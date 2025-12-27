@@ -334,6 +334,12 @@ fn phase1_init(boot_info: &BootInfo) {
         ke::init::create_wait_test_threads();
     }
 
+    // Initialize PIC and keyboard for PS/2 input
+    kprintln!("  Initializing keyboard...");
+    hal::pic::init();
+    hal::keyboard::init();
+    kprintln!("  Keyboard initialized");
+
     // Start the scheduler (enables interrupts)
     kprintln!("  Starting scheduler...");
     unsafe {

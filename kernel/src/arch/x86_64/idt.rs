@@ -22,6 +22,7 @@ use crate::hal::apic;
 /// Interrupt vector numbers
 pub mod vector {
     pub const TIMER: u8 = 32;
+    pub const KEYBOARD: u8 = 33;
     pub const SPURIOUS: u8 = 0xFF;
 }
 
@@ -70,6 +71,9 @@ static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
     // Hardware interrupt handlers (vectors 32-255)
     // Timer interrupt (vector 32) - connected to APIC timer
     idt[vector::TIMER].set_handler_fn(timer_interrupt_handler);
+
+    // Keyboard interrupt (vector 33) - PS/2 keyboard
+    idt[vector::KEYBOARD].set_handler_fn(keyboard_interrupt_handler);
 
     // Spurious interrupt handler
     idt[vector::SPURIOUS].set_handler_fn(spurious_interrupt_handler);
@@ -236,6 +240,19 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
         // Retire any pending DPCs (including timer DPCs)
         // This runs at DISPATCH_LEVEL equivalent
         crate::ke::dpc::ki_retire_dpc_list();
+    }
+}
+
+/// Keyboard interrupt handler (vector 33)
+/// Called when a key is pressed or released
+extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    // Handle the keyboard interrupt
+    crate::hal::keyboard::handle_interrupt();
+
+    // Send End of Interrupt to PIC (keyboard uses legacy PIC on IRQ1)
+    // For PIC, we need to send EOI to the master PIC at port 0x20
+    unsafe {
+        crate::arch::io::outb(0x20, 0x20);
     }
 }
 

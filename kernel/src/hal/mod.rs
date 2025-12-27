@@ -29,6 +29,8 @@
 // Submodules
 pub mod apic;
 pub mod ata;
+pub mod keyboard;
+pub mod pic;
 
 // TODO: Future submodules
 // pub mod acpi;
