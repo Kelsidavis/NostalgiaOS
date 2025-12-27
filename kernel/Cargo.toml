@@ -1,0 +1,18 @@
+[package]
+name = "kernel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "kernel"
+path = "src/main.rs"
+
+[dependencies]
+log.workspace = true
+spin.workspace = true
+bitflags.workspace = true
+x86_64 = "0.15"
+
+[features]
+default = []

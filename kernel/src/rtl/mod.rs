@@ -1,0 +1,38 @@
+//! Runtime Library (rtl)
+//!
+//! Common data structures and utilities used throughout the kernel:
+//!
+//! - **Strings**: UNICODE_STRING, ANSI_STRING
+//! - **Lists**: Doubly-linked list macros (LIST_ENTRY)
+//! - **Bitmaps**: RTL_BITMAP for bit manipulation
+//! - **AVL Trees**: Self-balancing binary trees (for VAD)
+//! - **Splay Trees**: Self-adjusting binary trees
+//! - **Heap**: User-mode heap management
+//!
+//! # UNICODE_STRING
+//!
+//! NT uses counted strings (not null-terminated):
+//! ```ignore
+//! struct UnicodeString {
+//!     length: u16,         // Current length in bytes
+//!     maximum_length: u16, // Buffer capacity in bytes
+//!     buffer: *mut u16,    // UTF-16 data
+//! }
+//! ```
+//!
+//! # LIST_ENTRY
+//!
+//! Intrusive doubly-linked list:
+//! ```ignore
+//! struct ListEntry {
+//!     flink: *mut ListEntry, // Forward link
+//!     blink: *mut ListEntry, // Backward link
+//! }
+//! ```
+
+// TODO: Submodules
+// pub mod avl;
+// pub mod bitmap;
+// pub mod heap;
+// pub mod splay;
+// pub mod string;

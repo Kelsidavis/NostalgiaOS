@@ -1,0 +1,34 @@
+# Build artifacts
+/target/
+*.o
+*.a
+*.so
+*.dylib
+
+# Cargo
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Disk images (generated)
+*.img
+
+# OVMF firmware files (generated/copied)
+ovmf*.fd
+OVMF*.fd
+*.fd
+
+# ESP directory (build artifact)
+/esp/
+
+# Claude
+CLAUDE.md

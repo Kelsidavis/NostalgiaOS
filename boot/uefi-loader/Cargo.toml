@@ -1,0 +1,14 @@
+[package]
+name = "uefi-loader"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+uefi = { version = "0.32", features = ["alloc", "panic_handler", "logger", "global_allocator"] }
+log.workspace = true
+
+[build-dependencies]
+
+[features]
+default = []

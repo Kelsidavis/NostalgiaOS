@@ -1,0 +1,26 @@
+# Cargo configuration for Nostalgia OS bare-metal targets
+
+[build]
+# Default target for kernel builds
+# Override with --target for bootloader
+
+[target.x86_64-unknown-none]
+# Kernel target - bare metal, no OS
+rustflags = [
+    "-C", "code-model=kernel",
+    "-C", "relocation-model=static",
+    "-C", "link-arg=-Tkernel/linker.ld",
+    "-C", "link-arg=-nostdlib",
+]
+
+[target.x86_64-unknown-uefi]
+# UEFI bootloader target
+rustflags = []
+
+[alias]
+# Build kernel
+kernel = "build --package kernel --target x86_64-unknown-none"
+# Build bootloader
+bootloader = "build --package uefi-loader --target x86_64-unknown-uefi"
+# Build everything
+all = "build --workspace"
