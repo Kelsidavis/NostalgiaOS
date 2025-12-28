@@ -42,6 +42,7 @@ pub mod fs;
 pub mod hal;
 pub mod io;
 pub mod ke;
+pub mod lpc;
 pub mod mm;
 pub mod ob;
 pub mod ps;
@@ -326,6 +327,11 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing file system...");
     fs::init();
     kprintln!("  File system initialized");
+
+    // Initialize LPC (Local Procedure Call)
+    kprintln!("  Initializing LPC subsystem...");
+    lpc::init();
+    kprintln!("  LPC subsystem initialized");
 
     // Test file system by reading C:\TEST.TXT
     test_file_read();

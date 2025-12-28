@@ -99,6 +99,30 @@ pub enum SyscallNumber {
     NtWriteVirtualMemory = 50,
     NtReadVirtualMemory = 51,
     NtDebugPrint = 52,
+
+    // Registry operations
+    NtCreateKey = 60,
+    NtOpenKey = 61,
+    NtCloseKey = 62,
+    NtQueryValueKey = 63,
+    NtSetValueKey = 64,
+    NtDeleteKey = 65,
+    NtDeleteValueKey = 66,
+    NtEnumerateKey = 67,
+    NtEnumerateValueKey = 68,
+    NtQueryKey = 69,
+
+    // LPC (Local Procedure Call) operations
+    NtCreatePort = 70,
+    NtConnectPort = 71,
+    NtListenPort = 72,
+    NtAcceptConnectPort = 73,
+    NtRequestPort = 74,
+    NtRequestWaitReplyPort = 75,
+    NtReplyPort = 76,
+    NtReplyWaitReceivePort = 77,
+    NtClosePort = 78,
+    NtQueryInformationPort = 79,
 }
 
 /// Syscall handler function type
@@ -195,6 +219,7 @@ unsafe fn init_syscall_table() {
     // Register default syscall handlers
     register_syscall(SyscallNumber::NtTerminateProcess as usize, sys_terminate_process);
     register_syscall(SyscallNumber::NtTerminateThread as usize, sys_terminate_thread);
+    register_syscall(SyscallNumber::NtCreateThread as usize, sys_create_thread);
     register_syscall(SyscallNumber::NtGetCurrentProcessId as usize, sys_get_current_process_id);
     register_syscall(SyscallNumber::NtGetCurrentThreadId as usize, sys_get_current_thread_id);
     register_syscall(SyscallNumber::NtYieldExecution as usize, sys_yield_execution);
@@ -240,6 +265,30 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtCreateIoCompletion as usize, sys_create_io_completion);
     register_syscall(SyscallNumber::NtSetIoCompletion as usize, sys_set_io_completion);
     register_syscall(SyscallNumber::NtRemoveIoCompletion as usize, sys_remove_io_completion);
+
+    // Registry syscalls
+    register_syscall(SyscallNumber::NtCreateKey as usize, sys_create_key);
+    register_syscall(SyscallNumber::NtOpenKey as usize, sys_open_key);
+    register_syscall(SyscallNumber::NtCloseKey as usize, sys_close_key);
+    register_syscall(SyscallNumber::NtQueryValueKey as usize, sys_query_value_key);
+    register_syscall(SyscallNumber::NtSetValueKey as usize, sys_set_value_key);
+    register_syscall(SyscallNumber::NtDeleteKey as usize, sys_delete_key);
+    register_syscall(SyscallNumber::NtDeleteValueKey as usize, sys_delete_value_key);
+    register_syscall(SyscallNumber::NtEnumerateKey as usize, sys_enumerate_key);
+    register_syscall(SyscallNumber::NtEnumerateValueKey as usize, sys_enumerate_value_key);
+    register_syscall(SyscallNumber::NtQueryKey as usize, sys_query_key);
+
+    // LPC syscalls
+    register_syscall(SyscallNumber::NtCreatePort as usize, sys_create_port);
+    register_syscall(SyscallNumber::NtConnectPort as usize, sys_connect_port);
+    register_syscall(SyscallNumber::NtListenPort as usize, sys_listen_port);
+    register_syscall(SyscallNumber::NtAcceptConnectPort as usize, sys_accept_connect_port);
+    register_syscall(SyscallNumber::NtRequestPort as usize, sys_request_port);
+    register_syscall(SyscallNumber::NtRequestWaitReplyPort as usize, sys_request_wait_reply_port);
+    register_syscall(SyscallNumber::NtReplyPort as usize, sys_reply_port);
+    register_syscall(SyscallNumber::NtReplyWaitReceivePort as usize, sys_reply_wait_receive_port);
+    register_syscall(SyscallNumber::NtClosePort as usize, sys_close_port);
+    register_syscall(SyscallNumber::NtQueryInformationPort as usize, sys_query_information_port);
 }
 
 /// Register a syscall handler
@@ -493,6 +542,182 @@ fn sys_terminate_thread(
 
     // Normal thread termination (not from user mode test)
     0
+}
+
+// ============================================================================
+// Thread Handle Management
+// ============================================================================
+
+/// Thread handle table
+const MAX_THREAD_HANDLES: usize = 64;
+const THREAD_HANDLE_BASE: usize = 0x4000;
+
+/// Thread handle entries (maps to thread IDs)
+static mut THREAD_HANDLE_MAP: [u32; MAX_THREAD_HANDLES] = [u32::MAX; MAX_THREAD_HANDLES];
+
+/// Allocate a thread handle
+unsafe fn alloc_thread_handle(thread_id: u32) -> Option<usize> {
+    for i in 0..MAX_THREAD_HANDLES {
+        if THREAD_HANDLE_MAP[i] == u32::MAX {
+            THREAD_HANDLE_MAP[i] = thread_id;
+            return Some(i + THREAD_HANDLE_BASE);
+        }
+    }
+    None
+}
+
+/// Get thread ID from handle
+unsafe fn get_thread_id(handle: usize) -> Option<u32> {
+    if handle < THREAD_HANDLE_BASE {
+        return None;
+    }
+    let idx = handle - THREAD_HANDLE_BASE;
+    if idx >= MAX_THREAD_HANDLES {
+        return None;
+    }
+    let tid = THREAD_HANDLE_MAP[idx];
+    if tid == u32::MAX {
+        None
+    } else {
+        Some(tid)
+    }
+}
+
+/// Free a thread handle
+unsafe fn free_thread_handle(handle: usize) {
+    if handle >= THREAD_HANDLE_BASE {
+        let idx = handle - THREAD_HANDLE_BASE;
+        if idx < MAX_THREAD_HANDLES {
+            THREAD_HANDLE_MAP[idx] = u32::MAX;
+        }
+    }
+}
+
+/// NtCreateThread - Create a new thread
+///
+/// Arguments:
+/// - thread_handle: Pointer to receive handle
+/// - desired_access: Access rights for handle
+/// - object_attributes: Security attributes (ignored for now)
+/// - process_handle: Handle to owning process
+/// - client_id: Receives thread/process IDs
+/// - thread_context: Initial context (rip = start address)
+fn sys_create_thread(
+    thread_handle_ptr: usize,
+    _desired_access: usize,
+    _object_attributes: usize,
+    _process_handle: usize,
+    client_id_ptr: usize,
+    thread_context_ptr: usize,
+) -> isize {
+    if thread_handle_ptr == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    crate::serial_println!("[SYSCALL] NtCreateThread()");
+
+    // Get the start address from context
+    // Thread context layout (simplified):
+    // offset 0x0: rip (instruction pointer / start address)
+    // offset 0x8: rsp (stack pointer)
+    // offset 0x10: rbp
+    // etc.
+    let (start_address, initial_rsp) = if thread_context_ptr != 0 {
+        unsafe {
+            let rip = *(thread_context_ptr as *const u64);
+            let rsp = *((thread_context_ptr + 8) as *const u64);
+            (rip, rsp)
+        }
+    } else {
+        return -1; // Need a context with at least RIP
+    };
+
+    crate::serial_println!("[SYSCALL] NtCreateThread: start_address={:#x}, rsp={:#x}",
+        start_address, initial_rsp);
+
+    // Create a wrapper start routine
+    // For now, we create a kernel thread that simulates user-mode execution
+    // Real NT would set up proper user-mode context
+
+    // Store parameters for the new thread
+    static mut THREAD_PARAMS: [(u64, u64); 64] = [(0, 0); 64];
+    static mut THREAD_PARAM_IDX: usize = 0;
+
+    unsafe {
+        let idx = THREAD_PARAM_IDX % 64;
+        THREAD_PARAMS[idx] = (start_address, initial_rsp);
+        THREAD_PARAM_IDX += 1;
+    }
+
+    // Create system thread (for now, all threads are kernel threads)
+    // Real implementation would create user-mode threads with proper address space
+    let thread = unsafe {
+        crate::ps::create::ps_create_system_thread(
+            thread_start_wrapper,
+            start_address as *mut u8,
+            8, // Normal priority
+        )
+    };
+
+    if thread.is_null() {
+        crate::serial_println!("[SYSCALL] NtCreateThread: failed to create thread");
+        return -1; // STATUS_UNSUCCESSFUL
+    }
+
+    // Get thread ID
+    let thread_id = unsafe { (*thread).cid.unique_thread };
+
+    // Allocate handle
+    let handle = unsafe { alloc_thread_handle(thread_id) };
+    match handle {
+        Some(h) => {
+            unsafe { *(thread_handle_ptr as *mut usize) = h; }
+
+            // Fill in client ID if provided
+            if client_id_ptr != 0 {
+                unsafe {
+                    // CLIENT_ID structure: { ProcessId, ThreadId }
+                    *(client_id_ptr as *mut u32) = (*thread).cid.unique_process;
+                    *((client_id_ptr + 4) as *mut u32) = thread_id;
+                }
+            }
+
+            // Start the thread
+            unsafe {
+                crate::ps::create::ps_start_thread(thread);
+            }
+
+            crate::serial_println!("[SYSCALL] NtCreateThread -> handle {:#x}, tid {}",
+                h, thread_id);
+            0 // STATUS_SUCCESS
+        }
+        None => {
+            crate::serial_println!("[SYSCALL] NtCreateThread: no handles available");
+            -1 // STATUS_INSUFFICIENT_RESOURCES
+        }
+    }
+}
+
+/// Thread start wrapper
+/// This function is called as the thread entry point
+fn thread_start_wrapper(_param: *mut u8) {
+    // The param is the start address
+    // For now, just log and halt
+    // Real implementation would:
+    // 1. Set up user-mode stack
+    // 2. Switch to user mode
+    // 3. Jump to start_address
+
+    crate::serial_println!("[THREAD] Thread started at address {:#x}", _param as u64);
+
+    // Simulate doing some work
+    for _ in 0..10 {
+        unsafe {
+            crate::ke::scheduler::ki_yield();
+        }
+    }
+
+    crate::serial_println!("[THREAD] Thread exiting");
 }
 
 /// NtGetCurrentProcessId - Get current process ID
@@ -2462,4 +2687,1164 @@ fn sys_unlock_file(
 
     // For now, just succeed
     0 // STATUS_SUCCESS
+}
+
+// ============================================================================
+// Registry Syscalls
+// ============================================================================
+
+/// Registry key handle table
+/// Maps syscall handles to CM key handles
+const MAX_KEY_HANDLES: usize = 128;
+const KEY_HANDLE_BASE: usize = 0x2000;
+
+/// Key handle entries
+static mut KEY_HANDLE_MAP: [u32; MAX_KEY_HANDLES] = [u32::MAX; MAX_KEY_HANDLES];
+
+/// Allocate a registry key handle
+unsafe fn alloc_key_handle(cm_handle: crate::cm::CmKeyHandle) -> Option<usize> {
+    for i in 0..MAX_KEY_HANDLES {
+        if KEY_HANDLE_MAP[i] == u32::MAX {
+            KEY_HANDLE_MAP[i] = cm_handle.index();
+            return Some(i + KEY_HANDLE_BASE);
+        }
+    }
+    None
+}
+
+/// Get CM key handle from syscall handle
+unsafe fn get_cm_key_handle(syscall_handle: usize) -> Option<crate::cm::CmKeyHandle> {
+    if syscall_handle < KEY_HANDLE_BASE {
+        return None;
+    }
+    let idx = syscall_handle - KEY_HANDLE_BASE;
+    if idx >= MAX_KEY_HANDLES {
+        return None;
+    }
+    let cm_idx = KEY_HANDLE_MAP[idx];
+    if cm_idx == u32::MAX {
+        None
+    } else {
+        Some(crate::cm::CmKeyHandle::new(cm_idx))
+    }
+}
+
+/// Free a registry key handle
+unsafe fn free_key_handle(syscall_handle: usize) {
+    if syscall_handle >= KEY_HANDLE_BASE {
+        let idx = syscall_handle - KEY_HANDLE_BASE;
+        if idx < MAX_KEY_HANDLES {
+            KEY_HANDLE_MAP[idx] = u32::MAX;
+        }
+    }
+}
+
+/// NtCreateKey - Create or open a registry key
+///
+/// Arguments:
+/// - key_handle: Pointer to receive handle
+/// - desired_access: Access mask
+/// - object_attributes: Pointer to path string (simplified)
+/// - _title_index: Not used
+/// - _class: Optional class string
+/// - create_options: REG_OPTION_* flags
+fn sys_create_key(
+    key_handle_ptr: usize,
+    _desired_access: usize,
+    object_attributes: usize,
+    _title_index: usize,
+    _class: usize,
+    create_options: usize,
+) -> isize {
+    if key_handle_ptr == 0 || object_attributes == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    // Read path from object_attributes (simplified - assume it's a path string)
+    let path_result = unsafe { read_user_path(object_attributes, 260) };
+
+    let (path_buf, path_len) = match path_result {
+        Some((buf, len)) => (buf, len),
+        None => return -1,
+    };
+
+    let path_str = match core::str::from_utf8(&path_buf[..path_len]) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtCreateKey(path='{}')", path_str);
+
+    // Create or open the key
+    let result = unsafe {
+        crate::cm::cm_create_key(path_str, create_options as u32)
+    };
+
+    match result {
+        Ok((cm_handle, disposition)) => {
+            // Allocate syscall handle
+            let syscall_handle = unsafe { alloc_key_handle(cm_handle) };
+            match syscall_handle {
+                Some(h) => {
+                    unsafe {
+                        *(key_handle_ptr as *mut usize) = h;
+                    }
+                    // Return disposition in high word
+                    let disp_value = match disposition {
+                        crate::cm::CmDisposition::CreatedNew => 1,
+                        crate::cm::CmDisposition::OpenedExisting => 2,
+                    };
+                    crate::serial_println!("[SYSCALL] NtCreateKey -> handle {:#x}, disposition {}",
+                        h, disp_value);
+                    0 // STATUS_SUCCESS
+                }
+                None => {
+                    let _ = crate::cm::cm_close_key(cm_handle);
+                    -1 // STATUS_INSUFFICIENT_RESOURCES
+                }
+            }
+        }
+        Err(e) => {
+            crate::serial_println!("[SYSCALL] NtCreateKey failed: {:?}", e);
+            e as isize
+        }
+    }
+}
+
+/// NtOpenKey - Open an existing registry key
+fn sys_open_key(
+    key_handle_ptr: usize,
+    _desired_access: usize,
+    object_attributes: usize,
+    _: usize, _: usize, _: usize,
+) -> isize {
+    if key_handle_ptr == 0 || object_attributes == 0 {
+        return -1;
+    }
+
+    let path_result = unsafe { read_user_path(object_attributes, 260) };
+
+    let (path_buf, path_len) = match path_result {
+        Some((buf, len)) => (buf, len),
+        None => return -1,
+    };
+
+    let path_str = match core::str::from_utf8(&path_buf[..path_len]) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtOpenKey(path='{}')", path_str);
+
+    let result = unsafe { crate::cm::cm_open_key(path_str) };
+
+    match result {
+        Ok(cm_handle) => {
+            let syscall_handle = unsafe { alloc_key_handle(cm_handle) };
+            match syscall_handle {
+                Some(h) => {
+                    unsafe { *(key_handle_ptr as *mut usize) = h; }
+                    crate::serial_println!("[SYSCALL] NtOpenKey -> handle {:#x}", h);
+                    0
+                }
+                None => {
+                    let _ = crate::cm::cm_close_key(cm_handle);
+                    -1
+                }
+            }
+        }
+        Err(e) => {
+            crate::serial_println!("[SYSCALL] NtOpenKey failed: {:?}", e);
+            e as isize
+        }
+    }
+}
+
+/// NtCloseKey - Close a registry key handle
+fn sys_close_key(
+    key_handle: usize,
+    _: usize, _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    crate::serial_println!("[SYSCALL] NtCloseKey(handle={:#x})", key_handle);
+
+    let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
+        Some(h) => h,
+        None => return -1, // STATUS_INVALID_HANDLE
+    };
+
+    let _ = crate::cm::cm_close_key(cm_handle);
+    unsafe { free_key_handle(key_handle); }
+
+    0 // STATUS_SUCCESS
+}
+
+/// Key value information class
+pub mod key_value_info_class {
+    pub const KEY_VALUE_BASIC_INFORMATION: u32 = 0;
+    pub const KEY_VALUE_FULL_INFORMATION: u32 = 1;
+    pub const KEY_VALUE_PARTIAL_INFORMATION: u32 = 2;
+}
+
+/// KEY_VALUE_PARTIAL_INFORMATION structure
+#[repr(C)]
+pub struct KeyValuePartialInformation {
+    pub title_index: u32,
+    pub value_type: u32,
+    pub data_length: u32,
+    // data follows
+}
+
+/// NtQueryValueKey - Query a registry value
+fn sys_query_value_key(
+    key_handle: usize,
+    value_name_ptr: usize,
+    key_value_info_class: usize,
+    key_value_info: usize,
+    length: usize,
+    result_length: usize,
+) -> isize {
+    if key_handle == 0 || value_name_ptr == 0 || key_value_info == 0 {
+        return -1;
+    }
+
+    let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
+        Some(h) => h,
+        None => return -1,
+    };
+
+    // Read value name
+    let name_result = unsafe { read_user_path(value_name_ptr, 260) };
+    let (name_buf, name_len) = match name_result {
+        Some((buf, len)) => (buf, len),
+        None => return -1,
+    };
+
+    let value_name = match core::str::from_utf8(&name_buf[..name_len]) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtQueryValueKey(handle={:#x}, name='{}')",
+        key_handle, value_name);
+
+    // Query the value
+    let result = unsafe { crate::cm::cm_query_value(cm_handle, value_name) };
+
+    match result {
+        Ok(value) => {
+            // Return partial information (most common)
+            let reg_type = value.value_type as u32;
+            let data = value.data.as_bytes();
+            let data_len = data.len();
+
+            // Calculate required size
+            let required = core::mem::size_of::<KeyValuePartialInformation>() + data_len;
+
+            if result_length != 0 {
+                unsafe { *(result_length as *mut usize) = required; }
+            }
+
+            if length < required {
+                return 0x80000005u32 as isize; // STATUS_BUFFER_OVERFLOW
+            }
+
+            // Fill in the structure
+            unsafe {
+                let info = key_value_info as *mut KeyValuePartialInformation;
+                (*info).title_index = 0;
+                (*info).value_type = reg_type;
+                (*info).data_length = data_len as u32;
+
+                // Copy data after the structure
+                let data_ptr = (key_value_info + core::mem::size_of::<KeyValuePartialInformation>()) as *mut u8;
+                core::ptr::copy_nonoverlapping(data.as_ptr(), data_ptr, data_len);
+            }
+
+            crate::serial_println!("[SYSCALL] NtQueryValueKey -> type={}, len={}", reg_type, data_len);
+            0
+        }
+        Err(e) => {
+            crate::serial_println!("[SYSCALL] NtQueryValueKey failed: {:?}", e);
+            e as isize
+        }
+    }
+}
+
+/// NtSetValueKey - Set a registry value
+fn sys_set_value_key(
+    key_handle: usize,
+    value_name_ptr: usize,
+    _title_index: usize,
+    value_type: usize,
+    data_ptr: usize,
+    data_size: usize,
+) -> isize {
+    if key_handle == 0 || value_name_ptr == 0 {
+        return -1;
+    }
+
+    let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
+        Some(h) => h,
+        None => return -1,
+    };
+
+    // Read value name
+    let name_result = unsafe { read_user_path(value_name_ptr, 260) };
+    let (name_buf, name_len) = match name_result {
+        Some((buf, len)) => (buf, len),
+        None => return -1,
+    };
+
+    let value_name = match core::str::from_utf8(&name_buf[..name_len]) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtSetValueKey(handle={:#x}, name='{}', type={}, size={})",
+        key_handle, value_name, value_type, data_size);
+
+    // Create the value based on type
+    let reg_type = crate::cm::RegType::from_u32(value_type as u32)
+        .unwrap_or(crate::cm::RegType::Binary);
+
+    let result = match reg_type {
+        crate::cm::RegType::Dword if data_size >= 4 => {
+            let dword_val = unsafe { *(data_ptr as *const u32) };
+            unsafe { crate::cm::cm_set_value_dword(cm_handle, value_name, dword_val) }
+        }
+        crate::cm::RegType::Qword if data_size >= 8 => {
+            let qword_val = unsafe { *(data_ptr as *const u64) };
+            unsafe { crate::cm::cm_set_value_qword(cm_handle, value_name, qword_val) }
+        }
+        crate::cm::RegType::Sz | crate::cm::RegType::ExpandSz => {
+            // Read string data
+            if data_ptr != 0 && data_size > 0 {
+                let str_slice = unsafe {
+                    core::slice::from_raw_parts(data_ptr as *const u8, data_size)
+                };
+                // Find null terminator or use full length
+                let str_len = str_slice.iter().position(|&b| b == 0).unwrap_or(data_size);
+                if let Ok(s) = core::str::from_utf8(&str_slice[..str_len]) {
+                    unsafe { crate::cm::cm_set_value_string(cm_handle, value_name, s) }
+                } else {
+                    crate::cm::CmStatus::InvalidParameter
+                }
+            } else {
+                unsafe { crate::cm::cm_set_value_string(cm_handle, value_name, "") }
+            }
+        }
+        _ => {
+            // Binary or other type - create binary value
+            let value = if data_ptr != 0 && data_size > 0 {
+                let data_slice = unsafe {
+                    core::slice::from_raw_parts(data_ptr as *const u8, data_size.min(256))
+                };
+                crate::cm::CmKeyValue::new_binary(value_name, data_slice)
+            } else {
+                crate::cm::CmKeyValue::new_binary(value_name, &[])
+            };
+            unsafe { crate::cm::cm_set_value(cm_handle, value) }
+        }
+    };
+
+    if result.is_success() {
+        crate::serial_println!("[SYSCALL] NtSetValueKey -> success");
+        0
+    } else {
+        crate::serial_println!("[SYSCALL] NtSetValueKey failed: {:?}", result);
+        result as isize
+    }
+}
+
+/// NtDeleteKey - Delete a registry key
+fn sys_delete_key(
+    key_handle: usize,
+    _: usize, _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    crate::serial_println!("[SYSCALL] NtDeleteKey(handle={:#x})", key_handle);
+
+    let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
+        Some(h) => h,
+        None => return -1,
+    };
+
+    // Get key name for deletion (we need the path)
+    let key_name = unsafe { crate::cm::cm_get_key_name(cm_handle) };
+
+    // For now, just mark the key as deleted
+    // A full implementation would walk back to get the full path
+    crate::serial_println!("[SYSCALL] NtDeleteKey - key name: {:?}", key_name);
+
+    // Close and free the handle
+    let _ = crate::cm::cm_close_key(cm_handle);
+    unsafe { free_key_handle(key_handle); }
+
+    0 // STATUS_SUCCESS (simplified)
+}
+
+/// NtDeleteValueKey - Delete a registry value
+fn sys_delete_value_key(
+    key_handle: usize,
+    value_name_ptr: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    if key_handle == 0 || value_name_ptr == 0 {
+        return -1;
+    }
+
+    let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
+        Some(h) => h,
+        None => return -1,
+    };
+
+    // Read value name
+    let name_result = unsafe { read_user_path(value_name_ptr, 260) };
+    let (name_buf, name_len) = match name_result {
+        Some((buf, len)) => (buf, len),
+        None => return -1,
+    };
+
+    let value_name = match core::str::from_utf8(&name_buf[..name_len]) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtDeleteValueKey(handle={:#x}, name='{}')",
+        key_handle, value_name);
+
+    let result = unsafe { crate::cm::cm_delete_value(cm_handle, value_name) };
+
+    if result.is_success() {
+        0
+    } else {
+        result as isize
+    }
+}
+
+/// Key information class for NtEnumerateKey
+pub mod key_info_class {
+    pub const KEY_BASIC_INFORMATION: u32 = 0;
+    pub const KEY_NODE_INFORMATION: u32 = 1;
+    pub const KEY_FULL_INFORMATION: u32 = 2;
+    pub const KEY_NAME_INFORMATION: u32 = 3;
+}
+
+/// KEY_BASIC_INFORMATION structure
+#[repr(C)]
+pub struct KeyBasicInformation {
+    pub last_write_time: i64,
+    pub title_index: u32,
+    pub name_length: u32,
+    // name follows (Unicode)
+}
+
+/// NtEnumerateKey - Enumerate subkeys
+fn sys_enumerate_key(
+    key_handle: usize,
+    index: usize,
+    key_info_class: usize,
+    key_info: usize,
+    length: usize,
+    result_length: usize,
+) -> isize {
+    if key_handle == 0 || key_info == 0 {
+        return -1;
+    }
+
+    let _ = key_info_class; // Simplified - always return basic info
+
+    let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
+        Some(h) => h,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtEnumerateKey(handle={:#x}, index={})",
+        key_handle, index);
+
+    let result = unsafe { crate::cm::cm_enumerate_key(cm_handle, index) };
+
+    match result {
+        Ok(subkey_handle) => {
+            // Get the subkey name
+            let name = unsafe { crate::cm::cm_get_key_name(subkey_handle) };
+            let name_str = name.unwrap_or("");
+            let name_bytes = name_str.as_bytes();
+            let name_len = name_bytes.len();
+
+            // Calculate required size
+            let required = core::mem::size_of::<KeyBasicInformation>() + name_len;
+
+            if result_length != 0 {
+                unsafe { *(result_length as *mut usize) = required; }
+            }
+
+            if length < required {
+                return 0x80000005u32 as isize; // STATUS_BUFFER_OVERFLOW
+            }
+
+            // Fill in the structure
+            unsafe {
+                let info = key_info as *mut KeyBasicInformation;
+                (*info).last_write_time = 0; // TODO: Get from key
+                (*info).title_index = 0;
+                (*info).name_length = name_len as u32;
+
+                // Copy name after the structure
+                let name_ptr = (key_info + core::mem::size_of::<KeyBasicInformation>()) as *mut u8;
+                core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), name_ptr, name_len);
+            }
+
+            crate::serial_println!("[SYSCALL] NtEnumerateKey -> '{}'", name_str);
+            0
+        }
+        Err(crate::cm::CmStatus::NoMoreEntries) => {
+            0x8000001A_u32 as isize // STATUS_NO_MORE_ENTRIES
+        }
+        Err(e) => {
+            crate::serial_println!("[SYSCALL] NtEnumerateKey failed: {:?}", e);
+            e as isize
+        }
+    }
+}
+
+/// KEY_VALUE_BASIC_INFORMATION structure
+#[repr(C)]
+pub struct KeyValueBasicInformation {
+    pub title_index: u32,
+    pub value_type: u32,
+    pub name_length: u32,
+    // name follows
+}
+
+/// NtEnumerateValueKey - Enumerate values
+fn sys_enumerate_value_key(
+    key_handle: usize,
+    index: usize,
+    key_value_info_class: usize,
+    key_value_info: usize,
+    length: usize,
+    result_length: usize,
+) -> isize {
+    if key_handle == 0 || key_value_info == 0 {
+        return -1;
+    }
+
+    let _ = key_value_info_class; // Simplified
+
+    let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
+        Some(h) => h,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtEnumerateValueKey(handle={:#x}, index={})",
+        key_handle, index);
+
+    let result = unsafe { crate::cm::cm_enumerate_value(cm_handle, index) };
+
+    match result {
+        Ok(value) => {
+            let name_str = value.name.as_str();
+            let name_bytes = name_str.as_bytes();
+            let name_len = name_bytes.len();
+
+            // Calculate required size
+            let required = core::mem::size_of::<KeyValueBasicInformation>() + name_len;
+
+            if result_length != 0 {
+                unsafe { *(result_length as *mut usize) = required; }
+            }
+
+            if length < required {
+                return 0x80000005u32 as isize; // STATUS_BUFFER_OVERFLOW
+            }
+
+            // Fill in the structure
+            unsafe {
+                let info = key_value_info as *mut KeyValueBasicInformation;
+                (*info).title_index = 0;
+                (*info).value_type = value.value_type as u32;
+                (*info).name_length = name_len as u32;
+
+                // Copy name after the structure
+                let name_ptr = (key_value_info + core::mem::size_of::<KeyValueBasicInformation>()) as *mut u8;
+                core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), name_ptr, name_len);
+            }
+
+            crate::serial_println!("[SYSCALL] NtEnumerateValueKey -> '{}'", name_str);
+            0
+        }
+        Err(crate::cm::CmStatus::NoMoreEntries) => {
+            0x8000001A_u32 as isize // STATUS_NO_MORE_ENTRIES
+        }
+        Err(e) => {
+            crate::serial_println!("[SYSCALL] NtEnumerateValueKey failed: {:?}", e);
+            e as isize
+        }
+    }
+}
+
+/// KEY_FULL_INFORMATION structure
+#[repr(C)]
+pub struct KeyFullInformation {
+    pub last_write_time: i64,
+    pub title_index: u32,
+    pub class_offset: u32,
+    pub class_length: u32,
+    pub sub_keys: u32,
+    pub max_name_len: u32,
+    pub max_class_len: u32,
+    pub values: u32,
+    pub max_value_name_len: u32,
+    pub max_value_data_len: u32,
+    // class follows
+}
+
+/// NtQueryKey - Query key information
+fn sys_query_key(
+    key_handle: usize,
+    key_info_class: usize,
+    key_info: usize,
+    length: usize,
+    result_length: usize,
+    _: usize,
+) -> isize {
+    if key_handle == 0 || key_info == 0 {
+        return -1;
+    }
+
+    let _ = key_info_class; // Simplified - return full info
+
+    let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
+        Some(h) => h,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtQueryKey(handle={:#x})", key_handle);
+
+    let result = unsafe { crate::cm::cm_query_key_info(cm_handle) };
+
+    match result {
+        Ok(info) => {
+            let required = core::mem::size_of::<KeyFullInformation>();
+
+            if result_length != 0 {
+                unsafe { *(result_length as *mut usize) = required; }
+            }
+
+            if length < required {
+                return 0x80000005u32 as isize; // STATUS_BUFFER_OVERFLOW
+            }
+
+            unsafe {
+                let key_full_info = key_info as *mut KeyFullInformation;
+                (*key_full_info).last_write_time = info.last_write_time as i64;
+                (*key_full_info).title_index = 0;
+                (*key_full_info).class_offset = 0;
+                (*key_full_info).class_length = 0;
+                (*key_full_info).sub_keys = info.subkey_count as u32;
+                (*key_full_info).max_name_len = 256;
+                (*key_full_info).max_class_len = 0;
+                (*key_full_info).values = info.value_count as u32;
+                (*key_full_info).max_value_name_len = 256;
+                (*key_full_info).max_value_data_len = 4096;
+            }
+
+            crate::serial_println!("[SYSCALL] NtQueryKey -> subkeys={}, values={}",
+                info.subkey_count, info.value_count);
+            0
+        }
+        Err(e) => {
+            crate::serial_println!("[SYSCALL] NtQueryKey failed: {:?}", e);
+            e as isize
+        }
+    }
+}
+
+// ============================================================================
+// LPC (Local Procedure Call) Syscalls
+// ============================================================================
+
+/// LPC port handle table
+const MAX_LPC_HANDLES: usize = 64;
+const LPC_HANDLE_BASE: usize = 0x3000;
+
+/// LPC handle entries (maps to lpc port index)
+static mut LPC_HANDLE_MAP: [u16; MAX_LPC_HANDLES] = [0xFFFF; MAX_LPC_HANDLES];
+
+/// Allocate an LPC handle
+unsafe fn alloc_lpc_handle(port_index: u16) -> Option<usize> {
+    for i in 0..MAX_LPC_HANDLES {
+        if LPC_HANDLE_MAP[i] == 0xFFFF {
+            LPC_HANDLE_MAP[i] = port_index;
+            return Some(i + LPC_HANDLE_BASE);
+        }
+    }
+    None
+}
+
+/// Get LPC port index from handle
+unsafe fn get_lpc_port(handle: usize) -> Option<u16> {
+    if handle < LPC_HANDLE_BASE {
+        return None;
+    }
+    let idx = handle - LPC_HANDLE_BASE;
+    if idx >= MAX_LPC_HANDLES {
+        return None;
+    }
+    let port_idx = LPC_HANDLE_MAP[idx];
+    if port_idx == 0xFFFF {
+        None
+    } else {
+        Some(port_idx)
+    }
+}
+
+/// Free an LPC handle
+unsafe fn free_lpc_handle(handle: usize) {
+    if handle >= LPC_HANDLE_BASE {
+        let idx = handle - LPC_HANDLE_BASE;
+        if idx < MAX_LPC_HANDLES {
+            LPC_HANDLE_MAP[idx] = 0xFFFF;
+        }
+    }
+}
+
+/// NtCreatePort - Create an LPC server port
+fn sys_create_port(
+    port_handle_ptr: usize,
+    object_attributes: usize,
+    max_connection_info_length: usize,
+    max_message_length: usize,
+    _max_pool_usage: usize,
+    _: usize,
+) -> isize {
+    if port_handle_ptr == 0 || object_attributes == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    // Read port name from object_attributes
+    let path_result = unsafe { read_user_path(object_attributes, 260) };
+    let (path_buf, path_len) = match path_result {
+        Some((buf, len)) => (buf, len),
+        None => return -1,
+    };
+
+    let port_name = match core::str::from_utf8(&path_buf[..path_len]) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    let _ = max_connection_info_length;
+
+    crate::serial_println!("[SYSCALL] NtCreatePort(name='{}')", port_name);
+
+    // Create server port
+    let port_index = unsafe {
+        crate::lpc::lpc_create_port(
+            port_name,
+            crate::lpc::LpcPortType::ServerConnection,
+            max_message_length as u32,
+        )
+    };
+
+    match port_index {
+        Some(idx) => {
+            let handle = unsafe { alloc_lpc_handle(idx) };
+            match handle {
+                Some(h) => {
+                    unsafe { *(port_handle_ptr as *mut usize) = h; }
+                    crate::serial_println!("[SYSCALL] NtCreatePort -> handle {:#x}", h);
+                    0
+                }
+                None => {
+                    unsafe { crate::lpc::lpc_close_port(idx); }
+                    -1
+                }
+            }
+        }
+        None => -1,
+    }
+}
+
+/// NtConnectPort - Connect to an LPC server port
+fn sys_connect_port(
+    port_handle_ptr: usize,
+    port_name_ptr: usize,
+    _security_qos: usize,
+    client_view: usize,
+    server_view: usize,
+    _max_message_length: usize,
+) -> isize {
+    if port_handle_ptr == 0 || port_name_ptr == 0 {
+        return -1;
+    }
+
+    let _ = client_view;
+    let _ = server_view;
+
+    let path_result = unsafe { read_user_path(port_name_ptr, 260) };
+    let (path_buf, path_len) = match path_result {
+        Some((buf, len)) => (buf, len),
+        None => return -1,
+    };
+
+    let port_name = match core::str::from_utf8(&path_buf[..path_len]) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtConnectPort(name='{}')", port_name);
+
+    // Connect to server port
+    let client_port = unsafe { crate::lpc::lpc_connect_port(port_name, &[]) };
+
+    match client_port {
+        Some(idx) => {
+            let handle = unsafe { alloc_lpc_handle(idx) };
+            match handle {
+                Some(h) => {
+                    unsafe { *(port_handle_ptr as *mut usize) = h; }
+                    crate::serial_println!("[SYSCALL] NtConnectPort -> handle {:#x}", h);
+                    0
+                }
+                None => {
+                    unsafe { crate::lpc::lpc_close_port(idx); }
+                    -1
+                }
+            }
+        }
+        None => -1,
+    }
+}
+
+/// NtListenPort - Wait for a connection request
+fn sys_listen_port(
+    port_handle: usize,
+    connection_request: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    if port_handle == 0 {
+        return -1;
+    }
+
+    let port_idx = match unsafe { get_lpc_port(port_handle) } {
+        Some(idx) => idx,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtListenPort(handle={:#x})", port_handle);
+
+    // Listen for pending connections
+    let conn = unsafe { crate::lpc::lpc_listen_port(port_idx) };
+
+    match conn {
+        Some(c) => {
+            // Return connection info if buffer provided
+            if connection_request != 0 {
+                unsafe {
+                    // Write connection info (simplified)
+                    *(connection_request as *mut u32) = c.client_port as u32;
+                    *((connection_request + 4) as *mut u32) = c.client_pid;
+                }
+            }
+            crate::serial_println!("[SYSCALL] NtListenPort -> connection from port {}", c.client_port);
+            0
+        }
+        None => {
+            crate::serial_println!("[SYSCALL] NtListenPort -> no pending connections");
+            0x102 // STATUS_TIMEOUT (no pending connections)
+        }
+    }
+}
+
+/// NtAcceptConnectPort - Accept or reject a connection
+fn sys_accept_connect_port(
+    port_handle_ptr: usize,
+    port_context: usize,
+    connection_request: usize,
+    accept_connection: usize,
+    _server_view: usize,
+    _client_view: usize,
+) -> isize {
+    if port_handle_ptr == 0 || connection_request == 0 {
+        return -1;
+    }
+
+    let _ = port_context;
+
+    // Read client port from connection request
+    let client_port = unsafe { *(connection_request as *const u32) as u16 };
+
+    // Get server port (from context or somewhere)
+    // For now, we need to find the server port that has this pending connection
+    // This is simplified - real NT passes server port handle
+
+    crate::serial_println!("[SYSCALL] NtAcceptConnectPort(client={}, accept={})",
+        client_port, accept_connection != 0);
+
+    if accept_connection == 0 {
+        // Reject connection
+        return 0;
+    }
+
+    // Accept connection - create communication port
+    // We need the server port index - for simplicity, search for it
+    let mut server_idx: Option<u16> = None;
+    for i in 0..MAX_LPC_HANDLES {
+        unsafe {
+            if LPC_HANDLE_MAP[i] != 0xFFFF {
+                if let Some(info) = crate::lpc::lpc_get_port_info(LPC_HANDLE_MAP[i]) {
+                    if info.port_type == crate::lpc::LpcPortType::ServerConnection
+                        && info.pending_connections > 0
+                    {
+                        server_idx = Some(LPC_HANDLE_MAP[i]);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let server_port = match server_idx {
+        Some(s) => s,
+        None => return -1,
+    };
+
+    let comm_port = unsafe {
+        crate::lpc::lpc_accept_connection(server_port, client_port, true)
+    };
+
+    match comm_port {
+        Some(idx) => {
+            let handle = unsafe { alloc_lpc_handle(idx) };
+            match handle {
+                Some(h) => {
+                    unsafe { *(port_handle_ptr as *mut usize) = h; }
+                    crate::serial_println!("[SYSCALL] NtAcceptConnectPort -> handle {:#x}", h);
+                    0
+                }
+                None => {
+                    unsafe { crate::lpc::lpc_close_port(idx); }
+                    -1
+                }
+            }
+        }
+        None => -1,
+    }
+}
+
+/// NtRequestPort - Send a datagram (no reply expected)
+fn sys_request_port(
+    port_handle: usize,
+    message: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    if port_handle == 0 || message == 0 {
+        return -1;
+    }
+
+    let port_idx = match unsafe { get_lpc_port(port_handle) } {
+        Some(idx) => idx,
+        None => return -1,
+    };
+
+    // Read message data (simplified - assume first 256 bytes)
+    let data = unsafe {
+        core::slice::from_raw_parts(message as *const u8, 256)
+    };
+
+    crate::serial_println!("[SYSCALL] NtRequestPort(handle={:#x})", port_handle);
+
+    let msg = crate::lpc::LpcMessage::datagram(data);
+    let result = unsafe { crate::lpc::lpc_send_message(port_idx, &msg) };
+
+    if result.is_some() { 0 } else { -1 }
+}
+
+/// NtRequestWaitReplyPort - Send request and wait for reply
+fn sys_request_wait_reply_port(
+    port_handle: usize,
+    message: usize,
+    reply_message: usize,
+    _: usize, _: usize, _: usize,
+) -> isize {
+    if port_handle == 0 || message == 0 {
+        return -1;
+    }
+
+    let port_idx = match unsafe { get_lpc_port(port_handle) } {
+        Some(idx) => idx,
+        None => return -1,
+    };
+
+    // Read message data
+    let data = unsafe {
+        core::slice::from_raw_parts(message as *const u8, 256)
+    };
+
+    crate::serial_println!("[SYSCALL] NtRequestWaitReplyPort(handle={:#x})", port_handle);
+
+    let msg = crate::lpc::LpcMessage::request(data);
+    let msg_id = unsafe { crate::lpc::lpc_send_message(port_idx, &msg) };
+
+    if msg_id.is_none() {
+        return -1;
+    }
+
+    // Wait for reply (simplified - just check for messages)
+    let reply = unsafe { crate::lpc::lpc_receive_message(port_idx) };
+
+    match reply {
+        Some(r) => {
+            if reply_message != 0 {
+                unsafe {
+                    let dest = reply_message as *mut u8;
+                    core::ptr::copy_nonoverlapping(r.get_data().as_ptr(), dest, r.get_data().len());
+                }
+            }
+            0
+        }
+        None => 0x102, // STATUS_TIMEOUT
+    }
+}
+
+/// NtReplyPort - Send a reply message
+fn sys_reply_port(
+    port_handle: usize,
+    reply_message: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    if port_handle == 0 || reply_message == 0 {
+        return -1;
+    }
+
+    let port_idx = match unsafe { get_lpc_port(port_handle) } {
+        Some(idx) => idx,
+        None => return -1,
+    };
+
+    // Read reply data and message ID
+    let msg_id = unsafe { *(reply_message as *const u32) };
+    let data = unsafe {
+        core::slice::from_raw_parts((reply_message + 32) as *const u8, 224)
+    };
+
+    crate::serial_println!("[SYSCALL] NtReplyPort(handle={:#x}, msg_id={})", port_handle, msg_id);
+
+    let result = unsafe { crate::lpc::lpc_reply_message(port_idx, msg_id, data) };
+
+    if result { 0 } else { -1 }
+}
+
+/// NtReplyWaitReceivePort - Reply and wait for next message
+fn sys_reply_wait_receive_port(
+    port_handle: usize,
+    port_context: usize,
+    reply_message: usize,
+    receive_message: usize,
+    _: usize, _: usize,
+) -> isize {
+    let _ = port_context;
+
+    if port_handle == 0 {
+        return -1;
+    }
+
+    let port_idx = match unsafe { get_lpc_port(port_handle) } {
+        Some(idx) => idx,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtReplyWaitReceivePort(handle={:#x})", port_handle);
+
+    // Send reply if provided
+    if reply_message != 0 {
+        let msg_id = unsafe { *(reply_message as *const u32) };
+        let data = unsafe {
+            core::slice::from_raw_parts((reply_message + 32) as *const u8, 224)
+        };
+        let _ = unsafe { crate::lpc::lpc_reply_message(port_idx, msg_id, data) };
+    }
+
+    // Wait for next message
+    let msg = unsafe { crate::lpc::lpc_receive_message(port_idx) };
+
+    match msg {
+        Some(m) => {
+            if receive_message != 0 {
+                unsafe {
+                    // Write message header (simplified)
+                    *(receive_message as *mut u32) = m.header.message_id;
+                    *((receive_message + 4) as *mut u16) = m.header.data_length;
+                    // Copy data
+                    let dest = (receive_message + 32) as *mut u8;
+                    core::ptr::copy_nonoverlapping(m.get_data().as_ptr(), dest, m.get_data().len());
+                }
+            }
+            0
+        }
+        None => 0x102, // STATUS_TIMEOUT
+    }
+}
+
+/// NtClosePort - Close an LPC port handle
+fn sys_close_port(
+    port_handle: usize,
+    _: usize, _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    crate::serial_println!("[SYSCALL] NtClosePort(handle={:#x})", port_handle);
+
+    let port_idx = match unsafe { get_lpc_port(port_handle) } {
+        Some(idx) => idx,
+        None => return -1,
+    };
+
+    let result = unsafe { crate::lpc::lpc_close_port(port_idx) };
+    unsafe { free_lpc_handle(port_handle); }
+
+    if result { 0 } else { -1 }
+}
+
+/// NtQueryInformationPort - Query port information
+fn sys_query_information_port(
+    port_handle: usize,
+    _port_information_class: usize,
+    port_information: usize,
+    length: usize,
+    return_length: usize,
+    _: usize,
+) -> isize {
+    if port_handle == 0 || port_information == 0 {
+        return -1;
+    }
+
+    let port_idx = match unsafe { get_lpc_port(port_handle) } {
+        Some(idx) => idx,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtQueryInformationPort(handle={:#x})", port_handle);
+
+    let info = unsafe { crate::lpc::lpc_get_port_info(port_idx) };
+
+    match info {
+        Some(i) => {
+            let required = core::mem::size_of::<crate::lpc::LpcPortInfo>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if length < required {
+                return 0x80000005u32 as isize; // STATUS_BUFFER_OVERFLOW
+            }
+
+            unsafe {
+                *(port_information as *mut crate::lpc::LpcPortInfo) = i;
+            }
+
+            0
+        }
+        None => -1,
+    }
 }
