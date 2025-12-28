@@ -1,7 +1,9 @@
 //! Simple Command Shell
 //!
 //! A basic interactive shell for Nostalgia OS that provides:
-//! - Command line editing with backspace
+//! - Command line editing with backspace and cursor movement
+//! - Left/right arrow keys for cursor navigation
+//! - Home/End keys to jump to start/end of line
 //! - Command history with up/down arrow navigation
 //! - Built-in commands (help, echo, clear, ver, etc.)
 //! - File system commands (ls, cd, cat, mkdir, rmdir, rm, type)
@@ -47,8 +49,10 @@ impl HistoryEntry {
 pub struct Shell {
     /// Command line buffer
     cmd_buf: [u8; MAX_CMD_LEN],
-    /// Current position in command buffer
-    cmd_pos: usize,
+    /// Length of command in buffer
+    cmd_len: usize,
+    /// Cursor position within the command (0 to cmd_len)
+    cursor_pos: usize,
     /// Is the shell running?
     running: bool,
     /// Command history (circular buffer)
@@ -71,7 +75,8 @@ impl Shell {
         const EMPTY_ENTRY: HistoryEntry = HistoryEntry::new();
         Self {
             cmd_buf: [0u8; MAX_CMD_LEN],
-            cmd_pos: 0,
+            cmd_len: 0,
+            cursor_pos: 0,
             running: true,
             history: [EMPTY_ENTRY; HISTORY_SIZE],
             history_write: 0,
@@ -126,13 +131,14 @@ impl Shell {
             // Enter - execute command
             b'\r' | b'\n' => {
                 serial_println!("");
-                if self.cmd_pos > 0 {
+                if self.cmd_len > 0 {
                     // Add to history before executing
                     self.add_to_history();
                     self.execute_command();
                 }
                 // Reset state
-                self.cmd_pos = 0;
+                self.cmd_len = 0;
+                self.cursor_pos = 0;
                 self.cmd_buf = [0u8; MAX_CMD_LEN];
                 self.history_nav = -1;
                 if self.running {
@@ -140,14 +146,41 @@ impl Shell {
                 }
             }
 
-            // Backspace
+            // Backspace - delete character before cursor
             0x7F | 0x08 => {
-                if self.cmd_pos > 0 {
-                    self.cmd_pos -= 1;
-                    self.cmd_buf[self.cmd_pos] = 0;
-                    // Erase character on screen: backspace, space, backspace
-                    crate::serial_print!("\x08 \x08");
+                if self.cursor_pos > 0 {
+                    // Shift everything after cursor left by one
+                    for i in self.cursor_pos..self.cmd_len {
+                        self.cmd_buf[i - 1] = self.cmd_buf[i];
+                    }
+                    self.cmd_len -= 1;
+                    self.cursor_pos -= 1;
+                    self.cmd_buf[self.cmd_len] = 0;
+
+                    // Move cursor back, redraw rest of line, clear last char
+                    crate::serial_print!("\x08");
+                    for i in self.cursor_pos..self.cmd_len {
+                        crate::serial_print!("{}", self.cmd_buf[i] as char);
+                    }
+                    crate::serial_print!(" ");
+                    // Move cursor back to correct position
+                    let chars_to_move_back = self.cmd_len - self.cursor_pos + 1;
+                    for _ in 0..chars_to_move_back {
+                        crate::serial_print!("\x08");
+                    }
                 }
+            }
+
+            // Delete key (Ctrl+D when line is non-empty, or DEL)
+            0x04 if self.cmd_len > 0 => {
+                self.delete_at_cursor();
+            }
+
+            // Ctrl+D on empty line - exit shell
+            0x04 => {
+                serial_println!("");
+                serial_println!("Exiting shell...");
+                self.running = false;
             }
 
             // Escape sequences (arrow keys, etc.)
@@ -162,32 +195,148 @@ impl Shell {
 
             // Regular printable characters
             0x20..=0x7E => {
-                if self.cmd_pos < MAX_CMD_LEN - 1 {
-                    self.cmd_buf[self.cmd_pos] = c;
-                    self.cmd_pos += 1;
-                    crate::serial_print!("{}", c as char);
+                if self.cmd_len < MAX_CMD_LEN - 1 {
+                    // Insert at cursor position
+                    if self.cursor_pos < self.cmd_len {
+                        // Shift characters right to make room
+                        for i in (self.cursor_pos..self.cmd_len).rev() {
+                            self.cmd_buf[i + 1] = self.cmd_buf[i];
+                        }
+                    }
+                    self.cmd_buf[self.cursor_pos] = c;
+                    self.cmd_len += 1;
+                    self.cursor_pos += 1;
+
+                    // Print the inserted char and rest of line
+                    for i in (self.cursor_pos - 1)..self.cmd_len {
+                        crate::serial_print!("{}", self.cmd_buf[i] as char);
+                    }
+                    // Move cursor back to correct position
+                    let chars_to_move_back = self.cmd_len - self.cursor_pos;
+                    for _ in 0..chars_to_move_back {
+                        crate::serial_print!("\x08");
+                    }
                 }
+            }
+
+            // Ctrl+A - move to beginning of line
+            0x01 => {
+                self.cursor_home();
+            }
+
+            // Ctrl+E - move to end of line
+            0x05 => {
+                self.cursor_end();
             }
 
             // Ctrl+C - cancel current line
             0x03 => {
                 serial_println!("^C");
-                self.cmd_pos = 0;
+                self.cmd_len = 0;
+                self.cursor_pos = 0;
                 self.cmd_buf = [0u8; MAX_CMD_LEN];
                 self.history_nav = -1;
                 self.print_prompt();
             }
 
-            // Ctrl+D - exit shell
-            0x04 => {
-                serial_println!("");
-                serial_println!("Exiting shell...");
-                self.running = false;
+            // Ctrl+U - clear line before cursor
+            0x15 => {
+                if self.cursor_pos > 0 {
+                    // Move cursor to start
+                    for _ in 0..self.cursor_pos {
+                        crate::serial_print!("\x08");
+                    }
+                    // Shift remaining text to start
+                    let remaining = self.cmd_len - self.cursor_pos;
+                    for i in 0..remaining {
+                        self.cmd_buf[i] = self.cmd_buf[self.cursor_pos + i];
+                        crate::serial_print!("{}", self.cmd_buf[i] as char);
+                    }
+                    // Clear rest of line
+                    for _ in 0..(self.cursor_pos) {
+                        crate::serial_print!(" ");
+                    }
+                    // Move cursor back
+                    for _ in 0..self.cursor_pos {
+                        crate::serial_print!("\x08");
+                    }
+                    self.cmd_len = remaining;
+                    self.cursor_pos = 0;
+                }
+            }
+
+            // Ctrl+K - clear line after cursor
+            0x0B => {
+                if self.cursor_pos < self.cmd_len {
+                    // Clear from cursor to end
+                    for _ in self.cursor_pos..self.cmd_len {
+                        crate::serial_print!(" ");
+                    }
+                    for _ in self.cursor_pos..self.cmd_len {
+                        crate::serial_print!("\x08");
+                    }
+                    self.cmd_len = self.cursor_pos;
+                }
             }
 
             _ => {
                 // Ignore other control characters
             }
+        }
+    }
+
+    /// Delete character at cursor position
+    fn delete_at_cursor(&mut self) {
+        if self.cursor_pos < self.cmd_len {
+            // Shift everything after cursor left by one
+            for i in self.cursor_pos..(self.cmd_len - 1) {
+                self.cmd_buf[i] = self.cmd_buf[i + 1];
+            }
+            self.cmd_len -= 1;
+            self.cmd_buf[self.cmd_len] = 0;
+
+            // Redraw rest of line and clear last char
+            for i in self.cursor_pos..self.cmd_len {
+                crate::serial_print!("{}", self.cmd_buf[i] as char);
+            }
+            crate::serial_print!(" ");
+            // Move cursor back to correct position
+            let chars_to_move_back = self.cmd_len - self.cursor_pos + 1;
+            for _ in 0..chars_to_move_back {
+                crate::serial_print!("\x08");
+            }
+        }
+    }
+
+    /// Move cursor to beginning of line
+    fn cursor_home(&mut self) {
+        while self.cursor_pos > 0 {
+            crate::serial_print!("\x08");
+            self.cursor_pos -= 1;
+        }
+    }
+
+    /// Move cursor to end of line
+    fn cursor_end(&mut self) {
+        while self.cursor_pos < self.cmd_len {
+            crate::serial_print!("{}", self.cmd_buf[self.cursor_pos] as char);
+            self.cursor_pos += 1;
+        }
+    }
+
+    /// Move cursor left one character
+    fn cursor_left(&mut self) {
+        if self.cursor_pos > 0 {
+            crate::serial_print!("\x08");
+            self.cursor_pos -= 1;
+        }
+    }
+
+    /// Move cursor right one character
+    fn cursor_right(&mut self) {
+        if self.cursor_pos < self.cmd_len {
+            crate::serial_print!("{}", self.cmd_buf[self.cursor_pos] as char);
+            self.cursor_pos += 1;
         }
     }
 
@@ -201,10 +350,18 @@ impl Shell {
                     match c2 {
                         b'A' => self.history_up(),   // Up arrow
                         b'B' => self.history_down(), // Down arrow
-                        b'C' => {}                   // Right arrow (TODO)
-                        b'D' => {}                   // Left arrow (TODO)
-                        b'H' => {}                   // Home (TODO)
-                        b'F' => {}                   // End (TODO)
+                        b'C' => self.cursor_right(), // Right arrow
+                        b'D' => self.cursor_left(),  // Left arrow
+                        b'H' => self.cursor_home(),  // Home
+                        b'F' => self.cursor_end(),   // End
+                        b'3' => {
+                            // Delete key: ESC [ 3 ~
+                            if let Some(c3) = keyboard::try_read_char() {
+                                if c3 == b'~' {
+                                    self.delete_at_cursor();
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -214,7 +371,7 @@ impl Shell {
 
     /// Add current command to history
     fn add_to_history(&mut self) {
-        if self.cmd_pos == 0 {
+        if self.cmd_len == 0 {
             return;
         }
 
@@ -226,9 +383,9 @@ impl Shell {
                 self.history_write - 1
             };
             let last = &self.history[last_idx];
-            if last.len == self.cmd_pos {
+            if last.len == self.cmd_len {
                 let mut same = true;
-                for i in 0..self.cmd_pos {
+                for i in 0..self.cmd_len {
                     if last.data[i] != self.cmd_buf[i] {
                         same = false;
                         break;
@@ -242,8 +399,8 @@ impl Shell {
 
         // Add to history
         let entry = &mut self.history[self.history_write];
-        entry.data[..self.cmd_pos].copy_from_slice(&self.cmd_buf[..self.cmd_pos]);
-        entry.len = self.cmd_pos;
+        entry.data[..self.cmd_len].copy_from_slice(&self.cmd_buf[..self.cmd_len]);
+        entry.len = self.cmd_len;
 
         self.history_write = (self.history_write + 1) % HISTORY_SIZE;
         if self.history_count < HISTORY_SIZE {
@@ -259,8 +416,8 @@ impl Shell {
 
         // Save current line if we're just starting to navigate
         if self.history_nav < 0 {
-            self.saved_line[..self.cmd_pos].copy_from_slice(&self.cmd_buf[..self.cmd_pos]);
-            self.saved_len = self.cmd_pos;
+            self.saved_line[..self.cmd_len].copy_from_slice(&self.cmd_buf[..self.cmd_len]);
+            self.saved_len = self.cmd_len;
             self.history_nav = 0;
         } else if (self.history_nav as usize) < self.history_count - 1 {
             self.history_nav += 1;
@@ -287,7 +444,8 @@ impl Shell {
             self.history_nav = -1;
             self.clear_line();
             self.cmd_buf[..self.saved_len].copy_from_slice(&self.saved_line[..self.saved_len]);
-            self.cmd_pos = self.saved_len;
+            self.cmd_len = self.saved_len;
+            self.cursor_pos = self.cmd_len;
             self.redisplay_line();
         }
     }
@@ -305,32 +463,39 @@ impl Shell {
             HISTORY_SIZE - 1 - (offset - self.history_write)
         };
 
-        let entry = &self.history[idx];
+        // Copy entry data before borrowing self mutably
+        let entry_len = self.history[idx].len;
+        let mut entry_data = [0u8; MAX_CMD_LEN];
+        entry_data[..entry_len].copy_from_slice(&self.history[idx].data[..entry_len]);
 
         // Clear current line and display history entry
         self.clear_line();
-        self.cmd_buf[..entry.len].copy_from_slice(&entry.data[..entry.len]);
-        self.cmd_pos = entry.len;
+        self.cmd_buf[..entry_len].copy_from_slice(&entry_data[..entry_len]);
+        self.cmd_len = entry_len;
+        self.cursor_pos = self.cmd_len;
         self.redisplay_line();
     }
 
     /// Clear the current line on screen
-    fn clear_line(&self) {
-        // Move cursor back to start of input and clear to end of line
-        for _ in 0..self.cmd_pos {
+    fn clear_line(&mut self) {
+        // Move cursor back to start of input
+        for _ in 0..self.cursor_pos {
             crate::serial_print!("\x08");
         }
-        for _ in 0..self.cmd_pos {
+        // Clear the entire line
+        for _ in 0..self.cmd_len {
             crate::serial_print!(" ");
         }
-        for _ in 0..self.cmd_pos {
+        // Move back to start
+        for _ in 0..self.cmd_len {
             crate::serial_print!("\x08");
         }
+        self.cursor_pos = 0;
     }
 
     /// Redisplay the current command buffer
     fn redisplay_line(&self) {
-        for i in 0..self.cmd_pos {
+        for i in 0..self.cmd_len {
             crate::serial_print!("{}", self.cmd_buf[i] as char);
         }
     }
@@ -365,7 +530,7 @@ impl Shell {
     /// Execute the current command
     fn execute_command(&mut self) {
         // Get command string
-        let cmd_str = match core::str::from_utf8(&self.cmd_buf[..self.cmd_pos]) {
+        let cmd_str = match core::str::from_utf8(&self.cmd_buf[..self.cmd_len]) {
             Ok(s) => s.trim(),
             Err(_) => {
                 serial_println!("Invalid UTF-8 in command");
