@@ -283,6 +283,43 @@ pub unsafe fn ke_set_priority(thread: *mut KThread, priority: i8) {
     }
 }
 
+/// Delay execution for the specified number of milliseconds
+///
+/// Puts the current thread to sleep for approximately the specified time.
+///
+/// # Safety
+/// Must be called from thread context
+pub unsafe fn ki_delay_execution(delay_ms: u64) {
+    if delay_ms == 0 {
+        // Zero delay just yields
+        ki_yield();
+        return;
+    }
+
+    // Get the current thread
+    let prcb = super::prcb::get_current_prcb_mut();
+    let thread = prcb.current_thread;
+
+    if thread.is_null() {
+        return;
+    }
+
+    // For now, simple busy-wait loop with yields
+    // TODO: Implement proper timer-based sleep
+    let start = crate::hal::apic::get_tick_count();
+    let target = start.saturating_add(delay_ms);
+
+    while crate::hal::apic::get_tick_count() < target {
+        // Yield to let other threads run
+        ki_yield();
+
+        // Small delay to prevent tight spinning
+        for _ in 0..1000 {
+            core::hint::spin_loop();
+        }
+    }
+}
+
 /// List all active threads
 ///
 /// # Safety

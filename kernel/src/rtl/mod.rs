@@ -30,9 +30,13 @@
 //! }
 //! ```
 
-// TODO: Submodules
-// pub mod avl;
-// pub mod bitmap;
-// pub mod heap;
-// pub mod splay;
-// pub mod string;
+pub mod avl;
+pub mod bitmap;
+pub mod string;
+// pub mod heap;   // TODO: User-mode heap
+// pub mod splay;  // TODO: Splay trees
+
+// Re-exports for convenience
+pub use avl::*;
+pub use bitmap::*;
+pub use string::*;

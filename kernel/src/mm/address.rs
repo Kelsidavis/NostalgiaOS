@@ -650,3 +650,54 @@ pub unsafe fn init() {
     crate::serial_println!("[MM]   System PML4: {:#x}", system.pml4_physical);
     crate::serial_println!("[MM]   {} address spaces available", MAX_ADDRESS_SPACES - 1);
 }
+
+// ============================================================================
+// Virtual Memory Protection
+// ============================================================================
+
+/// Change protection on a region of virtual memory
+///
+/// # Arguments
+/// * `base_address` - Starting address of the region
+/// * `size` - Size of the region in bytes
+/// * `new_protect` - New protection flags
+///
+/// # Returns
+/// Ok(old_protect) on success, Err on failure
+pub unsafe fn mm_protect_virtual_memory(
+    base_address: usize,
+    size: usize,
+    new_protect: u32,
+) -> Result<u32, ()> {
+    // Get current address space
+    let aspace = mm_get_system_address_space();
+    if aspace.is_null() {
+        return Err(());
+    }
+
+    let aspace_ref = &mut *aspace;
+
+    // Find the VAD for this address
+    let vad = match super::vad::mm_find_vad(&aspace_ref.vad_root, base_address as u64) {
+        Some(v) => v,
+        None => return Err(()),
+    };
+
+    let vad_ref = &mut *vad;
+
+    // Check that the requested region is within the VAD
+    let vad_end = vad_ref.start_address() + vad_ref.size();
+    if base_address as u64 + size as u64 > vad_end {
+        return Err(());
+    }
+
+    // Save old protection
+    let old_protect = vad_ref.protection;
+
+    // Update protection
+    vad_ref.protection = new_protect;
+
+    // TODO: Update page table entries to reflect new protection
+
+    Ok(old_protect)
+}

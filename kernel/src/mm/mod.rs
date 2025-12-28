@@ -134,6 +134,7 @@ pub use address::{
     mm_detach_address_space,
     mm_allocate_virtual_memory,
     mm_free_virtual_memory,
+    mm_protect_virtual_memory,
     mm_query_virtual_memory,
     mm_access_fault,
     mm_get_address_space_stats,

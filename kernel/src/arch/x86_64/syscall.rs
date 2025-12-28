@@ -182,10 +182,28 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtGetCurrentProcessId as usize, sys_get_current_process_id);
     register_syscall(SyscallNumber::NtGetCurrentThreadId as usize, sys_get_current_thread_id);
     register_syscall(SyscallNumber::NtYieldExecution as usize, sys_yield_execution);
+    register_syscall(SyscallNumber::NtDelayExecution as usize, sys_delay_execution);
     register_syscall(SyscallNumber::NtDebugPrint as usize, sys_debug_print);
     register_syscall(SyscallNumber::NtClose as usize, sys_close);
     register_syscall(SyscallNumber::NtReadFile as usize, sys_read_file);
     register_syscall(SyscallNumber::NtWriteFile as usize, sys_write_file);
+
+    // Synchronization syscalls
+    register_syscall(SyscallNumber::NtWaitForSingleObject as usize, sys_wait_for_single_object);
+    register_syscall(SyscallNumber::NtWaitForMultipleObjects as usize, sys_wait_for_multiple_objects);
+    register_syscall(SyscallNumber::NtSetEvent as usize, sys_set_event);
+    register_syscall(SyscallNumber::NtResetEvent as usize, sys_reset_event);
+    register_syscall(SyscallNumber::NtCreateEvent as usize, sys_create_event);
+    register_syscall(SyscallNumber::NtReleaseSemaphore as usize, sys_release_semaphore);
+    register_syscall(SyscallNumber::NtCreateSemaphore as usize, sys_create_semaphore);
+    register_syscall(SyscallNumber::NtReleaseMutant as usize, sys_release_mutant);
+    register_syscall(SyscallNumber::NtCreateMutant as usize, sys_create_mutant);
+
+    // Memory management syscalls
+    register_syscall(SyscallNumber::NtAllocateVirtualMemory as usize, sys_allocate_virtual_memory);
+    register_syscall(SyscallNumber::NtFreeVirtualMemory as usize, sys_free_virtual_memory);
+    register_syscall(SyscallNumber::NtProtectVirtualMemory as usize, sys_protect_virtual_memory);
+    register_syscall(SyscallNumber::NtQueryVirtualMemory as usize, sys_query_virtual_memory);
 }
 
 /// Register a syscall handler
@@ -818,4 +836,466 @@ pub unsafe fn test_user_mode() {
     let result = run_user_code(code_virt, stack_virt);
 
     crate::serial_println!("[SYSCALL] User mode test completed with exit code: {}", result);
+}
+
+// ============================================================================
+// Delay Execution Syscall
+// ============================================================================
+
+/// NtDelayExecution - Delay (sleep) the current thread
+fn sys_delay_execution(
+    alertable: usize,
+    delay_interval: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    // delay_interval is a pointer to a LARGE_INTEGER (i64)
+    // Positive value = absolute time, negative = relative time
+    // For now, we only support relative delays
+    let _ = alertable; // TODO: Handle alertable waits
+
+    if delay_interval == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    // Read the delay value (negative = relative delay in 100ns units)
+    let delay_100ns = unsafe { *(delay_interval as *const i64) };
+
+    if delay_100ns >= 0 {
+        // Absolute time not yet supported
+        return -1;
+    }
+
+    // Convert to milliseconds (negative 100ns -> positive ms)
+    let delay_ms = ((-delay_100ns) / 10_000) as u64;
+
+    // Use the scheduler's delay mechanism
+    unsafe {
+        crate::ke::scheduler::ki_delay_execution(delay_ms);
+    }
+
+    0 // STATUS_SUCCESS
+}
+
+// ============================================================================
+// Synchronization Syscalls
+// ============================================================================
+
+/// NtWaitForSingleObject - Wait for a single object to become signaled
+fn sys_wait_for_single_object(
+    handle: usize,
+    alertable: usize,
+    timeout: usize,
+    _: usize, _: usize, _: usize,
+) -> isize {
+    let _ = alertable; // TODO: Handle alertable waits
+
+    // Get the object from handle
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
+        if obj.is_null() {
+            return -1; // STATUS_INVALID_HANDLE
+        }
+        obj
+    };
+
+    // Get timeout value (NULL = infinite wait)
+    let timeout_ms = if timeout == 0 {
+        None
+    } else {
+        let timeout_100ns = unsafe { *(timeout as *const i64) };
+        if timeout_100ns < 0 {
+            Some(((-timeout_100ns) / 10_000) as u64)
+        } else {
+            Some(0) // Absolute time treated as no-wait
+        }
+    };
+
+    // Wait on the event (assuming it's an event for now)
+    let result = unsafe {
+        let event = object as *mut crate::ke::event::KEvent;
+        if let Some(ms) = timeout_ms {
+            if (*event).wait_timeout(ms) {
+                0 // STATUS_SUCCESS
+            } else {
+                0x102 // STATUS_TIMEOUT
+            }
+        } else {
+            (*event).wait();
+            0 // STATUS_SUCCESS
+        }
+    };
+
+    // Dereference the object
+    unsafe { crate::ob::ob_dereference_object(object); }
+
+    result
+}
+
+/// NtWaitForMultipleObjects - Wait for multiple objects
+fn sys_wait_for_multiple_objects(
+    count: usize,
+    handles: usize,
+    wait_type: usize,
+    alertable: usize,
+    timeout: usize,
+    _: usize,
+) -> isize {
+    let _ = alertable; // TODO: Handle alertable waits
+    let _ = wait_type; // 0 = WaitAll, 1 = WaitAny
+
+    if count == 0 || count > 64 || handles == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    // For now, just wait on each object sequentially (simplified)
+    let handle_array = unsafe {
+        core::slice::from_raw_parts(handles as *const usize, count)
+    };
+
+    for (i, &handle) in handle_array.iter().enumerate() {
+        let result = sys_wait_for_single_object(handle, 0, timeout, 0, 0, 0);
+        if result != 0 && result != 0x102 {
+            return result;
+        }
+        if wait_type == 1 && result == 0 {
+            // WaitAny - return which object was signaled
+            return i as isize;
+        }
+    }
+
+    0 // STATUS_SUCCESS (all objects signaled for WaitAll)
+}
+
+/// NtSetEvent - Set (signal) an event
+fn sys_set_event(
+    handle: usize,
+    previous_state: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
+        if obj.is_null() {
+            return -1;
+        }
+        obj
+    };
+
+    let was_signaled = unsafe {
+        let event = object as *mut crate::ke::event::KEvent;
+        (*event).set()
+    };
+
+    // Write previous state if requested
+    if previous_state != 0 {
+        unsafe {
+            *(previous_state as *mut i32) = was_signaled as i32;
+        }
+    }
+
+    unsafe { crate::ob::ob_dereference_object(object); }
+
+    0 // STATUS_SUCCESS
+}
+
+/// NtResetEvent - Reset (unsignal) an event
+fn sys_reset_event(
+    handle: usize,
+    previous_state: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
+        if obj.is_null() {
+            return -1;
+        }
+        obj
+    };
+
+    let was_signaled = unsafe {
+        let event = object as *mut crate::ke::event::KEvent;
+        (*event).reset()
+    };
+
+    if previous_state != 0 {
+        unsafe {
+            *(previous_state as *mut i32) = was_signaled as i32;
+        }
+    }
+
+    unsafe { crate::ob::ob_dereference_object(object); }
+
+    0
+}
+
+/// NtCreateEvent - Create a new event object
+fn sys_create_event(
+    event_handle: usize,
+    _desired_access: usize,
+    _object_attributes: usize,
+    _event_type: usize,
+    _initial_state: usize,
+    _: usize,
+) -> isize {
+    if event_handle == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    // For now, return a stub handle value
+    // TODO: Implement proper event object creation
+    crate::serial_println!("[SYSCALL] NtCreateEvent - stub implementation");
+
+    unsafe {
+        *(event_handle as *mut usize) = 0x100; // Stub handle
+    }
+    0 // STATUS_SUCCESS
+}
+
+/// NtReleaseSemaphore - Release a semaphore
+fn sys_release_semaphore(
+    handle: usize,
+    release_count: usize,
+    previous_count: usize,
+    _: usize, _: usize, _: usize,
+) -> isize {
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
+        if obj.is_null() {
+            return -1;
+        }
+        obj
+    };
+
+    let prev = unsafe {
+        let sem = object as *mut crate::ke::KSemaphore;
+        (*sem).release(release_count as i32)
+    };
+
+    if previous_count != 0 {
+        unsafe {
+            *(previous_count as *mut i32) = prev;
+        }
+    }
+
+    unsafe { crate::ob::ob_dereference_object(object); }
+
+    0
+}
+
+/// NtCreateSemaphore - Create a semaphore object
+fn sys_create_semaphore(
+    semaphore_handle: usize,
+    _desired_access: usize,
+    _object_attributes: usize,
+    _initial_count: usize,
+    _maximum_count: usize,
+    _: usize,
+) -> isize {
+    if semaphore_handle == 0 {
+        return -1;
+    }
+
+    // For now, return a stub handle value
+    // TODO: Implement proper semaphore object creation
+    crate::serial_println!("[SYSCALL] NtCreateSemaphore - stub implementation");
+
+    unsafe {
+        *(semaphore_handle as *mut usize) = 0x101; // Stub handle
+    }
+    0
+}
+
+/// NtReleaseMutant - Release a mutex (mutant in NT terminology)
+fn sys_release_mutant(
+    handle: usize,
+    previous_count: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
+        if obj.is_null() {
+            return -1;
+        }
+        obj
+    };
+
+    let prev = unsafe {
+        let mutex = object as *mut crate::ke::KMutex;
+        let was_owned = (*mutex).is_owned();
+        (*mutex).release();
+        was_owned as i32
+    };
+
+    if previous_count != 0 {
+        unsafe {
+            *(previous_count as *mut i32) = prev;
+        }
+    }
+
+    unsafe { crate::ob::ob_dereference_object(object); }
+
+    0
+}
+
+/// NtCreateMutant - Create a mutex object
+fn sys_create_mutant(
+    mutant_handle: usize,
+    _desired_access: usize,
+    _object_attributes: usize,
+    _initial_owner: usize,
+    _: usize, _: usize,
+) -> isize {
+    if mutant_handle == 0 {
+        return -1;
+    }
+
+    // For now, return a stub handle value
+    // TODO: Implement proper mutant object creation
+    crate::serial_println!("[SYSCALL] NtCreateMutant - stub implementation");
+
+    unsafe {
+        *(mutant_handle as *mut usize) = 0x102; // Stub handle
+    }
+    0
+}
+
+// ============================================================================
+// Memory Management Syscalls
+// ============================================================================
+
+/// NtAllocateVirtualMemory - Allocate virtual memory
+fn sys_allocate_virtual_memory(
+    _process_handle: usize,
+    base_address: usize,
+    _zero_bits: usize,
+    region_size: usize,
+    allocation_type: usize,
+    protect: usize,
+) -> isize {
+    if base_address == 0 || region_size == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    // Read the requested base address and size
+    let requested_base = unsafe { *(base_address as *const usize) };
+    let requested_size = unsafe { *(region_size as *const usize) };
+
+    // Get the system address space (for now, we use system aspace)
+    let aspace = unsafe { crate::mm::mm_get_system_address_space() };
+
+    // Allocate virtual memory
+    let result = unsafe {
+        crate::mm::mm_allocate_virtual_memory(
+            aspace,
+            if requested_base == 0 { None } else { Some(requested_base as u64) },
+            requested_size as u64,
+            allocation_type as u32,
+            protect as u32,
+        )
+    };
+
+    match result {
+        Some(actual_base) => {
+            unsafe {
+                *(base_address as *mut usize) = actual_base as usize;
+                // Region size is page-aligned by the allocator
+            }
+            0 // STATUS_SUCCESS
+        }
+        None => -1, // STATUS_NO_MEMORY
+    }
+}
+
+/// NtFreeVirtualMemory - Free virtual memory
+fn sys_free_virtual_memory(
+    _process_handle: usize,
+    base_address: usize,
+    region_size: usize,
+    free_type: usize,
+    _: usize, _: usize,
+) -> isize {
+    if base_address == 0 || region_size == 0 {
+        return -1;
+    }
+
+    let addr = unsafe { *(base_address as *const usize) };
+    let size = unsafe { *(region_size as *const usize) };
+
+    // Get the system address space
+    let aspace = unsafe { crate::mm::mm_get_system_address_space() };
+
+    let result = unsafe {
+        crate::mm::mm_free_virtual_memory(aspace, addr as u64, size as u64, free_type as u32)
+    };
+
+    if result { 0 } else { -1 }
+}
+
+/// NtProtectVirtualMemory - Change memory protection
+fn sys_protect_virtual_memory(
+    process_handle: usize,
+    base_address: usize,
+    region_size: usize,
+    new_protect: usize,
+    old_protect: usize,
+    _: usize,
+) -> isize {
+    let _ = process_handle;
+
+    if base_address == 0 || region_size == 0 || old_protect == 0 {
+        return -1;
+    }
+
+    let addr = unsafe { *(base_address as *const usize) };
+    let size = unsafe { *(region_size as *const usize) };
+
+    let result = unsafe {
+        crate::mm::mm_protect_virtual_memory(addr, size, new_protect as u32)
+    };
+
+    match result {
+        Ok(old) => {
+            unsafe {
+                *(old_protect as *mut u32) = old;
+            }
+            0
+        }
+        Err(_) => -1,
+    }
+}
+
+/// NtQueryVirtualMemory - Query information about virtual memory
+fn sys_query_virtual_memory(
+    _process_handle: usize,
+    base_address: usize,
+    _info_class: usize,
+    buffer: usize,
+    buffer_size: usize,
+    return_length: usize,
+) -> isize {
+    if buffer == 0 || buffer_size < core::mem::size_of::<crate::mm::MmMemoryInfo>() {
+        return -1;
+    }
+
+    // Get the system address space
+    let aspace = unsafe { crate::mm::mm_get_system_address_space() };
+
+    let result = unsafe {
+        crate::mm::mm_query_virtual_memory(aspace, base_address as u64)
+    };
+
+    match result {
+        Some(info) => {
+            // Copy result to user buffer
+            unsafe {
+                *(buffer as *mut crate::mm::MmMemoryInfo) = info;
+            }
+            if return_length != 0 {
+                unsafe {
+                    *(return_length as *mut usize) = core::mem::size_of::<crate::mm::MmMemoryInfo>();
+                }
+            }
+            0
+        }
+        None => -1,
+    }
 }
