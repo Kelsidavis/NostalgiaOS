@@ -9133,11 +9133,49 @@ fn sys_set_information_thread(
 }
 
 /// Object information classes for Set operations
+/// These are the same as Query classes but only some are settable
+#[allow(non_snake_case, non_upper_case_globals)]
 pub mod set_object_info_class {
-    pub const OBJECT_FLAGS_INFORMATION: u32 = 4;
+    /// Handle flag information (inherit, protect from close)
+    /// This is the only settable object information class
+    pub const ObjectHandleFlagInformation: u32 = 4;
+
+    /// Session information (can be set on some objects)
+    pub const ObjectSessionInformation: u32 = 5;
+
+    // Legacy alias
+    pub const OBJECT_FLAGS_INFORMATION: u32 = ObjectHandleFlagInformation;
 }
 
-/// NtSetInformationObject - Set object attributes
+/// OBJECT_HANDLE_FLAG_INFORMATION for Set operations
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SetObjectHandleFlagInformation {
+    /// Whether handle should be inheritable
+    pub inherit: u8,
+    /// Whether handle should be protected from close
+    pub protect_from_close: u8,
+}
+
+/// NtSetInformationObject - Set object handle attributes
+///
+/// # Arguments
+/// * `handle` - Handle to modify
+/// * `object_information_class` - Type of information to set
+/// * `object_information` - Buffer containing new information
+/// * `object_information_length` - Size of buffer
+///
+/// # Returns
+/// * STATUS_SUCCESS - Information was successfully set
+/// * STATUS_INVALID_HANDLE - Handle is invalid
+/// * STATUS_INVALID_PARAMETER - Invalid parameter
+/// * STATUS_INFO_LENGTH_MISMATCH - Buffer size is incorrect
+/// * STATUS_INVALID_INFO_CLASS - Information class not supported for Set
+/// * STATUS_ACCESS_DENIED - Cannot modify handle attributes
+///
+/// # Supported Information Classes
+/// * ObjectHandleFlagInformation (4) - Set inherit and protect-from-close flags
+/// * ObjectSessionInformation (5) - Set session ID (limited)
 fn sys_set_information_object(
     handle: usize,
     object_information_class: usize,
@@ -9145,39 +9183,266 @@ fn sys_set_information_object(
     object_information_length: usize,
     _: usize, _: usize,
 ) -> isize {
-    crate::serial_println!("[SYSCALL] NtSetInformationObject(handle={:#x}, class={})",
-        handle, object_information_class);
+    // NT status codes
+    const STATUS_SUCCESS: isize = 0;
+    const STATUS_INVALID_HANDLE: isize = 0xC0000008u32 as isize;
+    const STATUS_INVALID_PARAMETER: isize = 0xC000000Du32 as isize;
+    const STATUS_INFO_LENGTH_MISMATCH: isize = 0xC0000004u32 as isize;
+    const STATUS_INVALID_INFO_CLASS: isize = 0xC0000003u32 as isize;
+    const STATUS_ACCESS_DENIED: isize = 0xC0000022u32 as isize;
+    const STATUS_OBJECT_TYPE_MISMATCH: isize = 0xC0000024u32 as isize;
 
-    if object_information == 0 && object_information_length > 0 {
-        return -1;
+    crate::serial_println!(
+        "[SYSCALL] NtSetInformationObject(handle=0x{:X}, class={}, buffer=0x{:X}, len={})",
+        handle, object_information_class, object_information, object_information_length
+    );
+
+    // Validate handle
+    if handle == 0 {
+        crate::serial_println!("[SYSCALL] NtSetInformationObject: NULL handle");
+        return STATUS_INVALID_HANDLE;
     }
 
-    match object_information_class as u32 {
-        set_object_info_class::OBJECT_FLAGS_INFORMATION => {
-            if object_information_length < 4 {
-                return -1;
+    // Pseudo-handles cannot have their attributes modified
+    if handle == 0xFFFFFFFFFFFFFFFF || handle == 0xFFFFFFFFFFFFFFFE {
+        crate::serial_println!("[SYSCALL] NtSetInformationObject: cannot modify pseudo-handle");
+        return STATUS_INVALID_HANDLE;
+    }
+
+    // Validate buffer
+    if object_information == 0 && object_information_length > 0 {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    let info_class = object_information_class as u32;
+
+    match info_class {
+        set_object_info_class::ObjectHandleFlagInformation => {
+            let required = core::mem::size_of::<SetObjectHandleFlagInformation>();
+
+            if object_information_length < required {
+                crate::serial_println!("[SYSCALL] NtSetInformationObject: buffer too small ({} < {})",
+                    object_information_length, required);
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
 
-            // Object flags structure:
-            // BOOLEAN Inherit
-            // BOOLEAN ProtectFromClose
-            let flags = unsafe { *(object_information as *const u32) };
-            let inherit = (flags & 1) != 0;
-            let protect_from_close = (flags & 2) != 0;
+            if object_information == 0 {
+                return STATUS_INVALID_PARAMETER;
+            }
 
-            crate::serial_println!("[SYSCALL] SetInformationObject: inherit={}, protect={}",
-                inherit, protect_from_close);
+            // Read the flags
+            let flags = unsafe { *(object_information as *const SetObjectHandleFlagInformation) };
+            let inherit = flags.inherit != 0;
+            let protect_from_close = flags.protect_from_close != 0;
 
-            // TODO: Store flags in handle table entry
+            crate::serial_println!(
+                "[SYSCALL] NtSetInformationObject: setting inherit={}, protect_from_close={}",
+                inherit, protect_from_close
+            );
 
-            0
+            // Get handle type to determine how to update
+            let handle_type = get_handle_type(handle);
+
+            if handle_type == HandleType::None {
+                // Try object manager for kernel handles
+                let ob_handle = handle as u32;
+                let result = unsafe {
+                    set_ob_handle_flags(ob_handle, inherit, protect_from_close)
+                };
+
+                if result {
+                    crate::serial_println!("[SYSCALL] NtSetInformationObject: updated OB handle flags");
+                    return STATUS_SUCCESS;
+                } else {
+                    crate::serial_println!("[SYSCALL] NtSetInformationObject: OB handle not found");
+                    return STATUS_INVALID_HANDLE;
+                }
+            }
+
+            // For our internal handle types, we need to store these flags
+            // Currently our handle tables don't support per-handle flags,
+            // so we'll need to update them or use a separate flags table
+
+            // For now, store in a simple flags table
+            unsafe {
+                set_handle_flags(handle, inherit, protect_from_close);
+            }
+
+            crate::serial_println!("[SYSCALL] NtSetInformationObject: flags updated successfully");
+            STATUS_SUCCESS
         }
+
+        set_object_info_class::ObjectSessionInformation => {
+            // Set session ID for the object
+            // Only certain object types support this
+
+            let required = core::mem::size_of::<u32>();
+
+            if object_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            if object_information == 0 {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            let session_id = unsafe { *(object_information as *const u32) };
+
+            crate::serial_println!(
+                "[SYSCALL] NtSetInformationObject: setting session ID to {}",
+                session_id
+            );
+
+            // Get handle type
+            let handle_type = get_handle_type(handle);
+
+            // Only certain types support session assignment
+            match handle_type {
+                HandleType::Event | HandleType::Semaphore | HandleType::Mutex |
+                HandleType::Section | HandleType::Port => {
+                    // These types can have session IDs
+                    // For now, just acknowledge the request
+                    crate::serial_println!(
+                        "[SYSCALL] NtSetInformationObject: session set for {:?}",
+                        handle_type
+                    );
+                    STATUS_SUCCESS
+                }
+                HandleType::Process | HandleType::Thread => {
+                    // Process/thread session is read-only after creation
+                    crate::serial_println!(
+                        "[SYSCALL] NtSetInformationObject: cannot set session for process/thread"
+                    );
+                    STATUS_ACCESS_DENIED
+                }
+                _ => {
+                    crate::serial_println!(
+                        "[SYSCALL] NtSetInformationObject: type {:?} doesn't support session",
+                        handle_type
+                    );
+                    STATUS_OBJECT_TYPE_MISMATCH
+                }
+            }
+        }
+
+        // These are query-only classes
+        0 | 1 | 2 | 3 => {
+            crate::serial_println!(
+                "[SYSCALL] NtSetInformationObject: class {} is query-only",
+                info_class
+            );
+            STATUS_INVALID_INFO_CLASS
+        }
+
         _ => {
-            crate::serial_println!("[SYSCALL] NtSetInformationObject: unsupported class {}",
-                object_information_class);
-            -1
+            crate::serial_println!(
+                "[SYSCALL] NtSetInformationObject: unknown info class {}",
+                info_class
+            );
+            STATUS_INVALID_INFO_CLASS
         }
     }
+}
+
+// ============================================================================
+// Handle Flags Table
+// ============================================================================
+
+/// Maximum handles for flags table
+const MAX_HANDLE_FLAGS: usize = 1024;
+
+/// Handle flags entry
+#[derive(Clone, Copy)]
+struct HandleFlags {
+    /// Handle value (0 = unused entry)
+    handle: usize,
+    /// Inherit flag
+    inherit: bool,
+    /// Protect from close flag
+    protect_from_close: bool,
+}
+
+impl HandleFlags {
+    const fn new() -> Self {
+        Self {
+            handle: 0,
+            inherit: false,
+            protect_from_close: false,
+        }
+    }
+}
+
+/// Static handle flags table
+static mut HANDLE_FLAGS_TABLE: [HandleFlags; MAX_HANDLE_FLAGS] = {
+    const INIT: HandleFlags = HandleFlags::new();
+    [INIT; MAX_HANDLE_FLAGS]
+};
+
+/// Set flags for a handle
+unsafe fn set_handle_flags(handle: usize, inherit: bool, protect_from_close: bool) {
+    // First, try to find existing entry
+    for entry in HANDLE_FLAGS_TABLE.iter_mut() {
+        if entry.handle == handle {
+            entry.inherit = inherit;
+            entry.protect_from_close = protect_from_close;
+            return;
+        }
+    }
+
+    // Find free entry
+    for entry in HANDLE_FLAGS_TABLE.iter_mut() {
+        if entry.handle == 0 {
+            entry.handle = handle;
+            entry.inherit = inherit;
+            entry.protect_from_close = protect_from_close;
+            return;
+        }
+    }
+
+    // Table full - oldest entry gets overwritten (simple LRU)
+    HANDLE_FLAGS_TABLE[0].handle = handle;
+    HANDLE_FLAGS_TABLE[0].inherit = inherit;
+    HANDLE_FLAGS_TABLE[0].protect_from_close = protect_from_close;
+}
+
+/// Get flags for a handle
+unsafe fn get_handle_flags(handle: usize) -> (bool, bool) {
+    for entry in HANDLE_FLAGS_TABLE.iter() {
+        if entry.handle == handle {
+            return (entry.inherit, entry.protect_from_close);
+        }
+    }
+    (false, false) // Default: not inheritable, not protected
+}
+
+/// Clear flags when handle is closed
+unsafe fn clear_handle_flags(handle: usize) {
+    for entry in HANDLE_FLAGS_TABLE.iter_mut() {
+        if entry.handle == handle {
+            entry.handle = 0;
+            entry.inherit = false;
+            entry.protect_from_close = false;
+            return;
+        }
+    }
+}
+
+/// Set flags for an object manager handle
+unsafe fn set_ob_handle_flags(handle: u32, inherit: bool, protect_from_close: bool) -> bool {
+    // Try to get the handle entry from the object manager
+    let object = crate::ob::ob_reference_object_by_handle(handle, 0);
+
+    if object.is_null() {
+        return false;
+    }
+
+    // Dereference since we just needed to verify handle exists
+    crate::ob::ob_dereference_object(object);
+
+    // Store flags in our table (OB doesn't have per-handle flags storage yet)
+    set_handle_flags(handle as usize, inherit, protect_from_close);
+
+    true
 }
 
 /// Token information classes for Set operations
