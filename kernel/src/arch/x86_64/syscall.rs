@@ -123,6 +123,36 @@ pub enum SyscallNumber {
     NtReplyWaitReceivePort = 77,
     NtClosePort = 78,
     NtQueryInformationPort = 79,
+
+    // Object/Handle operations
+    NtDuplicateHandle = 80,
+    NtQueryObject = 81,
+    NtSetInformationObject = 82,
+    NtWaitForMultipleObjects32 = 83,
+
+    // Process operations
+    NtOpenProcess = 90,
+    NtQueryInformationProcess = 91,
+    NtSetInformationProcess = 92,
+    NtSuspendProcess = 93,
+    NtResumeProcess = 94,
+
+    // Thread operations
+    NtOpenThread = 95,
+    NtQueryInformationThread = 96,
+    NtSetInformationThread = 97,
+    NtSuspendThread = 98,
+    NtResumeThread = 99,
+
+    // Security/Token operations
+    NtOpenProcessToken = 100,
+    NtOpenThreadToken = 101,
+    NtQueryInformationToken = 102,
+    NtSetInformationToken = 103,
+    NtDuplicateToken = 104,
+    NtAdjustPrivilegesToken = 105,
+    NtAdjustGroupsToken = 106,
+    NtImpersonateThread = 107,
 }
 
 /// Syscall handler function type
@@ -289,6 +319,29 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtReplyWaitReceivePort as usize, sys_reply_wait_receive_port);
     register_syscall(SyscallNumber::NtClosePort as usize, sys_close_port);
     register_syscall(SyscallNumber::NtQueryInformationPort as usize, sys_query_information_port);
+
+    // Object/Handle syscalls
+    register_syscall(SyscallNumber::NtDuplicateHandle as usize, sys_duplicate_handle);
+    register_syscall(SyscallNumber::NtQueryObject as usize, sys_query_object);
+
+    // Process syscalls
+    register_syscall(SyscallNumber::NtOpenProcess as usize, sys_open_process);
+    register_syscall(SyscallNumber::NtQueryInformationProcess as usize, sys_query_information_process);
+    register_syscall(SyscallNumber::NtSuspendProcess as usize, sys_suspend_process);
+    register_syscall(SyscallNumber::NtResumeProcess as usize, sys_resume_process);
+
+    // Thread syscalls
+    register_syscall(SyscallNumber::NtOpenThread as usize, sys_open_thread);
+    register_syscall(SyscallNumber::NtQueryInformationThread as usize, sys_query_information_thread);
+    register_syscall(SyscallNumber::NtSuspendThread as usize, sys_suspend_thread);
+    register_syscall(SyscallNumber::NtResumeThread as usize, sys_resume_thread);
+
+    // Token syscalls
+    register_syscall(SyscallNumber::NtOpenProcessToken as usize, sys_open_process_token);
+    register_syscall(SyscallNumber::NtOpenThreadToken as usize, sys_open_thread_token);
+    register_syscall(SyscallNumber::NtQueryInformationToken as usize, sys_query_information_token);
+    register_syscall(SyscallNumber::NtDuplicateToken as usize, sys_duplicate_token);
+    register_syscall(SyscallNumber::NtAdjustPrivilegesToken as usize, sys_adjust_privileges_token);
 }
 
 /// Register a syscall handler
@@ -3847,4 +3900,1099 @@ fn sys_query_information_port(
         }
         None => -1,
     }
+}
+
+// ============================================================================
+// Object/Handle Syscalls
+// ============================================================================
+
+/// Handle type enumeration for the unified handle table
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum HandleType {
+    None = 0,
+    File = 1,
+    Event = 2,
+    Semaphore = 3,
+    Mutex = 4,
+    Section = 5,
+    Key = 6,
+    Port = 7,
+    Thread = 8,
+    Process = 9,
+    Token = 10,
+    IoCompletion = 11,
+}
+
+/// Generic handle entry
+#[derive(Clone, Copy)]
+struct HandleEntry {
+    handle_type: HandleType,
+    object_index: u32,  // Index into type-specific pool
+    access_mask: u32,
+    flags: u32,
+}
+
+impl HandleEntry {
+    const fn empty() -> Self {
+        Self {
+            handle_type: HandleType::None,
+            object_index: u32::MAX,
+            access_mask: 0,
+            flags: 0,
+        }
+    }
+
+    fn is_valid(&self) -> bool {
+        self.handle_type != HandleType::None && self.object_index != u32::MAX
+    }
+}
+
+/// Process handle table
+const MAX_PROCESS_HANDLES: usize = 64;
+const PROCESS_HANDLE_BASE: usize = 0x5000;
+
+static mut PROCESS_HANDLE_MAP: [u32; MAX_PROCESS_HANDLES] = [u32::MAX; MAX_PROCESS_HANDLES];
+
+/// Allocate a process handle
+unsafe fn alloc_process_handle(pid: u32) -> Option<usize> {
+    for i in 0..MAX_PROCESS_HANDLES {
+        if PROCESS_HANDLE_MAP[i] == u32::MAX {
+            PROCESS_HANDLE_MAP[i] = pid;
+            return Some(i + PROCESS_HANDLE_BASE);
+        }
+    }
+    None
+}
+
+/// Get process ID from handle
+unsafe fn get_process_id(handle: usize) -> Option<u32> {
+    if handle < PROCESS_HANDLE_BASE {
+        return None;
+    }
+    let idx = handle - PROCESS_HANDLE_BASE;
+    if idx >= MAX_PROCESS_HANDLES {
+        return None;
+    }
+    let pid = PROCESS_HANDLE_MAP[idx];
+    if pid == u32::MAX { None } else { Some(pid) }
+}
+
+/// Free a process handle
+unsafe fn free_process_handle(handle: usize) {
+    if handle >= PROCESS_HANDLE_BASE {
+        let idx = handle - PROCESS_HANDLE_BASE;
+        if idx < MAX_PROCESS_HANDLES {
+            PROCESS_HANDLE_MAP[idx] = u32::MAX;
+        }
+    }
+}
+
+/// Token handle table
+const MAX_TOKEN_HANDLES: usize = 64;
+const TOKEN_HANDLE_BASE: usize = 0x6000;
+
+static mut TOKEN_HANDLE_MAP: [u32; MAX_TOKEN_HANDLES] = [u32::MAX; MAX_TOKEN_HANDLES];
+
+/// Allocate a token handle
+unsafe fn alloc_token_handle(token_id: u32) -> Option<usize> {
+    for i in 0..MAX_TOKEN_HANDLES {
+        if TOKEN_HANDLE_MAP[i] == u32::MAX {
+            TOKEN_HANDLE_MAP[i] = token_id;
+            return Some(i + TOKEN_HANDLE_BASE);
+        }
+    }
+    None
+}
+
+/// Get token ID from handle
+unsafe fn get_token_id(handle: usize) -> Option<u32> {
+    if handle < TOKEN_HANDLE_BASE {
+        return None;
+    }
+    let idx = handle - TOKEN_HANDLE_BASE;
+    if idx >= MAX_TOKEN_HANDLES {
+        return None;
+    }
+    let tid = TOKEN_HANDLE_MAP[idx];
+    if tid == u32::MAX { None } else { Some(tid) }
+}
+
+/// Determine handle type from handle value
+fn get_handle_type(handle: usize) -> HandleType {
+    if handle >= TOKEN_HANDLE_BASE && handle < TOKEN_HANDLE_BASE + MAX_TOKEN_HANDLES {
+        HandleType::Token
+    } else if handle >= PROCESS_HANDLE_BASE && handle < PROCESS_HANDLE_BASE + MAX_PROCESS_HANDLES {
+        HandleType::Process
+    } else if handle >= THREAD_HANDLE_BASE && handle < THREAD_HANDLE_BASE + MAX_THREAD_HANDLES {
+        HandleType::Thread
+    } else if handle >= LPC_HANDLE_BASE && handle < LPC_HANDLE_BASE + MAX_LPC_HANDLES {
+        HandleType::Port
+    } else if handle >= KEY_HANDLE_BASE && handle < KEY_HANDLE_BASE + MAX_KEY_HANDLES {
+        HandleType::Key
+    } else if handle >= SYNC_HANDLE_BASE && handle < SYNC_HANDLE_BASE + MAX_SYNC_OBJECTS {
+        // Check sync object type
+        let idx = handle - SYNC_HANDLE_BASE;
+        unsafe {
+            match SYNC_OBJECT_POOL[idx].obj_type {
+                SyncObjectType::Event => HandleType::Event,
+                SyncObjectType::Semaphore => HandleType::Semaphore,
+                SyncObjectType::Mutex => HandleType::Mutex,
+                _ => HandleType::None,
+            }
+        }
+    } else if handle >= FILE_HANDLE_BASE && handle < FILE_HANDLE_BASE + MAX_FILE_HANDLES {
+        HandleType::File
+    } else {
+        HandleType::None
+    }
+}
+
+/// Duplicate handle options
+pub mod duplicate_options {
+    pub const DUPLICATE_CLOSE_SOURCE: u32 = 0x00000001;
+    pub const DUPLICATE_SAME_ACCESS: u32 = 0x00000002;
+    pub const DUPLICATE_SAME_ATTRIBUTES: u32 = 0x00000004;
+}
+
+/// NtDuplicateHandle - Duplicate a handle
+fn sys_duplicate_handle(
+    source_process_handle: usize,
+    source_handle: usize,
+    target_process_handle: usize,
+    target_handle_ptr: usize,
+    desired_access: usize,
+    _handle_attributes: usize,
+) -> isize {
+    // For now, only support current process to current process
+    let _ = source_process_handle;
+    let _ = target_process_handle;
+
+    if target_handle_ptr == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    crate::serial_println!("[SYSCALL] NtDuplicateHandle(source={:#x})", source_handle);
+
+    let handle_type = get_handle_type(source_handle);
+
+    // Duplicate based on handle type
+    let new_handle = match handle_type {
+        HandleType::File => unsafe {
+            if let Some(fs_handle) = get_fs_handle(source_handle) {
+                alloc_file_handle(fs_handle)
+            } else {
+                None
+            }
+        },
+        HandleType::Event | HandleType::Semaphore | HandleType::Mutex => unsafe {
+            // For sync objects, just create a new reference to the same object
+            let idx = source_handle - SYNC_HANDLE_BASE;
+            if idx < MAX_SYNC_OBJECTS && SYNC_OBJECT_POOL[idx].obj_type != SyncObjectType::None {
+                // Find a new slot and copy the reference
+                for i in 0..MAX_SYNC_OBJECTS {
+                    if SYNC_OBJECT_POOL[i].obj_type == SyncObjectType::None {
+                        SYNC_OBJECT_POOL[i].obj_type = SYNC_OBJECT_POOL[idx].obj_type;
+                        // Note: We're not actually duplicating the object, just the handle
+                        // A real implementation would increment a reference count
+                        return {
+                            let h = i + SYNC_HANDLE_BASE;
+                            *(target_handle_ptr as *mut usize) = h;
+                            crate::serial_println!("[SYSCALL] NtDuplicateHandle -> {:#x}", h);
+                            0
+                        };
+                    }
+                }
+                None
+            } else {
+                None
+            }
+        },
+        HandleType::Key => unsafe {
+            if let Some(cm_handle) = get_cm_key_handle(source_handle) {
+                alloc_key_handle(cm_handle)
+            } else {
+                None
+            }
+        },
+        HandleType::Port => unsafe {
+            if let Some(port_idx) = get_lpc_port(source_handle) {
+                alloc_lpc_handle(port_idx)
+            } else {
+                None
+            }
+        },
+        HandleType::Thread => unsafe {
+            if let Some(tid) = get_thread_id(source_handle) {
+                alloc_thread_handle(tid)
+            } else {
+                None
+            }
+        },
+        HandleType::Process => unsafe {
+            if let Some(pid) = get_process_id(source_handle) {
+                alloc_process_handle(pid)
+            } else {
+                None
+            }
+        },
+        HandleType::Token => unsafe {
+            if let Some(tok_id) = get_token_id(source_handle) {
+                alloc_token_handle(tok_id)
+            } else {
+                None
+            }
+        },
+        _ => None,
+    };
+
+    let _ = desired_access;
+
+    match new_handle {
+        Some(h) => {
+            unsafe { *(target_handle_ptr as *mut usize) = h; }
+            crate::serial_println!("[SYSCALL] NtDuplicateHandle -> {:#x}", h);
+            0
+        }
+        None => {
+            crate::serial_println!("[SYSCALL] NtDuplicateHandle failed");
+            -1
+        }
+    }
+}
+
+/// Object information class
+pub mod object_info_class {
+    pub const OBJECT_BASIC_INFORMATION: u32 = 0;
+    pub const OBJECT_NAME_INFORMATION: u32 = 1;
+    pub const OBJECT_TYPE_INFORMATION: u32 = 2;
+    pub const OBJECT_TYPES_INFORMATION: u32 = 3;
+    pub const OBJECT_HANDLE_FLAG_INFORMATION: u32 = 4;
+}
+
+/// OBJECT_BASIC_INFORMATION structure
+#[repr(C)]
+pub struct ObjectBasicInformation {
+    pub attributes: u32,
+    pub granted_access: u32,
+    pub handle_count: u32,
+    pub pointer_count: u32,
+    pub paged_pool_charge: u32,
+    pub non_paged_pool_charge: u32,
+    pub reserved: [u32; 3],
+    pub name_info_size: u32,
+    pub type_info_size: u32,
+    pub security_descriptor_size: u32,
+    pub creation_time: i64,
+}
+
+/// NtQueryObject - Query object information
+fn sys_query_object(
+    handle: usize,
+    object_information_class: usize,
+    object_information: usize,
+    object_information_length: usize,
+    return_length: usize,
+    _: usize,
+) -> isize {
+    if handle == 0 || object_information == 0 {
+        return -1;
+    }
+
+    crate::serial_println!("[SYSCALL] NtQueryObject(handle={:#x}, class={})",
+        handle, object_information_class);
+
+    let handle_type = get_handle_type(handle);
+
+    match object_information_class as u32 {
+        object_info_class::OBJECT_BASIC_INFORMATION => {
+            let required = core::mem::size_of::<ObjectBasicInformation>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if object_information_length < required {
+                return 0x80000005u32 as isize; // STATUS_BUFFER_OVERFLOW
+            }
+
+            unsafe {
+                let info = object_information as *mut ObjectBasicInformation;
+                (*info).attributes = 0;
+                (*info).granted_access = 0x1F0001; // GENERIC_ALL
+                (*info).handle_count = 1;
+                (*info).pointer_count = 1;
+                (*info).paged_pool_charge = 0;
+                (*info).non_paged_pool_charge = 0;
+                (*info).reserved = [0; 3];
+                (*info).name_info_size = 0;
+                (*info).type_info_size = 32;
+                (*info).security_descriptor_size = 0;
+                (*info).creation_time = 0;
+            }
+
+            0
+        }
+        object_info_class::OBJECT_TYPE_INFORMATION => {
+            // Return type name
+            let type_name = match handle_type {
+                HandleType::File => "File",
+                HandleType::Event => "Event",
+                HandleType::Semaphore => "Semaphore",
+                HandleType::Mutex => "Mutant",
+                HandleType::Section => "Section",
+                HandleType::Key => "Key",
+                HandleType::Port => "Port",
+                HandleType::Thread => "Thread",
+                HandleType::Process => "Process",
+                HandleType::Token => "Token",
+                _ => "Unknown",
+            };
+
+            let name_bytes = type_name.as_bytes();
+            let required = 68 + name_bytes.len(); // Header + name
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if object_information_length < required {
+                return 0x80000005u32 as isize;
+            }
+
+            // Write type info (simplified)
+            unsafe {
+                let ptr = object_information as *mut u8;
+                // Name length at offset 0
+                *(ptr as *mut u16) = name_bytes.len() as u16;
+                // Name at offset 68
+                core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), ptr.add(68), name_bytes.len());
+            }
+
+            0
+        }
+        _ => -1, // STATUS_INVALID_INFO_CLASS
+    }
+}
+
+// ============================================================================
+// Process Syscalls
+// ============================================================================
+
+/// Process access rights
+pub mod process_access {
+    pub const PROCESS_TERMINATE: u32 = 0x0001;
+    pub const PROCESS_CREATE_THREAD: u32 = 0x0002;
+    pub const PROCESS_SET_SESSIONID: u32 = 0x0004;
+    pub const PROCESS_VM_OPERATION: u32 = 0x0008;
+    pub const PROCESS_VM_READ: u32 = 0x0010;
+    pub const PROCESS_VM_WRITE: u32 = 0x0020;
+    pub const PROCESS_DUP_HANDLE: u32 = 0x0040;
+    pub const PROCESS_CREATE_PROCESS: u32 = 0x0080;
+    pub const PROCESS_SET_QUOTA: u32 = 0x0100;
+    pub const PROCESS_SET_INFORMATION: u32 = 0x0200;
+    pub const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+    pub const PROCESS_SUSPEND_RESUME: u32 = 0x0800;
+    pub const PROCESS_ALL_ACCESS: u32 = 0x1FFFFF;
+}
+
+/// NtOpenProcess - Open a process by ID
+fn sys_open_process(
+    process_handle_ptr: usize,
+    desired_access: usize,
+    _object_attributes: usize,
+    client_id_ptr: usize,
+    _: usize, _: usize,
+) -> isize {
+    if process_handle_ptr == 0 || client_id_ptr == 0 {
+        return -1;
+    }
+
+    // Read process ID from CLIENT_ID
+    let pid = unsafe { *(client_id_ptr as *const u32) };
+
+    crate::serial_println!("[SYSCALL] NtOpenProcess(pid={}, access={:#x})",
+        pid, desired_access);
+
+    // Verify process exists (check CID table)
+    let process_exists = unsafe {
+        !crate::ps::cid::ps_lookup_process_by_id(pid).is_null()
+    };
+
+    if !process_exists {
+        crate::serial_println!("[SYSCALL] NtOpenProcess: process {} not found", pid);
+        return -1; // STATUS_INVALID_CID
+    }
+
+    // Allocate handle
+    let handle = unsafe { alloc_process_handle(pid) };
+    match handle {
+        Some(h) => {
+            unsafe { *(process_handle_ptr as *mut usize) = h; }
+            crate::serial_println!("[SYSCALL] NtOpenProcess -> handle {:#x}", h);
+            0
+        }
+        None => -1,
+    }
+}
+
+/// Process information class
+pub mod process_info_class {
+    pub const PROCESS_BASIC_INFORMATION: u32 = 0;
+    pub const PROCESS_QUOTA_LIMITS: u32 = 1;
+    pub const PROCESS_IO_COUNTERS: u32 = 2;
+    pub const PROCESS_VM_COUNTERS: u32 = 3;
+    pub const PROCESS_TIMES: u32 = 4;
+    pub const PROCESS_PRIORITY_CLASS: u32 = 18;
+    pub const PROCESS_HANDLE_COUNT: u32 = 20;
+    pub const PROCESS_SESSION_INFORMATION: u32 = 24;
+    pub const PROCESS_IMAGE_FILE_NAME: u32 = 27;
+}
+
+/// PROCESS_BASIC_INFORMATION structure
+#[repr(C)]
+pub struct ProcessBasicInformation {
+    pub exit_status: i32,
+    pub peb_base_address: u64,
+    pub affinity_mask: u64,
+    pub base_priority: i32,
+    pub unique_process_id: u32,
+    pub inherited_from_unique_process_id: u32,
+}
+
+/// NtQueryInformationProcess - Query process information
+fn sys_query_information_process(
+    process_handle: usize,
+    process_information_class: usize,
+    process_information: usize,
+    process_information_length: usize,
+    return_length: usize,
+    _: usize,
+) -> isize {
+    if process_handle == 0 || process_information == 0 {
+        return -1;
+    }
+
+    // Special handle -1 means current process
+    let pid = if process_handle == usize::MAX {
+        4 // System process for now
+    } else {
+        match unsafe { get_process_id(process_handle) } {
+            Some(p) => p,
+            None => return -1,
+        }
+    };
+
+    crate::serial_println!("[SYSCALL] NtQueryInformationProcess(pid={}, class={})",
+        pid, process_information_class);
+
+    match process_information_class as u32 {
+        process_info_class::PROCESS_BASIC_INFORMATION => {
+            let required = core::mem::size_of::<ProcessBasicInformation>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return 0x80000005u32 as isize;
+            }
+
+            // Look up process
+            let process = unsafe { crate::ps::cid::ps_lookup_process_by_id(pid) };
+
+            unsafe {
+                let info = process_information as *mut ProcessBasicInformation;
+                (*info).exit_status = 0x103; // STATUS_PENDING (still running)
+                (*info).peb_base_address = 0;
+                (*info).affinity_mask = 1;
+                (*info).base_priority = 8;
+                (*info).unique_process_id = pid;
+                (*info).inherited_from_unique_process_id = if !process.is_null() {
+                    let p = process as *mut crate::ps::EProcess;
+                    (*p).inherited_from_unique_process_id
+                } else {
+                    0
+                };
+            }
+
+            0
+        }
+        process_info_class::PROCESS_HANDLE_COUNT => {
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = 4; }
+            }
+
+            if process_information_length < 4 {
+                return 0x80000005u32 as isize;
+            }
+
+            // Return a dummy handle count
+            unsafe {
+                *(process_information as *mut u32) = 10;
+            }
+
+            0
+        }
+        _ => {
+            crate::serial_println!("[SYSCALL] NtQueryInformationProcess: unsupported class {}",
+                process_information_class);
+            -1 // STATUS_INVALID_INFO_CLASS
+        }
+    }
+}
+
+/// NtSuspendProcess - Suspend all threads in a process
+fn sys_suspend_process(
+    process_handle: usize,
+    _: usize, _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    let pid = match unsafe { get_process_id(process_handle) } {
+        Some(p) => p,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtSuspendProcess(pid={})", pid);
+
+    // TODO: Actually suspend all threads in the process
+    // For now, just succeed
+
+    0
+}
+
+/// NtResumeProcess - Resume all threads in a process
+fn sys_resume_process(
+    process_handle: usize,
+    _: usize, _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    let pid = match unsafe { get_process_id(process_handle) } {
+        Some(p) => p,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtResumeProcess(pid={})", pid);
+
+    // TODO: Actually resume all threads in the process
+
+    0
+}
+
+// ============================================================================
+// Thread Syscalls (Extended)
+// ============================================================================
+
+/// Thread access rights
+pub mod thread_access {
+    pub const THREAD_TERMINATE: u32 = 0x0001;
+    pub const THREAD_SUSPEND_RESUME: u32 = 0x0002;
+    pub const THREAD_GET_CONTEXT: u32 = 0x0008;
+    pub const THREAD_SET_CONTEXT: u32 = 0x0010;
+    pub const THREAD_SET_INFORMATION: u32 = 0x0020;
+    pub const THREAD_QUERY_INFORMATION: u32 = 0x0040;
+    pub const THREAD_SET_THREAD_TOKEN: u32 = 0x0080;
+    pub const THREAD_IMPERSONATE: u32 = 0x0100;
+    pub const THREAD_DIRECT_IMPERSONATION: u32 = 0x0200;
+    pub const THREAD_ALL_ACCESS: u32 = 0x1FFFFF;
+}
+
+/// NtOpenThread - Open a thread by ID
+fn sys_open_thread(
+    thread_handle_ptr: usize,
+    desired_access: usize,
+    _object_attributes: usize,
+    client_id_ptr: usize,
+    _: usize, _: usize,
+) -> isize {
+    if thread_handle_ptr == 0 || client_id_ptr == 0 {
+        return -1;
+    }
+
+    // Read thread ID from CLIENT_ID (offset 4)
+    let tid = unsafe { *((client_id_ptr + 4) as *const u32) };
+
+    crate::serial_println!("[SYSCALL] NtOpenThread(tid={}, access={:#x})",
+        tid, desired_access);
+
+    // Verify thread exists
+    let thread_exists = unsafe {
+        !crate::ps::cid::ps_lookup_thread_by_id(tid).is_null()
+    };
+
+    if !thread_exists {
+        crate::serial_println!("[SYSCALL] NtOpenThread: thread {} not found", tid);
+        return -1;
+    }
+
+    // Allocate handle
+    let handle = unsafe { alloc_thread_handle(tid) };
+    match handle {
+        Some(h) => {
+            unsafe { *(thread_handle_ptr as *mut usize) = h; }
+            crate::serial_println!("[SYSCALL] NtOpenThread -> handle {:#x}", h);
+            0
+        }
+        None => -1,
+    }
+}
+
+/// Thread information class
+pub mod thread_info_class {
+    pub const THREAD_BASIC_INFORMATION: u32 = 0;
+    pub const THREAD_TIMES: u32 = 1;
+    pub const THREAD_PRIORITY: u32 = 2;
+    pub const THREAD_BASE_PRIORITY: u32 = 3;
+    pub const THREAD_AFFINITY_MASK: u32 = 4;
+    pub const THREAD_IMPERSONATION_TOKEN: u32 = 5;
+    pub const THREAD_QUERY_SET_WIN32_START_ADDRESS: u32 = 9;
+    pub const THREAD_IS_TERMINATED: u32 = 20;
+}
+
+/// THREAD_BASIC_INFORMATION structure
+#[repr(C)]
+pub struct ThreadBasicInformation {
+    pub exit_status: i32,
+    pub teb_base_address: u64,
+    pub client_id_process: u32,
+    pub client_id_thread: u32,
+    pub affinity_mask: u64,
+    pub priority: i32,
+    pub base_priority: i32,
+}
+
+/// NtQueryInformationThread - Query thread information
+fn sys_query_information_thread(
+    thread_handle: usize,
+    thread_information_class: usize,
+    thread_information: usize,
+    thread_information_length: usize,
+    return_length: usize,
+    _: usize,
+) -> isize {
+    if thread_handle == 0 || thread_information == 0 {
+        return -1;
+    }
+
+    // Special handle -2 means current thread
+    let tid = if thread_handle == usize::MAX - 1 {
+        unsafe {
+            let prcb = crate::ke::prcb::get_current_prcb();
+            if !prcb.current_thread.is_null() {
+                (*prcb.current_thread).thread_id
+            } else {
+                0
+            }
+        }
+    } else {
+        match unsafe { get_thread_id(thread_handle) } {
+            Some(t) => t,
+            None => return -1,
+        }
+    };
+
+    crate::serial_println!("[SYSCALL] NtQueryInformationThread(tid={}, class={})",
+        tid, thread_information_class);
+
+    match thread_information_class as u32 {
+        thread_info_class::THREAD_BASIC_INFORMATION => {
+            let required = core::mem::size_of::<ThreadBasicInformation>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return 0x80000005u32 as isize;
+            }
+
+            // Look up thread
+            let thread = unsafe { crate::ps::cid::ps_lookup_thread_by_id(tid) };
+
+            unsafe {
+                let info = thread_information as *mut ThreadBasicInformation;
+                (*info).exit_status = 0x103; // STATUS_PENDING
+                (*info).teb_base_address = 0;
+                if !thread.is_null() {
+                    let t = thread as *mut crate::ps::EThread;
+                    (*info).client_id_process = (*t).cid.unique_process;
+                    (*info).client_id_thread = (*t).cid.unique_thread;
+                    (*info).priority = (*(*t).get_tcb()).priority as i32;
+                    (*info).base_priority = (*(*t).get_tcb()).base_priority as i32;
+                } else {
+                    (*info).client_id_process = 0;
+                    (*info).client_id_thread = tid;
+                    (*info).priority = 8;
+                    (*info).base_priority = 8;
+                }
+                (*info).affinity_mask = 1;
+            }
+
+            0
+        }
+        thread_info_class::THREAD_IS_TERMINATED => {
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = 4; }
+            }
+
+            if thread_information_length < 4 {
+                return 0x80000005u32 as isize;
+            }
+
+            // Check if thread is terminated
+            unsafe {
+                *(thread_information as *mut u32) = 0; // Not terminated
+            }
+
+            0
+        }
+        _ => {
+            crate::serial_println!("[SYSCALL] NtQueryInformationThread: unsupported class {}",
+                thread_information_class);
+            -1
+        }
+    }
+}
+
+/// NtSuspendThread - Suspend a thread
+fn sys_suspend_thread(
+    thread_handle: usize,
+    previous_suspend_count: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    let tid = match unsafe { get_thread_id(thread_handle) } {
+        Some(t) => t,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtSuspendThread(tid={})", tid);
+
+    // TODO: Actually suspend the thread
+    // For now, just return previous count of 0
+
+    if previous_suspend_count != 0 {
+        unsafe { *(previous_suspend_count as *mut u32) = 0; }
+    }
+
+    0
+}
+
+/// NtResumeThread - Resume a thread
+fn sys_resume_thread(
+    thread_handle: usize,
+    previous_suspend_count: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    let tid = match unsafe { get_thread_id(thread_handle) } {
+        Some(t) => t,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtResumeThread(tid={})", tid);
+
+    // TODO: Actually resume the thread
+
+    if previous_suspend_count != 0 {
+        unsafe { *(previous_suspend_count as *mut u32) = 0; }
+    }
+
+    0
+}
+
+// ============================================================================
+// Token Syscalls
+// ============================================================================
+
+/// Token access rights
+pub mod token_access {
+    pub const TOKEN_ASSIGN_PRIMARY: u32 = 0x0001;
+    pub const TOKEN_DUPLICATE: u32 = 0x0002;
+    pub const TOKEN_IMPERSONATE: u32 = 0x0004;
+    pub const TOKEN_QUERY: u32 = 0x0008;
+    pub const TOKEN_QUERY_SOURCE: u32 = 0x0010;
+    pub const TOKEN_ADJUST_PRIVILEGES: u32 = 0x0020;
+    pub const TOKEN_ADJUST_GROUPS: u32 = 0x0040;
+    pub const TOKEN_ADJUST_DEFAULT: u32 = 0x0080;
+    pub const TOKEN_ADJUST_SESSIONID: u32 = 0x0100;
+    pub const TOKEN_ALL_ACCESS: u32 = 0xF01FF;
+}
+
+/// Simple token ID counter
+static mut NEXT_TOKEN_ID: u32 = 1;
+
+/// NtOpenProcessToken - Open a process's token
+fn sys_open_process_token(
+    process_handle: usize,
+    desired_access: usize,
+    token_handle_ptr: usize,
+    _: usize, _: usize, _: usize,
+) -> isize {
+    if token_handle_ptr == 0 {
+        return -1;
+    }
+
+    // Get process ID (or use current if -1)
+    let pid = if process_handle == usize::MAX {
+        4 // System process
+    } else {
+        match unsafe { get_process_id(process_handle) } {
+            Some(p) => p,
+            None => return -1,
+        }
+    };
+
+    crate::serial_println!("[SYSCALL] NtOpenProcessToken(pid={}, access={:#x})",
+        pid, desired_access);
+
+    // Create a token handle
+    // In a real implementation, we'd look up the process's token
+    let token_id = unsafe {
+        let id = NEXT_TOKEN_ID;
+        NEXT_TOKEN_ID += 1;
+        id
+    };
+
+    let handle = unsafe { alloc_token_handle(token_id) };
+    match handle {
+        Some(h) => {
+            unsafe { *(token_handle_ptr as *mut usize) = h; }
+            crate::serial_println!("[SYSCALL] NtOpenProcessToken -> handle {:#x}", h);
+            0
+        }
+        None => -1,
+    }
+}
+
+/// NtOpenThreadToken - Open a thread's impersonation token
+fn sys_open_thread_token(
+    thread_handle: usize,
+    desired_access: usize,
+    open_as_self: usize,
+    token_handle_ptr: usize,
+    _: usize, _: usize,
+) -> isize {
+    if token_handle_ptr == 0 {
+        return -1;
+    }
+
+    let _ = open_as_self;
+
+    let tid = if thread_handle == usize::MAX - 1 {
+        0 // Current thread
+    } else {
+        match unsafe { get_thread_id(thread_handle) } {
+            Some(t) => t,
+            None => return -1,
+        }
+    };
+
+    crate::serial_println!("[SYSCALL] NtOpenThreadToken(tid={}, access={:#x})",
+        tid, desired_access);
+
+    // Threads may not have an impersonation token
+    // Return STATUS_NO_TOKEN if not impersonating
+    0xC000007C_u32 as isize // STATUS_NO_TOKEN
+}
+
+/// Token information class
+pub mod token_info_class {
+    pub const TOKEN_USER: u32 = 1;
+    pub const TOKEN_GROUPS: u32 = 2;
+    pub const TOKEN_PRIVILEGES: u32 = 3;
+    pub const TOKEN_OWNER: u32 = 4;
+    pub const TOKEN_PRIMARY_GROUP: u32 = 5;
+    pub const TOKEN_DEFAULT_DACL: u32 = 6;
+    pub const TOKEN_SOURCE: u32 = 7;
+    pub const TOKEN_TYPE: u32 = 8;
+    pub const TOKEN_IMPERSONATION_LEVEL: u32 = 9;
+    pub const TOKEN_STATISTICS: u32 = 10;
+    pub const TOKEN_SESSION_ID: u32 = 12;
+    pub const TOKEN_ELEVATION: u32 = 20;
+    pub const TOKEN_ELEVATION_TYPE: u32 = 18;
+}
+
+/// TOKEN_STATISTICS structure
+#[repr(C)]
+pub struct TokenStatistics {
+    pub token_id: u64,
+    pub authentication_id: u64,
+    pub expiration_time: i64,
+    pub token_type: u32,
+    pub impersonation_level: u32,
+    pub dynamic_charged: u32,
+    pub dynamic_available: u32,
+    pub group_count: u32,
+    pub privilege_count: u32,
+    pub modified_id: u64,
+}
+
+/// NtQueryInformationToken - Query token information
+fn sys_query_information_token(
+    token_handle: usize,
+    token_information_class: usize,
+    token_information: usize,
+    token_information_length: usize,
+    return_length: usize,
+    _: usize,
+) -> isize {
+    if token_handle == 0 || token_information == 0 {
+        return -1;
+    }
+
+    let token_id = match unsafe { get_token_id(token_handle) } {
+        Some(t) => t,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtQueryInformationToken(token={}, class={})",
+        token_id, token_information_class);
+
+    match token_information_class as u32 {
+        token_info_class::TOKEN_STATISTICS => {
+            let required = core::mem::size_of::<TokenStatistics>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if token_information_length < required {
+                return 0x80000005u32 as isize;
+            }
+
+            unsafe {
+                let stats = token_information as *mut TokenStatistics;
+                (*stats).token_id = token_id as u64;
+                (*stats).authentication_id = 0x3E7; // SYSTEM_LUID
+                (*stats).expiration_time = i64::MAX;
+                (*stats).token_type = 1; // TokenPrimary
+                (*stats).impersonation_level = 0;
+                (*stats).dynamic_charged = 4096;
+                (*stats).dynamic_available = 4096;
+                (*stats).group_count = 1;
+                (*stats).privilege_count = 5;
+                (*stats).modified_id = token_id as u64;
+            }
+
+            0
+        }
+        token_info_class::TOKEN_TYPE => {
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = 4; }
+            }
+
+            if token_information_length < 4 {
+                return 0x80000005u32 as isize;
+            }
+
+            // Return TokenPrimary (1) or TokenImpersonation (2)
+            unsafe {
+                *(token_information as *mut u32) = 1; // TokenPrimary
+            }
+
+            0
+        }
+        token_info_class::TOKEN_ELEVATION => {
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = 4; }
+            }
+
+            if token_information_length < 4 {
+                return 0x80000005u32 as isize;
+            }
+
+            // Return elevated status (1 = elevated)
+            unsafe {
+                *(token_information as *mut u32) = 1;
+            }
+
+            0
+        }
+        token_info_class::TOKEN_SESSION_ID => {
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = 4; }
+            }
+
+            if token_information_length < 4 {
+                return 0x80000005u32 as isize;
+            }
+
+            unsafe {
+                *(token_information as *mut u32) = 0; // Session 0
+            }
+
+            0
+        }
+        _ => {
+            crate::serial_println!("[SYSCALL] NtQueryInformationToken: unsupported class {}",
+                token_information_class);
+            -1
+        }
+    }
+}
+
+/// NtDuplicateToken - Duplicate a token
+fn sys_duplicate_token(
+    existing_token_handle: usize,
+    desired_access: usize,
+    _object_attributes: usize,
+    _impersonation_level: usize,
+    _token_type: usize,
+    new_token_handle_ptr: usize,
+) -> isize {
+    if new_token_handle_ptr == 0 {
+        return -1;
+    }
+
+    let token_id = match unsafe { get_token_id(existing_token_handle) } {
+        Some(t) => t,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtDuplicateToken(token={}, access={:#x})",
+        token_id, desired_access);
+
+    // Create a new token ID
+    let new_token_id = unsafe {
+        let id = NEXT_TOKEN_ID;
+        NEXT_TOKEN_ID += 1;
+        id
+    };
+
+    let handle = unsafe { alloc_token_handle(new_token_id) };
+    match handle {
+        Some(h) => {
+            unsafe { *(new_token_handle_ptr as *mut usize) = h; }
+            crate::serial_println!("[SYSCALL] NtDuplicateToken -> handle {:#x}", h);
+            0
+        }
+        None => -1,
+    }
+}
+
+/// NtAdjustPrivilegesToken - Enable/disable token privileges
+fn sys_adjust_privileges_token(
+    token_handle: usize,
+    disable_all_privileges: usize,
+    new_state: usize,
+    buffer_length: usize,
+    previous_state: usize,
+    return_length: usize,
+) -> isize {
+    let token_id = match unsafe { get_token_id(token_handle) } {
+        Some(t) => t,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtAdjustPrivilegesToken(token={}, disable_all={})",
+        token_id, disable_all_privileges != 0);
+
+    let _ = new_state;
+    let _ = buffer_length;
+    let _ = previous_state;
+
+    // Return required length if asked
+    if return_length != 0 {
+        unsafe { *(return_length as *mut usize) = 0; }
+    }
+
+    // For now, always succeed (all privileges are granted)
+    0
 }
