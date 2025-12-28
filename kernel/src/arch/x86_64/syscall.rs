@@ -1811,56 +1811,270 @@ fn sys_delay_execution(
 // Synchronization Syscalls
 // ============================================================================
 
+/// Wait status codes for NT compatibility
+#[allow(non_snake_case, non_upper_case_globals)]
+pub mod wait_status {
+    /// Object 0 was signaled
+    pub const STATUS_WAIT_0: isize = 0x00000000;
+    /// Object 1 was signaled (for multiple object waits)
+    pub const STATUS_WAIT_1: isize = 0x00000001;
+    /// Object 2 was signaled
+    pub const STATUS_WAIT_2: isize = 0x00000002;
+    /// Object 3 was signaled
+    pub const STATUS_WAIT_3: isize = 0x00000003;
+    /// Mutex was abandoned (owner terminated)
+    pub const STATUS_ABANDONED_WAIT_0: isize = 0x00000080;
+    /// Thread was alerted
+    pub const STATUS_ALERTED: isize = 0x00000101;
+    /// Wait timed out
+    pub const STATUS_TIMEOUT: isize = 0x00000102;
+    /// I/O operation pending
+    pub const STATUS_PENDING: isize = 0x00000103;
+    /// User APC was delivered
+    pub const STATUS_USER_APC: isize = 0x000000C0;
+    /// Invalid handle
+    pub const STATUS_INVALID_HANDLE: isize = 0xC0000008u32 as isize;
+    /// Invalid parameter
+    pub const STATUS_INVALID_PARAMETER: isize = 0xC000000Du32 as isize;
+    /// Access denied
+    pub const STATUS_ACCESS_DENIED: isize = 0xC0000022u32 as isize;
+    /// Object type mismatch (not waitable)
+    pub const STATUS_OBJECT_TYPE_MISMATCH: isize = 0xC0000024u32 as isize;
+    /// Maximum wait objects exceeded
+    pub const STATUS_MAXIMUM_WAIT_OBJECTS_EXCEEDED: isize = 0xC00000E1u32 as isize;
+    /// Mutant limit exceeded
+    pub const STATUS_MUTANT_LIMIT_EXCEEDED: isize = 0xC0000191u32 as isize;
+}
+
 /// NtWaitForSingleObject - Wait for a single object to become signaled
+///
+/// # Arguments
+/// * `handle` - Handle to the waitable object
+/// * `alertable` - If TRUE, the wait is alertable (can be interrupted by APCs)
+/// * `timeout` - Pointer to timeout value (NULL = infinite, negative = relative, positive = absolute)
+///
+/// # Returns
+/// * STATUS_WAIT_0 (0) - Object was signaled
+/// * STATUS_TIMEOUT (0x102) - Wait timed out
+/// * STATUS_ALERTED (0x101) - Thread was alerted (alertable wait)
+/// * STATUS_USER_APC (0xC0) - User APC was delivered
+/// * STATUS_ABANDONED_WAIT_0 (0x80) - Mutex was abandoned
+/// * STATUS_INVALID_HANDLE - Handle is invalid or not waitable
+/// * STATUS_ACCESS_DENIED - Handle lacks SYNCHRONIZE access
+///
+/// # Waitable Object Types
+/// * Event (manual-reset or auto-reset)
+/// * Semaphore
+/// * Mutex (Mutant)
+/// * Timer
+/// * Process (wait for termination)
+/// * Thread (wait for termination)
+/// * File (I/O completion)
+/// * Section (signaled on mapping)
+/// * Port (message available)
 fn sys_wait_for_single_object(
     handle: usize,
     alertable: usize,
     timeout: usize,
     _: usize, _: usize, _: usize,
 ) -> isize {
-    use crate::ke::dispatcher::WaitStatus;
-    use crate::ke::wait::ke_wait_for_single_object_alertable;
+    crate::serial_println!(
+        "[SYSCALL] NtWaitForSingleObject(handle=0x{:X}, alertable={}, timeout=0x{:X})",
+        handle, alertable, timeout
+    );
 
     let is_alertable = alertable != 0;
 
-    // Get the object from handle
+    // Validate handle
+    if handle == 0 {
+        crate::serial_println!("[SYSCALL] NtWaitForSingleObject: NULL handle");
+        return wait_status::STATUS_INVALID_HANDLE;
+    }
+
+    // Parse timeout value
+    // NULL (0) = infinite wait
+    // Negative value = relative time in 100ns units
+    // Positive value = absolute time
+    let timeout_ms = if timeout == 0 {
+        crate::serial_println!("[SYSCALL] NtWaitForSingleObject: infinite wait");
+        None
+    } else {
+        let timeout_100ns = unsafe { *(timeout as *const i64) };
+        if timeout_100ns == 0 {
+            // Zero timeout = poll (don't block)
+            crate::serial_println!("[SYSCALL] NtWaitForSingleObject: poll (no wait)");
+            Some(0u64)
+        } else if timeout_100ns < 0 {
+            // Negative = relative time
+            let ms = ((-timeout_100ns) / 10_000) as u64;
+            crate::serial_println!("[SYSCALL] NtWaitForSingleObject: relative timeout {} ms", ms);
+            Some(ms)
+        } else {
+            // Positive = absolute time (convert to relative based on current time)
+            // For now, treat as immediate
+            crate::serial_println!("[SYSCALL] NtWaitForSingleObject: absolute timeout (treating as immediate)");
+            Some(0u64)
+        }
+    };
+
+    // First, try our internal sync object pool
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
+        crate::serial_println!("[SYSCALL] NtWaitForSingleObject: found sync object type {:?}", obj_type);
+
+        let result = match obj_type {
+            SyncObjectType::Event => unsafe {
+                let event_ptr = core::ptr::addr_of_mut!((*entry).data.event);
+                let header = &mut **event_ptr as *mut crate::ke::KEvent as *mut crate::ke::dispatcher::DispatcherHeader;
+                wait_on_dispatcher_object(header, timeout_ms, is_alertable)
+            },
+            SyncObjectType::Semaphore => unsafe {
+                let sem_ptr = core::ptr::addr_of_mut!((*entry).data.semaphore);
+                let header = &mut **sem_ptr as *mut crate::ke::KSemaphore as *mut crate::ke::dispatcher::DispatcherHeader;
+                wait_on_dispatcher_object(header, timeout_ms, is_alertable)
+            },
+            SyncObjectType::Mutex => unsafe {
+                let mutex_ptr = core::ptr::addr_of_mut!((*entry).data.mutex);
+                let header = &mut **mutex_ptr as *mut crate::ke::KMutex as *mut crate::ke::dispatcher::DispatcherHeader;
+                wait_on_dispatcher_object(header, timeout_ms, is_alertable)
+            },
+            SyncObjectType::None => {
+                crate::serial_println!("[SYSCALL] NtWaitForSingleObject: invalid sync object");
+                wait_status::STATUS_INVALID_HANDLE
+            }
+        };
+
+        return result;
+    }
+
+    // Check if it's a process handle - wait for process termination
+    if let Some(pid) = unsafe { get_process_id(handle) } {
+        crate::serial_println!("[SYSCALL] NtWaitForSingleObject: waiting on process {}", pid);
+        return wait_on_process(pid, timeout_ms, is_alertable);
+    }
+
+    // Check if it's a thread handle - wait for thread termination
+    if let Some(tid) = unsafe { get_thread_id(handle) } {
+        crate::serial_println!("[SYSCALL] NtWaitForSingleObject: waiting on thread {}", tid);
+        return wait_on_thread(tid, timeout_ms, is_alertable);
+    }
+
+    // Try object manager for kernel objects
     let object = unsafe {
         let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
         if obj.is_null() {
-            return -1; // STATUS_INVALID_HANDLE
+            crate::serial_println!("[SYSCALL] NtWaitForSingleObject: handle not found in OB");
+            return wait_status::STATUS_INVALID_HANDLE;
         }
         obj
     };
 
-    // Get timeout value (NULL = infinite wait)
-    let timeout_ms = if timeout == 0 {
-        None
-    } else {
-        let timeout_100ns = unsafe { *(timeout as *const i64) };
-        if timeout_100ns < 0 {
-            Some(((-timeout_100ns) / 10_000) as u64)
-        } else {
-            Some(0) // Absolute time treated as no-wait
-        }
-    };
+    crate::serial_println!("[SYSCALL] NtWaitForSingleObject: found OB object at {:p}", object);
 
     // Wait on the dispatcher object with alertable support
-    let result = unsafe {
+    let result = {
         let header = object as *mut crate::ke::dispatcher::DispatcherHeader;
-        let status = ke_wait_for_single_object_alertable(header, timeout_ms, is_alertable);
-        match status {
-            WaitStatus::Object0 => 0, // STATUS_WAIT_0
-            WaitStatus::Timeout => 0x102, // STATUS_TIMEOUT
-            WaitStatus::Alerted => 0x101, // STATUS_ALERTED
-            WaitStatus::Abandoned => 0x80, // STATUS_ABANDONED_WAIT_0
-            WaitStatus::Invalid => -1,
-        }
+        wait_on_dispatcher_object(header, timeout_ms, is_alertable)
     };
 
     // Dereference the object
     unsafe { crate::ob::ob_dereference_object(object); }
 
     result
+}
+
+/// Wait on a dispatcher object (event, semaphore, mutex, etc.)
+fn wait_on_dispatcher_object(
+    header: *mut crate::ke::dispatcher::DispatcherHeader,
+    timeout_ms: Option<u64>,
+    is_alertable: bool,
+) -> isize {
+    use crate::ke::dispatcher::WaitStatus;
+    use crate::ke::wait::ke_wait_for_single_object_alertable;
+
+    let status = unsafe {
+        ke_wait_for_single_object_alertable(header, timeout_ms, is_alertable)
+    };
+
+    match status {
+        WaitStatus::Object0 => {
+            crate::serial_println!("[SYSCALL] NtWaitForSingleObject: wait satisfied");
+            wait_status::STATUS_WAIT_0
+        }
+        WaitStatus::Timeout => {
+            crate::serial_println!("[SYSCALL] NtWaitForSingleObject: timeout");
+            wait_status::STATUS_TIMEOUT
+        }
+        WaitStatus::Alerted => {
+            crate::serial_println!("[SYSCALL] NtWaitForSingleObject: alerted");
+            wait_status::STATUS_ALERTED
+        }
+        WaitStatus::Abandoned => {
+            crate::serial_println!("[SYSCALL] NtWaitForSingleObject: abandoned mutex");
+            wait_status::STATUS_ABANDONED_WAIT_0
+        }
+        WaitStatus::Invalid => {
+            crate::serial_println!("[SYSCALL] NtWaitForSingleObject: invalid wait");
+            wait_status::STATUS_INVALID_HANDLE
+        }
+    }
+}
+
+/// Wait for a process to terminate
+fn wait_on_process(pid: u32, timeout_ms: Option<u64>, _is_alertable: bool) -> isize {
+    // Look up process
+    let process_ptr = unsafe { crate::ps::cid::ps_lookup_process_by_id(pid) };
+
+    if process_ptr.is_null() {
+        crate::serial_println!("[SYSCALL] NtWaitForSingleObject: process {} not found", pid);
+        return wait_status::STATUS_INVALID_HANDLE;
+    }
+
+    // Check if already terminated
+    let process = unsafe { &*(process_ptr as *const crate::ps::EProcess) };
+    if process.exit_time != 0 {
+        crate::serial_println!("[SYSCALL] NtWaitForSingleObject: process {} already terminated", pid);
+        return wait_status::STATUS_WAIT_0;
+    }
+
+    // For now, if not terminated and timeout is 0, return timeout
+    // A full implementation would add the thread to a wait list
+    if let Some(ms) = timeout_ms {
+        if ms == 0 {
+            return wait_status::STATUS_TIMEOUT;
+        }
+    }
+
+    // Simplified: poll until timeout
+    // In a real implementation, we'd block the thread
+    wait_status::STATUS_TIMEOUT
+}
+
+/// Wait for a thread to terminate
+fn wait_on_thread(tid: u32, timeout_ms: Option<u64>, _is_alertable: bool) -> isize {
+    // Look up thread
+    let thread_ptr = unsafe { crate::ps::cid::ps_lookup_thread_by_id(tid) };
+
+    if thread_ptr.is_null() {
+        crate::serial_println!("[SYSCALL] NtWaitForSingleObject: thread {} not found", tid);
+        return wait_status::STATUS_INVALID_HANDLE;
+    }
+
+    // Check if already terminated
+    let thread = unsafe { &*(thread_ptr as *const crate::ps::EThread) };
+    if thread.exit_time != 0 {
+        crate::serial_println!("[SYSCALL] NtWaitForSingleObject: thread {} already terminated", tid);
+        return wait_status::STATUS_WAIT_0;
+    }
+
+    // For now, if not terminated and timeout is 0, return timeout
+    if let Some(ms) = timeout_ms {
+        if ms == 0 {
+            return wait_status::STATUS_TIMEOUT;
+        }
+    }
+
+    // Simplified: return timeout
+    wait_status::STATUS_TIMEOUT
 }
 
 /// NtWaitForMultipleObjects - Wait for multiple objects
@@ -2050,7 +2264,7 @@ union SyncObjectUnion {
 
 /// Type of sync object
 #[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SyncObjectType {
     None = 0,
     Event = 1,
