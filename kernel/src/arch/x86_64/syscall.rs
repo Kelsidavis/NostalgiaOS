@@ -101,6 +101,13 @@ pub enum SyscallNumber {
     NtReadVirtualMemory = 51,
     NtDebugPrint = 52,
 
+    // Timer operations
+    NtCreateTimer = 53,
+    NtOpenTimer = 54,
+    NtSetTimer = 55,
+    NtCancelTimer = 56,
+    NtQueryTimer = 57,
+
     // Registry operations
     NtCreateKey = 60,
     NtOpenKey = 61,
@@ -320,6 +327,12 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtReleaseMutant as usize, sys_release_mutant);
     register_syscall(SyscallNumber::NtCreateMutant as usize, sys_create_mutant);
     register_syscall(SyscallNumber::NtSignalAndWaitForSingleObject as usize, sys_signal_and_wait_for_single_object);
+
+    // Timer syscalls
+    register_syscall(SyscallNumber::NtCreateTimer as usize, sys_create_timer);
+    register_syscall(SyscallNumber::NtSetTimer as usize, sys_set_timer);
+    register_syscall(SyscallNumber::NtCancelTimer as usize, sys_cancel_timer);
+    register_syscall(SyscallNumber::NtQueryTimer as usize, sys_query_timer);
 
     // Memory management syscalls
     register_syscall(SyscallNumber::NtAllocateVirtualMemory as usize, sys_allocate_virtual_memory);
@@ -1848,6 +1861,10 @@ pub mod wait_status {
     pub const STATUS_MUTANT_LIMIT_EXCEEDED: isize = 0xC0000191u32 as isize;
     /// Mutant not owned (trying to release a mutex not owned by caller)
     pub const STATUS_MUTANT_NOT_OWNED: isize = 0xC0000046u32 as isize;
+    /// Insufficient resources
+    pub const STATUS_INSUFFICIENT_RESOURCES: isize = 0xC000009Au32 as isize;
+    /// Buffer too small for requested information
+    pub const STATUS_INFO_LENGTH_MISMATCH: isize = 0xC0000004u32 as isize;
 }
 
 /// NtWaitForSingleObject - Wait for a single object to become signaled
@@ -1939,6 +1956,11 @@ fn sys_wait_for_single_object(
             SyncObjectType::Mutex => unsafe {
                 let mutex_ptr = core::ptr::addr_of_mut!((*entry).data.mutex);
                 let header = &mut **mutex_ptr as *mut crate::ke::KMutex as *mut crate::ke::dispatcher::DispatcherHeader;
+                wait_on_dispatcher_object(header, timeout_ms, is_alertable)
+            },
+            SyncObjectType::Timer => unsafe {
+                let timer_ptr = core::ptr::addr_of_mut!((*entry).data.timer);
+                let header = &mut **timer_ptr as *mut crate::ke::KTimer as *mut crate::ke::dispatcher::DispatcherHeader;
                 wait_on_dispatcher_object(header, timeout_ms, is_alertable)
             },
             SyncObjectType::None => {
@@ -2196,6 +2218,10 @@ fn sys_wait_for_multiple_objects(
                     let mutex_ptr = core::ptr::addr_of_mut!((*entry).data.mutex);
                     &mut **mutex_ptr as *mut crate::ke::KMutex as *mut DispatcherHeader
                 },
+                SyncObjectType::Timer => unsafe {
+                    let timer_ptr = core::ptr::addr_of_mut!((*entry).data.timer);
+                    &mut **timer_ptr as *mut crate::ke::KTimer as *mut DispatcherHeader
+                },
                 SyncObjectType::None => {
                     crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: invalid sync object at index {}", i);
                     cleanup_wait_objects(&mut objects, &from_ob, valid_count);
@@ -2408,6 +2434,11 @@ fn sys_signal_and_wait_for_single_object(
                 let header = &mut **mutex_ptr as *mut crate::ke::KMutex as *mut DispatcherHeader;
                 wait_on_dispatcher_object(header, timeout_ms, is_alertable)
             },
+            SyncObjectType::Timer => unsafe {
+                let timer_ptr = core::ptr::addr_of_mut!((*entry).data.timer);
+                let header = &mut **timer_ptr as *mut crate::ke::KTimer as *mut DispatcherHeader;
+                wait_on_dispatcher_object(header, timeout_ms, is_alertable)
+            },
             SyncObjectType::None => {
                 crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: invalid wait sync object");
                 wait_status::STATUS_INVALID_HANDLE
@@ -2492,6 +2523,11 @@ fn signal_object_internal(handle: usize) -> isize {
                 }
                 crate::serial_println!("[SYSCALL] signal_object_internal: released mutex");
                 return 0;
+            }
+            SyncObjectType::Timer => {
+                // Timers cannot be directly signaled - use NtSetTimer to arm them
+                crate::serial_println!("[SYSCALL] signal_object_internal: timer cannot be signaled directly");
+                return wait_status::STATUS_OBJECT_TYPE_MISMATCH;
             }
             SyncObjectType::None => {
                 return wait_status::STATUS_INVALID_HANDLE;
@@ -2662,6 +2698,7 @@ union SyncObjectUnion {
     event: core::mem::ManuallyDrop<crate::ke::KEvent>,
     semaphore: core::mem::ManuallyDrop<crate::ke::KSemaphore>,
     mutex: core::mem::ManuallyDrop<crate::ke::KMutex>,
+    timer: core::mem::ManuallyDrop<crate::ke::KTimer>,
 }
 
 /// Type of sync object
@@ -2672,6 +2709,7 @@ enum SyncObjectType {
     Event = 1,
     Semaphore = 2,
     Mutex = 3,
+    Timer = 4,
 }
 
 /// Sync object pool entry wrapper
@@ -2968,6 +3006,389 @@ fn sys_create_mutant(
     crate::serial_println!("[SYSCALL] NtCreateMutant(initial_owner={}) -> handle {:#x}",
         initial_owner, handle);
 
+    0
+}
+
+// ============================================================================
+// Timer Syscalls
+// ============================================================================
+
+/// Timer type for NtCreateTimer
+#[allow(non_upper_case_globals)]
+pub mod timer_type {
+    /// Notification timer - stays signaled until explicitly reset
+    pub const NotificationTimer: u32 = 0;
+    /// Synchronization timer - auto-resets after satisfying one wait
+    pub const SynchronizationTimer: u32 = 1;
+}
+
+/// Timer information class for NtQueryTimer
+#[allow(non_upper_case_globals)]
+pub mod timer_info_class {
+    /// Basic timer information
+    pub const TimerBasicInformation: u32 = 0;
+}
+
+/// Timer basic information structure
+#[repr(C)]
+pub struct TimerBasicInformation {
+    /// Time remaining until timer expires (negative = relative, positive = absolute)
+    pub remaining_time: i64,
+    /// Whether the timer is currently signaled
+    pub timer_state: u32,
+}
+
+/// NtCreateTimer - Create a timer object
+///
+/// Creates a waitable timer that can be set to expire at a specified time.
+///
+/// # Arguments
+/// * `timer_handle` - Pointer to receive the timer handle
+/// * `desired_access` - Access rights (TIMER_ALL_ACCESS, etc.)
+/// * `object_attributes` - Optional object attributes (name, security)
+/// * `timer_type` - NotificationTimer (0) or SynchronizationTimer (1)
+///
+/// # Returns
+/// * STATUS_SUCCESS - Timer created successfully
+/// * STATUS_INVALID_PARAMETER - Invalid parameter
+/// * STATUS_INSUFFICIENT_RESOURCES - No memory available
+fn sys_create_timer(
+    timer_handle: usize,
+    _desired_access: usize,
+    _object_attributes: usize,
+    timer_type_arg: usize,
+    _: usize,
+    _: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtCreateTimer(handle_ptr=0x{:X}, timer_type={})",
+        timer_handle, timer_type_arg
+    );
+
+    if timer_handle == 0 {
+        crate::serial_println!("[SYSCALL] NtCreateTimer: NULL handle pointer");
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Validate timer type
+    if timer_type_arg > 1 {
+        crate::serial_println!("[SYSCALL] NtCreateTimer: invalid timer type {}", timer_type_arg);
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Allocate timer from pool
+    let handle = match unsafe { alloc_sync_object(SyncObjectType::Timer) } {
+        Some(h) => h,
+        None => {
+            crate::serial_println!("[SYSCALL] NtCreateTimer: pool exhausted");
+            return wait_status::STATUS_INSUFFICIENT_RESOURCES;
+        }
+    };
+
+    // Initialize the timer
+    unsafe {
+        let (entry, _) = get_sync_object(handle).unwrap();
+        let timer = &mut *core::ptr::addr_of_mut!((*entry).data.timer);
+
+        // Create and initialize the timer
+        *timer = core::mem::ManuallyDrop::new(crate::ke::KTimer::new());
+
+        // Initialize with the appropriate timer type
+        let ke_timer_type = if timer_type_arg == timer_type::NotificationTimer as usize {
+            crate::ke::TimerType::Notification
+        } else {
+            crate::ke::TimerType::Synchronization
+        };
+        timer.init_ex(ke_timer_type);
+
+        // Return handle to caller
+        *(timer_handle as *mut usize) = handle;
+    }
+
+    crate::serial_println!("[SYSCALL] NtCreateTimer: created timer handle 0x{:X}", handle);
+
+    0 // STATUS_SUCCESS
+}
+
+/// NtSetTimer - Set a timer to expire at a specified time
+///
+/// # Arguments
+/// * `timer_handle` - Handle to the timer object
+/// * `due_time` - Pointer to expiration time (negative = relative, positive = absolute)
+/// * `apc_routine` - Optional APC routine to call when timer expires
+/// * `apc_context` - Context for APC routine
+/// * `resume` - If TRUE, resume system from sleep when timer expires
+/// * `period` - Period in milliseconds for periodic timer (0 = one-shot)
+///
+/// # Returns
+/// * STATUS_SUCCESS - Timer set successfully
+/// * STATUS_INVALID_HANDLE - Invalid timer handle
+fn sys_set_timer(
+    timer_handle: usize,
+    due_time: usize,
+    _apc_routine: usize,
+    _apc_context: usize,
+    _resume: usize,
+    period: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtSetTimer(handle=0x{:X}, due_time_ptr=0x{:X}, period={})",
+        timer_handle, due_time, period
+    );
+
+    if timer_handle == 0 {
+        crate::serial_println!("[SYSCALL] NtSetTimer: NULL handle");
+        return wait_status::STATUS_INVALID_HANDLE;
+    }
+
+    if due_time == 0 {
+        crate::serial_println!("[SYSCALL] NtSetTimer: NULL due_time pointer");
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Get the due time value
+    let due_time_100ns = unsafe { *(due_time as *const i64) };
+
+    // Convert to milliseconds
+    // Negative = relative time, positive = absolute time
+    let timeout_ms = if due_time_100ns < 0 {
+        // Relative time in 100ns units, convert to ms
+        ((-due_time_100ns) / 10_000) as u32
+    } else if due_time_100ns == 0 {
+        // Immediate expiration
+        0u32
+    } else {
+        // Absolute time - for now, treat as relative from current time
+        // TODO: Proper absolute time support
+        (due_time_100ns / 10_000) as u32
+    };
+
+    // Get timer from pool
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(timer_handle) } {
+        if obj_type != SyncObjectType::Timer {
+            crate::serial_println!("[SYSCALL] NtSetTimer: handle is not a timer");
+            return wait_status::STATUS_OBJECT_TYPE_MISMATCH;
+        }
+
+        unsafe {
+            let timer = &mut *core::ptr::addr_of_mut!((*entry).data.timer);
+            // Set the timer (period is in milliseconds)
+            timer.set(timeout_ms, period as u32, None);
+        }
+
+        crate::serial_println!("[SYSCALL] NtSetTimer: timer set for {} ms, period {} ms",
+            timeout_ms, period);
+
+        return 0; // STATUS_SUCCESS
+    }
+
+    // Try object manager
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(timer_handle as u32, 0);
+        if obj.is_null() {
+            crate::serial_println!("[SYSCALL] NtSetTimer: handle not found");
+            return wait_status::STATUS_INVALID_HANDLE;
+        }
+        obj
+    };
+
+    // Set the timer
+    unsafe {
+        let timer = object as *mut crate::ke::KTimer;
+        (*timer).set(timeout_ms, period as u32, None);
+        crate::ob::ob_dereference_object(object);
+    }
+
+    crate::serial_println!("[SYSCALL] NtSetTimer: OB timer set for {} ms, period {} ms",
+        timeout_ms, period);
+
+    0 // STATUS_SUCCESS
+}
+
+/// NtCancelTimer - Cancel a pending timer
+///
+/// # Arguments
+/// * `timer_handle` - Handle to the timer object
+/// * `current_state` - Optional pointer to receive previous state
+///
+/// # Returns
+/// * STATUS_SUCCESS - Timer cancelled successfully
+/// * STATUS_INVALID_HANDLE - Invalid timer handle
+fn sys_cancel_timer(
+    timer_handle: usize,
+    current_state: usize,
+    _: usize,
+    _: usize,
+    _: usize,
+    _: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtCancelTimer(handle=0x{:X}, state_ptr=0x{:X})",
+        timer_handle, current_state
+    );
+
+    if timer_handle == 0 {
+        crate::serial_println!("[SYSCALL] NtCancelTimer: NULL handle");
+        return wait_status::STATUS_INVALID_HANDLE;
+    }
+
+    // Get timer from pool
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(timer_handle) } {
+        if obj_type != SyncObjectType::Timer {
+            crate::serial_println!("[SYSCALL] NtCancelTimer: handle is not a timer");
+            return wait_status::STATUS_OBJECT_TYPE_MISMATCH;
+        }
+
+        let was_set = unsafe {
+            let timer = &mut *core::ptr::addr_of_mut!((*entry).data.timer);
+            let was_active = timer.is_set();
+            timer.cancel();
+            was_active
+        };
+
+        if current_state != 0 {
+            unsafe { *(current_state as *mut u32) = was_set as u32; }
+        }
+
+        crate::serial_println!("[SYSCALL] NtCancelTimer: timer cancelled (was_set={})", was_set);
+        return 0;
+    }
+
+    // Try object manager
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(timer_handle as u32, 0);
+        if obj.is_null() {
+            crate::serial_println!("[SYSCALL] NtCancelTimer: handle not found");
+            return wait_status::STATUS_INVALID_HANDLE;
+        }
+        obj
+    };
+
+    let was_set = unsafe {
+        let timer = object as *mut crate::ke::KTimer;
+        let was_active = (*timer).is_set();
+        (*timer).cancel();
+        crate::ob::ob_dereference_object(object);
+        was_active
+    };
+
+    if current_state != 0 {
+        unsafe { *(current_state as *mut u32) = was_set as u32; }
+    }
+
+    crate::serial_println!("[SYSCALL] NtCancelTimer: OB timer cancelled (was_set={})", was_set);
+    0
+}
+
+/// NtQueryTimer - Query timer information
+///
+/// # Arguments
+/// * `timer_handle` - Handle to the timer object
+/// * `timer_information_class` - Type of information to query
+/// * `timer_information` - Buffer to receive information
+/// * `timer_information_length` - Size of buffer
+/// * `return_length` - Optional pointer to receive required size
+///
+/// # Returns
+/// * STATUS_SUCCESS - Query successful
+/// * STATUS_INVALID_HANDLE - Invalid timer handle
+/// * STATUS_INFO_LENGTH_MISMATCH - Buffer too small
+fn sys_query_timer(
+    timer_handle: usize,
+    timer_info_class: usize,
+    timer_information: usize,
+    timer_info_length: usize,
+    return_length: usize,
+    _: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtQueryTimer(handle=0x{:X}, class={}, buf=0x{:X}, len={})",
+        timer_handle, timer_info_class, timer_information, timer_info_length
+    );
+
+    if timer_handle == 0 {
+        crate::serial_println!("[SYSCALL] NtQueryTimer: NULL handle");
+        return wait_status::STATUS_INVALID_HANDLE;
+    }
+
+    // Only TimerBasicInformation supported
+    if timer_info_class != timer_info_class::TimerBasicInformation as usize {
+        crate::serial_println!("[SYSCALL] NtQueryTimer: unsupported info class {}", timer_info_class);
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    let required_size = core::mem::size_of::<TimerBasicInformation>();
+
+    if return_length != 0 {
+        unsafe { *(return_length as *mut u32) = required_size as u32; }
+    }
+
+    if timer_info_length < required_size {
+        crate::serial_println!("[SYSCALL] NtQueryTimer: buffer too small");
+        return wait_status::STATUS_INFO_LENGTH_MISMATCH;
+    }
+
+    if timer_information == 0 {
+        crate::serial_println!("[SYSCALL] NtQueryTimer: NULL buffer");
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Get timer from pool
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(timer_handle) } {
+        if obj_type != SyncObjectType::Timer {
+            crate::serial_println!("[SYSCALL] NtQueryTimer: handle is not a timer");
+            return wait_status::STATUS_OBJECT_TYPE_MISMATCH;
+        }
+
+        unsafe {
+            let timer = &*core::ptr::addr_of!((*entry).data.timer);
+            let info = timer_information as *mut TimerBasicInformation;
+
+            // Calculate remaining time
+            let current_time = crate::hal::apic::get_tick_count();
+            let due_time = timer.due_time();
+            let remaining_ticks = if due_time > current_time {
+                due_time - current_time
+            } else {
+                0
+            };
+            // Convert ticks to 100ns units (assuming 1ms per tick)
+            (*info).remaining_time = -((remaining_ticks * 10_000) as i64);
+            (*info).timer_state = timer.is_signaled() as u32;
+        }
+
+        crate::serial_println!("[SYSCALL] NtQueryTimer: query successful");
+        return 0;
+    }
+
+    // Try object manager
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(timer_handle as u32, 0);
+        if obj.is_null() {
+            crate::serial_println!("[SYSCALL] NtQueryTimer: handle not found");
+            return wait_status::STATUS_INVALID_HANDLE;
+        }
+        obj
+    };
+
+    unsafe {
+        let timer = &*(object as *const crate::ke::KTimer);
+        let info = timer_information as *mut TimerBasicInformation;
+
+        let current_time = crate::hal::apic::get_tick_count();
+        let due_time = timer.due_time();
+        let remaining_ticks = if due_time > current_time {
+            due_time - current_time
+        } else {
+            0
+        };
+        (*info).remaining_time = -((remaining_ticks * 10_000) as i64);
+        (*info).timer_state = timer.is_signaled() as u32;
+
+        crate::ob::ob_dereference_object(object);
+    }
+
+    crate::serial_println!("[SYSCALL] NtQueryTimer: OB query successful");
     0
 }
 
