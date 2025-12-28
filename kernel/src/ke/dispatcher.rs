@@ -32,6 +32,8 @@ pub enum DispatcherType {
     Process = 5,
     /// Queue object
     Queue = 6,
+    /// I/O Completion Port
+    IoCompletion = 7,
 }
 
 /// Dispatcher object header

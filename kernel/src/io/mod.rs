@@ -32,6 +32,7 @@ pub mod file;
 pub mod complete;
 pub mod block;
 pub mod disk;
+pub mod iocp;
 
 // Re-export main structures and types
 pub use irp::{
@@ -121,6 +122,21 @@ pub use disk::{
     list_volumes,
 };
 
+pub use iocp::{
+    IoCompletionPort,
+    IoCompletionPacket,
+    IoCompletionInfo,
+    io_create_completion_port,
+    io_close_completion_port,
+    io_set_completion,
+    io_remove_completion,
+    io_query_completion,
+    io_associate_file_completion_port,
+    io_post_irp_completion,
+    MAX_COMPLETION_PORTS,
+    MAX_QUEUED_COMPLETIONS,
+};
+
 /// Initialize the I/O Manager
 ///
 /// This initializes all I/O subsystems in the correct order:
@@ -148,6 +164,9 @@ pub fn init() {
 
     // Initialize block device subsystem
     block::init();
+
+    // Initialize I/O completion port subsystem
+    iocp::init();
 
     crate::serial_println!("[IO] I/O Manager initialized");
 }

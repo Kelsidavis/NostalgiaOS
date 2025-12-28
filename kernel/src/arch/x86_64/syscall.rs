@@ -79,6 +79,20 @@ pub enum SyscallNumber {
     NtReleaseMutant = 37,
     NtCreateMutant = 38,
 
+    // Section objects (shared memory/file mapping)
+    NtCreateSection = 40,
+    NtOpenSection = 41,
+    NtMapViewOfSection = 42,
+    NtUnmapViewOfSection = 43,
+    NtExtendSection = 44,
+    NtQuerySection = 45,
+
+    // I/O Completion Ports
+    NtCreateIoCompletion = 46,
+    NtSetIoCompletion = 47,
+    NtRemoveIoCompletion = 48,
+    NtQueryIoCompletion = 49,
+
     // Debug/Console
     NtWriteVirtualMemory = 50,
     NtReadVirtualMemory = 51,
@@ -204,6 +218,17 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtFreeVirtualMemory as usize, sys_free_virtual_memory);
     register_syscall(SyscallNumber::NtProtectVirtualMemory as usize, sys_protect_virtual_memory);
     register_syscall(SyscallNumber::NtQueryVirtualMemory as usize, sys_query_virtual_memory);
+
+    // Section (shared memory) syscalls
+    register_syscall(SyscallNumber::NtCreateSection as usize, sys_create_section);
+    register_syscall(SyscallNumber::NtMapViewOfSection as usize, sys_map_view_of_section);
+    register_syscall(SyscallNumber::NtUnmapViewOfSection as usize, sys_unmap_view_of_section);
+    register_syscall(SyscallNumber::NtQuerySection as usize, sys_query_section);
+
+    // I/O Completion Port syscalls
+    register_syscall(SyscallNumber::NtCreateIoCompletion as usize, sys_create_io_completion);
+    register_syscall(SyscallNumber::NtSetIoCompletion as usize, sys_set_io_completion);
+    register_syscall(SyscallNumber::NtRemoveIoCompletion as usize, sys_remove_io_completion);
 }
 
 /// Register a syscall handler
@@ -1297,5 +1322,254 @@ fn sys_query_virtual_memory(
             0
         }
         None => -1,
+    }
+}
+
+// ============================================================================
+// Section Object Syscalls
+// ============================================================================
+
+/// NtCreateSection - Create a section object (shared memory)
+fn sys_create_section(
+    section_handle: usize,
+    _desired_access: usize,
+    _object_attributes: usize,
+    maximum_size: usize,
+    section_page_protection: usize,
+    allocation_attributes: usize,
+) -> isize {
+    if section_handle == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    // Get size from pointer (NT style)
+    let size = if maximum_size != 0 {
+        unsafe { *(maximum_size as *const u64) }
+    } else {
+        4096 // Default to one page
+    };
+
+    let _ = allocation_attributes; // For file-backed sections
+
+    // Create page-file backed section
+    let section = unsafe {
+        crate::mm::mm_create_section(size, section_page_protection as u32)
+    };
+
+    if section.is_null() {
+        return -1; // STATUS_INSUFFICIENT_RESOURCES
+    }
+
+    // Return section handle (pointer as handle for now)
+    unsafe {
+        *(section_handle as *mut usize) = section as usize;
+    }
+
+    0 // STATUS_SUCCESS
+}
+
+/// NtMapViewOfSection - Map a view of a section into an address space
+fn sys_map_view_of_section(
+    section_handle: usize,
+    _process_handle: usize,
+    base_address: usize,
+    _zero_bits: usize,
+    _commit_size: usize,
+    section_offset: usize,
+) -> isize {
+    // Additional parameters would be in stack (view_size, protection, etc.)
+    // For simplicity, we use defaults
+
+    if section_handle == 0 || base_address == 0 {
+        return -1;
+    }
+
+    let section = section_handle as *mut crate::mm::Section;
+
+    // Read requested base and offset
+    let requested_base = unsafe { *(base_address as *const u64) };
+    let offset = if section_offset != 0 {
+        unsafe { *(section_offset as *const u64) }
+    } else {
+        0
+    };
+
+    // Map the view
+    let result = unsafe {
+        crate::mm::mm_map_view_of_section(
+            section,
+            core::ptr::null_mut(), // Current process
+            if requested_base == 0 { None } else { Some(requested_base) },
+            offset,
+            0, // Map entire section
+            crate::mm::page_protection::PAGE_READWRITE,
+        )
+    };
+
+    match result {
+        Some(mapped_base) => {
+            unsafe {
+                *(base_address as *mut u64) = mapped_base;
+            }
+            0
+        }
+        None => -1,
+    }
+}
+
+/// NtUnmapViewOfSection - Unmap a view of a section
+fn sys_unmap_view_of_section(
+    _process_handle: usize,
+    base_address: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    if base_address == 0 {
+        return -1;
+    }
+
+    // We need to find the section for this base address
+    // For now, this is a stub - full implementation would track views
+    crate::serial_println!("[SYSCALL] NtUnmapViewOfSection - stub at {:#x}", base_address);
+
+    0
+}
+
+/// NtQuerySection - Query section information
+fn sys_query_section(
+    section_handle: usize,
+    _info_class: usize,
+    buffer: usize,
+    buffer_size: usize,
+    return_length: usize,
+    _: usize,
+) -> isize {
+    if section_handle == 0 || buffer == 0 {
+        return -1;
+    }
+
+    if buffer_size < core::mem::size_of::<crate::mm::SectionInfo>() {
+        return -1; // STATUS_BUFFER_TOO_SMALL
+    }
+
+    let section = section_handle as *mut crate::mm::Section;
+
+    let result = unsafe { crate::mm::mm_query_section(section) };
+
+    match result {
+        Some(info) => {
+            unsafe {
+                *(buffer as *mut crate::mm::SectionInfo) = info;
+            }
+            if return_length != 0 {
+                unsafe {
+                    *(return_length as *mut usize) = core::mem::size_of::<crate::mm::SectionInfo>();
+                }
+            }
+            0
+        }
+        None => -1,
+    }
+}
+
+// ============================================================================
+// I/O Completion Port Syscalls
+// ============================================================================
+
+/// NtCreateIoCompletion - Create an I/O completion port
+fn sys_create_io_completion(
+    completion_handle: usize,
+    _desired_access: usize,
+    _object_attributes: usize,
+    concurrent_threads: usize,
+    _: usize, _: usize,
+) -> isize {
+    if completion_handle == 0 {
+        return -1;
+    }
+
+    let port = unsafe {
+        crate::io::io_create_completion_port(concurrent_threads as u32)
+    };
+
+    if port.is_null() {
+        return -1; // STATUS_INSUFFICIENT_RESOURCES
+    }
+
+    unsafe {
+        *(completion_handle as *mut usize) = port as usize;
+    }
+
+    0
+}
+
+/// NtSetIoCompletion - Post a completion to a port
+fn sys_set_io_completion(
+    completion_handle: usize,
+    key: usize,
+    overlapped: usize,
+    status: usize,
+    information: usize,
+    _: usize,
+) -> isize {
+    if completion_handle == 0 {
+        return -1;
+    }
+
+    let port = completion_handle as *mut crate::io::IoCompletionPort;
+
+    let result = unsafe {
+        crate::io::io_set_completion(port, key, overlapped, status as i32, information)
+    };
+
+    if result { 0 } else { -1 }
+}
+
+/// NtRemoveIoCompletion - Wait for and retrieve a completion
+fn sys_remove_io_completion(
+    completion_handle: usize,
+    key_out: usize,
+    overlapped_out: usize,
+    io_status_out: usize,
+    timeout: usize,
+    _: usize,
+) -> isize {
+    if completion_handle == 0 {
+        return -1;
+    }
+
+    let port = completion_handle as *mut crate::io::IoCompletionPort;
+
+    // Get timeout value
+    let timeout_ms = if timeout == 0 {
+        None
+    } else {
+        let timeout_100ns = unsafe { *(timeout as *const i64) };
+        if timeout_100ns < 0 {
+            Some(((-timeout_100ns) / 10_000) as u64)
+        } else {
+            Some(0)
+        }
+    };
+
+    let result = unsafe { crate::io::io_remove_completion(port, timeout_ms) };
+
+    match result {
+        Some(packet) => {
+            if key_out != 0 {
+                unsafe { *(key_out as *mut usize) = packet.key; }
+            }
+            if overlapped_out != 0 {
+                unsafe { *(overlapped_out as *mut usize) = packet.overlapped; }
+            }
+            if io_status_out != 0 {
+                unsafe {
+                    let status_block = io_status_out as *mut crate::io::IoStatusBlock;
+                    (*status_block).status = packet.status;
+                    (*status_block).information = packet.information;
+                }
+            }
+            0
+        }
+        None => 0x102, // STATUS_TIMEOUT
     }
 }

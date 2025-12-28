@@ -28,6 +28,7 @@ pub mod pool;
 pub mod address;
 pub mod physical;
 pub mod user;
+pub mod section;
 
 // Re-export PFN types
 pub use pfn::{
@@ -181,6 +182,30 @@ pub use user::{
     USER_TEST_CODE,
 };
 
+// Re-export section types
+pub use section::{
+    Section,
+    SectionView,
+    SectionType,
+    SectionInfo,
+    SectionStats,
+    ControlArea,
+    section_access,
+    section_type,
+    page_protection,
+    mm_create_section,
+    mm_create_file_section,
+    mm_create_image_section,
+    mm_close_section,
+    mm_map_view_of_section,
+    mm_unmap_view_of_section,
+    mm_extend_section,
+    mm_query_section,
+    mm_get_section_stats,
+    MAX_SECTIONS,
+    SECTION_ALLOCATION_GRANULARITY,
+};
+
 /// Initialize the Memory Manager
 ///
 /// This initializes all memory management subsystems:
@@ -210,6 +235,9 @@ pub unsafe fn init(boot_info: &crate::BootInfo) {
 
     // Initialize physical memory management (parses memory map)
     physical::init(boot_info);
+
+    // Initialize section subsystem
+    section::init();
 
     crate::serial_println!("[MM] Memory Manager initialized");
 }
