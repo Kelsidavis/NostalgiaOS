@@ -160,6 +160,43 @@ fn has_wildcards(s: &str) -> bool {
     false
 }
 
+/// Secondary path buffer for building paths
+static mut PATH_BUFFER2: [u8; 256] = [0u8; 256];
+static mut PATH_LEN2: usize = 0;
+
+/// Build a path by combining directory and filename
+fn build_path(dir: &str, filename: &str) -> &'static str {
+    unsafe {
+        PATH_LEN2 = 0;
+
+        // Copy directory
+        for &b in dir.as_bytes() {
+            if PATH_LEN2 < PATH_BUFFER2.len() - 1 {
+                PATH_BUFFER2[PATH_LEN2] = b;
+                PATH_LEN2 += 1;
+            }
+        }
+
+        // Add separator if needed
+        if PATH_LEN2 > 0 && PATH_BUFFER2[PATH_LEN2 - 1] != b'\\' {
+            if PATH_LEN2 < PATH_BUFFER2.len() - 1 {
+                PATH_BUFFER2[PATH_LEN2] = b'\\';
+                PATH_LEN2 += 1;
+            }
+        }
+
+        // Copy filename
+        for &b in filename.as_bytes() {
+            if PATH_LEN2 < PATH_BUFFER2.len() - 1 {
+                PATH_BUFFER2[PATH_LEN2] = b;
+                PATH_LEN2 += 1;
+            }
+        }
+
+        core::str::from_utf8_unchecked(&PATH_BUFFER2[..PATH_LEN2])
+    }
+}
+
 /// Display version information
 pub fn cmd_version() {
     serial_println!("");
@@ -490,20 +527,108 @@ pub fn cmd_rmdir(args: &[&str]) {
 pub fn cmd_del(args: &[&str]) {
     if args.is_empty() {
         serial_println!("Usage: del <filename>");
+        serial_println!("  Wildcards * and ? are supported.");
         return;
     }
 
-    let full_path = resolve_path(args[0]);
+    let arg = args[0];
 
-    match fs::delete(&full_path) {
-        Ok(()) => {
-            // Success - no output
+    // Check for wildcards
+    if has_wildcards(arg) {
+        // Split into directory and pattern
+        let bytes = arg.as_bytes();
+        let mut last_sep = None;
+        for i in 0..bytes.len() {
+            if bytes[i] == b'\\' || bytes[i] == b'/' {
+                last_sep = Some(i);
+            }
         }
-        Err(fs::FsStatus::NotFound) => {
+
+        let (dir_path, pattern) = match last_sep {
+            Some(pos) => (&arg[..pos + 1], &arg[pos + 1..]),
+            None => (get_current_dir(), arg),
+        };
+
+        let full_dir = resolve_path(dir_path);
+        let mut deleted_count = 0u32;
+        let mut error_count = 0u32;
+
+        // Collect matching files first (to avoid modifying while iterating)
+        let mut files_to_delete: [[u8; 64]; 32] = [[0u8; 64]; 32];
+        let mut file_lens: [usize; 32] = [0; 32];
+        let mut file_count = 0usize;
+
+        let mut offset = 0u32;
+        loop {
+            match fs::readdir(&full_dir, offset) {
+                Ok(entry) => {
+                    let name = entry.name_str();
+
+                    // Skip directories and special entries
+                    if name == "." || name == ".." {
+                        offset = entry.next_offset;
+                        continue;
+                    }
+
+                    // Only delete files, not directories
+                    if entry.file_type == fs::FileType::Regular {
+                        if wildcard_match(pattern, name) {
+                            if file_count < 32 {
+                                let name_bytes = name.as_bytes();
+                                let len = name_bytes.len().min(63);
+                                files_to_delete[file_count][..len].copy_from_slice(&name_bytes[..len]);
+                                file_lens[file_count] = len;
+                                file_count += 1;
+                            }
+                        }
+                    }
+
+                    offset = entry.next_offset;
+                }
+                Err(_) => break,
+            }
+        }
+
+        if file_count == 0 {
             serial_println!("Could not find the file specified.");
+            return;
         }
-        Err(e) => {
-            serial_println!("Error deleting file: {:?}", e);
+
+        // Now delete the collected files
+        for i in 0..file_count {
+            let name = core::str::from_utf8(&files_to_delete[i][..file_lens[i]]).unwrap_or("");
+
+            // Build full path for this file
+            let file_path = build_path(&full_dir, name);
+
+            match fs::delete(&file_path) {
+                Ok(()) => {
+                    deleted_count += 1;
+                }
+                Err(e) => {
+                    serial_println!("Error deleting {}: {:?}", name, e);
+                    error_count += 1;
+                }
+            }
+        }
+
+        if deleted_count > 0 || error_count > 0 {
+            serial_println!("{} file(s) deleted.", deleted_count);
+        }
+    } else {
+        // No wildcards - single file delete
+        let full_path = resolve_path(arg);
+
+        match fs::delete(&full_path) {
+            Ok(()) => {
+                // Success - no output (DOS behavior)
+            }
+            Err(fs::FsStatus::NotFound) => {
+                serial_println!("Could not find the file specified.");
+            }
+            Err(e) => {
+                serial_println!("Error deleting file: {:?}", e);
+            }
         }
     }
 }
@@ -512,21 +637,129 @@ pub fn cmd_del(args: &[&str]) {
 pub fn cmd_copy(args: &[&str]) {
     if args.len() < 2 {
         serial_println!("Usage: copy <source> <dest>");
+        serial_println!("  Wildcards * and ? are supported in source.");
         return;
     }
 
-    let src_path = resolve_path(args[0]);
-    let dst_path = resolve_path(args[1]);
+    let src_arg = args[0];
+    let dst_arg = args[1];
 
-    match fs::copy(&src_path, &dst_path) {
-        Ok(bytes) => {
-            serial_println!("        1 file(s) copied ({} bytes).", bytes);
+    // Check for wildcards in source
+    if has_wildcards(src_arg) {
+        // Split source into directory and pattern
+        let bytes = src_arg.as_bytes();
+        let mut last_sep = None;
+        for i in 0..bytes.len() {
+            if bytes[i] == b'\\' || bytes[i] == b'/' {
+                last_sep = Some(i);
+            }
         }
-        Err(fs::FsStatus::NotFound) => {
+
+        let (src_dir, pattern) = match last_sep {
+            Some(pos) => (&src_arg[..pos + 1], &src_arg[pos + 1..]),
+            None => (get_current_dir(), src_arg),
+        };
+
+        let full_src_dir = resolve_path(src_dir);
+        let dst_path = resolve_path(dst_arg);
+
+        // Collect matching files
+        let mut files_to_copy: [[u8; 64]; 32] = [[0u8; 64]; 32];
+        let mut file_lens: [usize; 32] = [0; 32];
+        let mut file_count = 0usize;
+
+        let mut offset = 0u32;
+        loop {
+            match fs::readdir(&full_src_dir, offset) {
+                Ok(entry) => {
+                    let name = entry.name_str();
+
+                    if name == "." || name == ".." {
+                        offset = entry.next_offset;
+                        continue;
+                    }
+
+                    // Only copy files, not directories
+                    if entry.file_type == fs::FileType::Regular {
+                        if wildcard_match(pattern, name) {
+                            if file_count < 32 {
+                                let name_bytes = name.as_bytes();
+                                let len = name_bytes.len().min(63);
+                                files_to_copy[file_count][..len].copy_from_slice(&name_bytes[..len]);
+                                file_lens[file_count] = len;
+                                file_count += 1;
+                            }
+                        }
+                    }
+
+                    offset = entry.next_offset;
+                }
+                Err(_) => break,
+            }
+        }
+
+        if file_count == 0 {
             serial_println!("The system cannot find the file specified.");
+            return;
         }
-        Err(e) => {
-            serial_println!("Error copying file: {:?}", e);
+
+        // Check if destination is a directory
+        let dst_is_dir = match fs::stat(&dst_path) {
+            Ok(info) => info.file_type == fs::FileType::Directory,
+            Err(_) => dst_arg.ends_with('\\') || dst_arg.ends_with('/'),
+        };
+
+        let mut copied_count = 0u32;
+        let mut total_bytes = 0u64;
+
+        for i in 0..file_count {
+            let name = core::str::from_utf8(&files_to_copy[i][..file_lens[i]]).unwrap_or("");
+            let src_file = build_path(&full_src_dir, name);
+
+            // Determine destination path
+            let dst_file = if dst_is_dir {
+                build_path(&dst_path, name)
+            } else if file_count == 1 {
+                // Single file to non-directory destination
+                &dst_path
+            } else {
+                serial_println!("Cannot copy multiple files to a single file.");
+                return;
+            };
+
+            // Need to copy src_file to a buffer since build_path uses static buffer
+            let mut src_buf: [u8; 256] = [0u8; 256];
+            let src_len = src_file.len().min(255);
+            src_buf[..src_len].copy_from_slice(src_file.as_bytes());
+            let src_str = core::str::from_utf8(&src_buf[..src_len]).unwrap_or("");
+
+            match fs::copy(src_str, dst_file) {
+                Ok(bytes) => {
+                    copied_count += 1;
+                    total_bytes += bytes as u64;
+                }
+                Err(e) => {
+                    serial_println!("Error copying {}: {:?}", name, e);
+                }
+            }
+        }
+
+        serial_println!("        {} file(s) copied ({} bytes).", copied_count, total_bytes);
+    } else {
+        // No wildcards - single file copy
+        let src_path = resolve_path(src_arg);
+        let dst_path = resolve_path(dst_arg);
+
+        match fs::copy(&src_path, &dst_path) {
+            Ok(bytes) => {
+                serial_println!("        1 file(s) copied ({} bytes).", bytes);
+            }
+            Err(fs::FsStatus::NotFound) => {
+                serial_println!("The system cannot find the file specified.");
+            }
+            Err(e) => {
+                serial_println!("Error copying file: {:?}", e);
+            }
         }
     }
 }
