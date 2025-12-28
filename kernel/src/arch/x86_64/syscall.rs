@@ -67,6 +67,8 @@ pub enum SyscallNumber {
     NtQueryInformationFile = 25,
     NtSetInformationFile = 26,
     NtDeleteFile = 27,
+    NtQueryDirectoryFile = 28,
+    NtLockFile = 29,
 
     // Synchronization
     NtWaitForSingleObject = 30,
@@ -201,6 +203,8 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtClose as usize, sys_close);
     register_syscall(SyscallNumber::NtReadFile as usize, sys_read_file);
     register_syscall(SyscallNumber::NtWriteFile as usize, sys_write_file);
+    register_syscall(SyscallNumber::NtQueryDirectoryFile as usize, sys_query_directory_file);
+    register_syscall(SyscallNumber::NtLockFile as usize, sys_lock_file);
 
     // Synchronization syscalls
     register_syscall(SyscallNumber::NtWaitForSingleObject as usize, sys_wait_for_single_object);
@@ -1572,4 +1576,197 @@ fn sys_remove_io_completion(
         }
         None => 0x102, // STATUS_TIMEOUT
     }
+}
+
+// ============================================================================
+// Directory and File Lock Syscalls
+// ============================================================================
+
+/// File information returned by NtQueryDirectoryFile
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FileDirectoryInformation {
+    /// Offset to next entry (0 if last)
+    pub next_entry_offset: u32,
+    /// File index (for resume)
+    pub file_index: u32,
+    /// Creation time (100ns since 1601)
+    pub creation_time: i64,
+    /// Last access time
+    pub last_access_time: i64,
+    /// Last write time
+    pub last_write_time: i64,
+    /// Change time
+    pub change_time: i64,
+    /// End of file position
+    pub end_of_file: i64,
+    /// Allocation size (on disk)
+    pub allocation_size: i64,
+    /// File attributes (FILE_ATTRIBUTE_*)
+    pub file_attributes: u32,
+    /// Length of file name in bytes
+    pub file_name_length: u32,
+    // file_name follows in memory (variable length, Unicode)
+}
+
+/// File attributes for FileDirectoryInformation
+pub mod file_attributes {
+    pub const READONLY: u32 = 0x0001;
+    pub const HIDDEN: u32 = 0x0002;
+    pub const SYSTEM: u32 = 0x0004;
+    pub const DIRECTORY: u32 = 0x0010;
+    pub const ARCHIVE: u32 = 0x0020;
+    pub const NORMAL: u32 = 0x0080;
+}
+
+/// NtQueryDirectoryFile - Enumerate directory contents
+///
+/// NT-style directory enumeration. Returns one or more entries per call.
+///
+/// Arguments:
+/// - file_handle: Handle to an open directory
+/// - event: Optional event to signal on completion (async)
+/// - apc_routine: Optional APC callback
+/// - apc_context: Context for APC
+/// - io_status_block: Receives completion status
+/// - file_information: Output buffer for entries
+fn sys_query_directory_file(
+    file_handle: usize,
+    _event: usize,
+    file_information: usize,
+    length: usize,
+    _return_single_entry: usize,
+    file_name_pattern: usize,
+) -> isize {
+    // Validate parameters
+    if file_handle == 0 || file_information == 0 || length == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    // For now, use a simplified implementation using our fs module
+    // In a full implementation, we'd work with file handles properly
+
+    // Get the file name pattern (optional wildcard like "*.txt")
+    let pattern_str: Option<&str> = if file_name_pattern != 0 {
+        // Read the pattern - assume it's a null-terminated ASCII string for simplicity
+        let pattern_ptr = file_name_pattern as *const u8;
+        let mut len = 0;
+        unsafe {
+            while *pattern_ptr.add(len) != 0 && len < 256 {
+                len += 1;
+            }
+            if len > 0 {
+                Some(core::str::from_utf8_unchecked(
+                    core::slice::from_raw_parts(pattern_ptr, len)
+                ))
+            } else {
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let _ = pattern_str; // TODO: Implement pattern matching
+
+    // For now, just log and return success with empty result
+    // A full implementation would enumerate the directory
+    crate::serial_println!(
+        "[SYSCALL] NtQueryDirectoryFile(handle={}, buf={:#x}, len={})",
+        file_handle, file_information, length
+    );
+
+    // Return STATUS_NO_MORE_FILES to indicate end of directory
+    0x80000006u32 as isize // STATUS_NO_MORE_FILES
+}
+
+/// File lock info for NtLockFile
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FileLockInfo {
+    /// Byte offset to start of lock
+    pub byte_offset: i64,
+    /// Length of lock in bytes
+    pub length: i64,
+    /// Key for this lock (used for unlock)
+    pub key: u32,
+    /// Is this an exclusive lock?
+    pub exclusive: bool,
+    /// Fail immediately if can't lock?
+    pub fail_immediately: bool,
+}
+
+/// NtLockFile - Lock a byte range in a file
+///
+/// Provides byte-range locking for file coordination between processes.
+///
+/// Arguments:
+/// - file_handle: Handle to the file
+/// - event: Optional event for async completion
+/// - apc_routine: Optional APC callback
+/// - apc_context: Context for APC
+/// - io_status_block: Receives status
+/// - byte_offset: Starting offset of lock (LARGE_INTEGER pointer)
+fn sys_lock_file(
+    file_handle: usize,
+    _event: usize,
+    byte_offset: usize,
+    length: usize,
+    key: usize,
+    fail_immediately: usize,
+) -> isize {
+    // Validate parameters
+    if file_handle == 0 || byte_offset == 0 || length == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    // Read the byte offset and length (passed as LARGE_INTEGER pointers)
+    let offset = unsafe { *(byte_offset as *const i64) };
+    let len = unsafe { *(length as *const i64) };
+
+    crate::serial_println!(
+        "[SYSCALL] NtLockFile(handle={}, offset={}, len={}, key={}, fail_immed={})",
+        file_handle, offset, len, key, fail_immediately != 0
+    );
+
+    // For now, just record the lock request
+    // A full implementation would:
+    // 1. Check for conflicting locks
+    // 2. Either wait or fail immediately based on fail_immediately
+    // 3. Add lock to the file's lock list
+
+    // Track locks per file (simplified - in reality this would be per file object)
+    // For now, just succeed
+    0 // STATUS_SUCCESS
+}
+
+/// NtUnlockFile - Unlock a byte range in a file
+///
+/// Arguments:
+/// - file_handle: Handle to the file
+/// - io_status_block: Receives status
+/// - byte_offset: Starting offset of region to unlock
+/// - length: Length of region to unlock
+/// - key: Key that was used when locking
+fn sys_unlock_file(
+    file_handle: usize,
+    byte_offset: usize,
+    length: usize,
+    key: usize,
+    _: usize, _: usize,
+) -> isize {
+    if file_handle == 0 || byte_offset == 0 || length == 0 {
+        return -1;
+    }
+
+    let offset = unsafe { *(byte_offset as *const i64) };
+    let len = unsafe { *(length as *const i64) };
+
+    crate::serial_println!(
+        "[SYSCALL] NtUnlockFile(handle={}, offset={}, len={}, key={})",
+        file_handle, offset, len, key
+    );
+
+    // For now, just succeed
+    0 // STATUS_SUCCESS
 }

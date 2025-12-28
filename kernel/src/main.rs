@@ -9,7 +9,8 @@
 //! - **ke** - Kernel Executive: scheduler, DPC/APC, synchronization primitives
 //! - **mm** - Memory Manager: virtual memory, PFN database, working sets
 //! - **ob** - Object Manager: handles, namespace, object types
-//! - **io** - I/O Manager: IRP, device/driver objects
+//! - **io** - I/O Manager: IRP, device/driver objects, completion ports
+//! - **cc** - Cache Manager: file caching, lazy writer, read-ahead
 //! - **ps** - Process Manager: EPROCESS/ETHREAD
 //! - **ex** - Executive: pools, resources, worker threads
 //! - **se** - Security: tokens, ACLs, access checks
@@ -34,6 +35,7 @@
 
 // Subsystem modules
 pub mod arch;
+pub mod cc;
 pub mod cm;
 pub mod ex;
 pub mod fs;
@@ -297,6 +299,11 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing I/O manager...");
     io::init();
     kprintln!("  I/O manager initialized");
+
+    // Initialize Cache Manager
+    kprintln!("  Initializing cache manager...");
+    cc::init();
+    kprintln!("  Cache manager initialized");
 
     // Initialize storage subsystem (ATA driver, disk partitions)
     kprintln!("  Initializing storage subsystem...");

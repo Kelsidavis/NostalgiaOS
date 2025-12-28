@@ -33,6 +33,7 @@ pub mod complete;
 pub mod block;
 pub mod disk;
 pub mod iocp;
+pub mod pipe;
 
 // Re-export main structures and types
 pub use irp::{
@@ -137,6 +138,28 @@ pub use iocp::{
     MAX_QUEUED_COMPLETIONS,
 };
 
+pub use pipe::{
+    NamedPipe,
+    PipeInstance,
+    PipeState,
+    PipeEnd,
+    PipeBuffer,
+    PipeStats,
+    pipe_type,
+    io_create_named_pipe,
+    io_open_named_pipe,
+    io_close_pipe_instance,
+    io_write_pipe,
+    io_read_pipe,
+    io_listen_pipe,
+    io_peek_pipe,
+    io_get_pipe_state,
+    get_pipe_stats,
+    MAX_NAMED_PIPES,
+    MAX_PIPE_INSTANCES,
+    DEFAULT_BUFFER_SIZE,
+};
+
 /// Initialize the I/O Manager
 ///
 /// This initializes all I/O subsystems in the correct order:
@@ -167,6 +190,9 @@ pub fn init() {
 
     // Initialize I/O completion port subsystem
     iocp::init();
+
+    // Initialize named pipe subsystem
+    pipe::init();
 
     crate::serial_println!("[IO] I/O Manager initialized");
 }
