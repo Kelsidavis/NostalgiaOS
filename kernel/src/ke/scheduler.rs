@@ -283,3 +283,34 @@ pub unsafe fn ke_set_priority(thread: *mut KThread, priority: i8) {
         }
     }
 }
+
+/// List all active threads
+///
+/// # Safety
+/// Accesses thread pool directly
+pub unsafe fn list_threads() {
+    use super::thread::{THREAD_POOL, THREAD_POOL_BITMAP};
+
+    for i in 0..constants::MAX_THREADS {
+        if THREAD_POOL_BITMAP & (1 << i) != 0 {
+            let thread = &THREAD_POOL[i];
+
+            let state_str = match thread.state {
+                ThreadState::Initialized => "Init  ",
+                ThreadState::Ready => "Ready ",
+                ThreadState::Running => "Run   ",
+                ThreadState::Standby => "Standby",
+                ThreadState::Terminated => "Term  ",
+                ThreadState::Waiting => "Wait  ",
+                ThreadState::Transition => "Trans ",
+                ThreadState::DeferredReady => "DfRdy ",
+            };
+
+            crate::serial_println!("  {:>3}  {}      {:>2}",
+                thread.thread_id,
+                state_str,
+                thread.priority
+            );
+        }
+    }
+}

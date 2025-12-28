@@ -290,12 +290,12 @@ extern "C" fn thread_entry_trampoline() {
 }
 
 // Static thread pool (no heap allocator)
-static mut THREAD_POOL: [KThread; constants::MAX_THREADS] = {
+pub(crate) static mut THREAD_POOL: [KThread; constants::MAX_THREADS] = {
     const INIT: KThread = KThread::new();
     [INIT; constants::MAX_THREADS]
 };
 
-static mut THREAD_POOL_BITMAP: u32 = 0;
+pub(crate) static mut THREAD_POOL_BITMAP: u32 = 0;
 
 /// Allocate a thread from the static pool
 ///

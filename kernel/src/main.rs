@@ -44,6 +44,7 @@ pub mod ob;
 pub mod ps;
 pub mod rtl;
 pub mod se;
+pub mod shell;
 
 mod framebuffer;
 mod serial;
@@ -340,12 +341,38 @@ fn phase1_init(boot_info: &BootInfo) {
     hal::keyboard::init();
     kprintln!("  Keyboard initialized");
 
+    // Create shell thread
+    kprintln!("  Creating shell thread...");
+    unsafe {
+        if ke::init::create_thread(12, shell_thread_entry).is_some() {
+            serial_println!("[SHELL] Shell thread created at priority 12");
+        } else {
+            serial_println!("[SHELL] ERROR: Failed to create shell thread");
+        }
+    }
+
     // Start the scheduler (enables interrupts)
     kprintln!("  Starting scheduler...");
     unsafe {
         ke::init::start_scheduler();
     }
     kprintln!("  Scheduler started");
+}
+
+/// Shell thread entry point
+fn shell_thread_entry() {
+    // Wait a moment for other threads to start and print their messages
+    for _ in 0..500 {
+        unsafe { core::arch::asm!("pause"); }
+    }
+
+    // Run the shell
+    shell::run();
+
+    // Shell exited - halt this thread
+    loop {
+        unsafe { crate::ke::scheduler::ki_yield(); }
+    }
 }
 
 /// Test file system by reading C:\TEST.TXT
