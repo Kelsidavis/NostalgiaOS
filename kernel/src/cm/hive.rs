@@ -19,11 +19,10 @@
 //! - HARDWARE: Rebuilt each boot
 //! - SYSTEM\CurrentControlSet: Active control set
 
-use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
 use crate::ke::SpinLock;
 use super::key::{CmKeyNode, cm_allocate_key, cm_get_key_mut, cm_get_key_pool_mut, key_flags};
-use super::cell::{CmCellTable, CellIndex, HCELL_NIL};
+use super::cell::CmCellTable;
 
 /// Maximum number of hives
 pub const MAX_HIVES: usize = 16;

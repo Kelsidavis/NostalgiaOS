@@ -14,8 +14,6 @@
 //! - REG_MULTI_SZ: Multiple null-terminated strings
 //! - REG_QWORD: 64-bit integer
 
-use core::ptr;
-
 /// Maximum value name length (characters)
 pub const MAX_VALUE_NAME_LENGTH: usize = 64;
 

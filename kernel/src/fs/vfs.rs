@@ -11,7 +11,7 @@
 
 use core::sync::atomic::{AtomicU32, Ordering};
 use crate::ke::SpinLock;
-use super::path::{ParsedPath, MAX_PATH, MAX_COMPONENT};
+use super::path::MAX_COMPONENT;
 
 /// Maximum number of registered file systems
 pub const MAX_FILE_SYSTEMS: usize = 8;

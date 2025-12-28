@@ -25,7 +25,6 @@ use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use super::dispatcher::{DispatcherHeader, DispatcherType};
 use super::dpc::KDpc;
 use super::list::ListEntry;
-use super::prcb::get_current_prcb_mut;
 use super::scheduler;
 use super::thread::ThreadState;
 use crate::hal::apic;

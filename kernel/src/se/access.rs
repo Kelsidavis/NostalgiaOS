@@ -26,7 +26,6 @@ use super::token::Token;
 use super::descriptor::SimpleSecurityDescriptor;
 use super::acl::{AceType, SimpleAce, generic_rights, standard_rights, special_rights};
 use super::privilege::privilege_luids;
-use super::sid::Sid;
 
 /// Access check result
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

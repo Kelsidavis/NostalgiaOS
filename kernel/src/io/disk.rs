@@ -10,7 +10,7 @@
 
 use crate::ke::SpinLock;
 use super::block::{
-    BlockDevice, BlockStatus, DiskGeometry, SECTOR_SIZE,
+    BlockStatus, SECTOR_SIZE,
     get_block_device, read_sectors, write_sectors, device_count,
 };
 

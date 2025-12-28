@@ -33,8 +33,6 @@
 //! Bit 63:    No Execute
 //! ```
 
-use core::ptr;
-use super::pfn::PAGE_SIZE;
 
 /// Number of entries per page table (all levels)
 pub const ENTRIES_PER_TABLE: usize = 512;

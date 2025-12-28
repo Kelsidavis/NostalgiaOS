@@ -15,9 +15,9 @@
 
 use core::ptr;
 use super::pte::{
-    PageTable, HardwarePte, pte_flags, ENTRIES_PER_TABLE,
-    pml4_index, pdpt_index, pd_index, pt_index,
-    mm_get_cr3, mm_set_cr3, mm_flush_tlb, mm_invalidate_page,
+    pte_flags, ENTRIES_PER_TABLE,
+    pd_index, pt_index,
+    mm_get_cr3,
 };
 use super::pfn::PAGE_SIZE;
 

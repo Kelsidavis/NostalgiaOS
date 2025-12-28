@@ -13,7 +13,7 @@
 //! handles can reference the same file object (via DuplicateHandle).
 
 use core::ptr;
-use core::sync::atomic::{AtomicU32, AtomicI32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use crate::ke::{list::ListEntry, SpinLock, KEvent};
 use crate::ob::ObjectHeader;
 use super::device::DeviceObject;

@@ -11,9 +11,7 @@
 //! can register a completion routine when forwarding an IRP down the
 //! stack. These routines are called in reverse order during completion.
 
-use core::sync::atomic::Ordering;
 use super::irp::{Irp, irp_flags, sl_control, io_free_irp};
-use super::file::FileObject;
 
 /// Priority boost values for IRP completion
 pub mod priority_boost {

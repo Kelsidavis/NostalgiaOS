@@ -17,7 +17,6 @@
 use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
 use super::header::ObjectHeader;
-use super::object_type::ObjectType;
 use crate::ke::SpinLock;
 
 /// Handle type (unsigned 32-bit, like Windows HANDLE)

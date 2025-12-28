@@ -13,8 +13,8 @@
 //! - Delete: Remove named object
 
 use core::ptr;
-use super::header::{ObjectHeader, ObjectNameInfo, OB_MAX_NAME_LENGTH, flags};
-use super::object_type::{ObjectType, type_index};
+use super::header::{ObjectHeader, ObjectNameInfo, flags};
+use super::object_type::type_index;
 use crate::ke::SpinLock;
 
 /// Maximum entries per directory (simple implementation)

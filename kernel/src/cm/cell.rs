@@ -14,7 +14,6 @@
 //! For our simplified implementation, we use a flat cell table.
 
 use core::sync::atomic::{AtomicU32, Ordering};
-use crate::ke::SpinLock;
 
 /// Cell index type
 pub type CellIndex = u32;

@@ -3,7 +3,7 @@
 //! Provides low-level port I/O for hardware access.
 //! Used by device drivers (ATA, PIC, etc.) for register access.
 
-use x86_64::instructions::port::{Port, PortReadOnly, PortWriteOnly};
+use x86_64::instructions::port::{PortReadOnly, PortWriteOnly};
 
 /// Read a byte from an I/O port
 #[inline]

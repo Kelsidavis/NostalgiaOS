@@ -20,7 +20,6 @@
 //! 3. Inherited deny ACEs
 //! 4. Inherited allow ACEs
 
-use core::ptr;
 use super::sid::Sid;
 
 /// ACL revision

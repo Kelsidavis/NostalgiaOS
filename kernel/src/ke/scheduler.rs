@@ -10,7 +10,6 @@
 //! - 16-31: Realtime (fixed) priority threads
 
 use core::ptr;
-use super::list::ListEntry;
 use super::thread::{KThread, ThreadState, constants};
 use super::prcb::{KPrcb, get_current_prcb_mut};
 use super::apc::{ApcMode, ki_deliver_apc};

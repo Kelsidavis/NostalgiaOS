@@ -14,6 +14,7 @@
 use crate::hal::keyboard;
 use crate::serial_println;
 use crate::fs;
+use core::ptr::addr_of_mut;
 
 mod commands;
 
@@ -28,11 +29,14 @@ static mut REDIRECT_PATH_LEN: usize = 0;
 /// Write to redirect buffer or serial
 pub fn shell_write(s: &str) {
     unsafe {
-        if REDIRECT_ACTIVE {
+        let active = core::ptr::read_volatile(addr_of_mut!(REDIRECT_ACTIVE));
+        if active {
+            let buf = &mut *addr_of_mut!(REDIRECT_BUFFER);
+            let len = &mut *addr_of_mut!(REDIRECT_LEN);
             for &b in s.as_bytes() {
-                if REDIRECT_LEN < REDIRECT_BUFFER.len() {
-                    REDIRECT_BUFFER[REDIRECT_LEN] = b;
-                    REDIRECT_LEN += 1;
+                if *len < buf.len() {
+                    buf[*len] = b;
+                    *len += 1;
                 }
             }
         } else {
@@ -50,32 +54,40 @@ pub fn shell_writeln(s: &str) {
 /// Start output redirection
 fn start_redirect(path: &str, append: bool) {
     unsafe {
-        REDIRECT_ACTIVE = true;
-        REDIRECT_APPEND = append;
-        REDIRECT_LEN = 0;
+        core::ptr::write_volatile(addr_of_mut!(REDIRECT_ACTIVE), true);
+        core::ptr::write_volatile(addr_of_mut!(REDIRECT_APPEND), append);
+        core::ptr::write_volatile(addr_of_mut!(REDIRECT_LEN), 0);
 
+        let rpath = &mut *addr_of_mut!(REDIRECT_PATH);
         let path_bytes = path.as_bytes();
-        let len = path_bytes.len().min(REDIRECT_PATH.len() - 1);
-        REDIRECT_PATH[..len].copy_from_slice(&path_bytes[..len]);
-        REDIRECT_PATH_LEN = len;
+        let len = path_bytes.len().min(rpath.len() - 1);
+        rpath[..len].copy_from_slice(&path_bytes[..len]);
+        core::ptr::write_volatile(addr_of_mut!(REDIRECT_PATH_LEN), len);
     }
 }
 
 /// End output redirection and write to file
 fn end_redirect() -> Result<(), &'static str> {
     unsafe {
-        if !REDIRECT_ACTIVE {
+        let active = core::ptr::read_volatile(addr_of_mut!(REDIRECT_ACTIVE));
+        if !active {
             return Ok(());
         }
 
-        REDIRECT_ACTIVE = false;
+        core::ptr::write_volatile(addr_of_mut!(REDIRECT_ACTIVE), false);
 
-        let path = core::str::from_utf8(&REDIRECT_PATH[..REDIRECT_PATH_LEN])
+        let rpath = &*addr_of_mut!(REDIRECT_PATH);
+        let rpath_len = core::ptr::read_volatile(addr_of_mut!(REDIRECT_PATH_LEN));
+        let path = core::str::from_utf8(&rpath[..rpath_len])
             .map_err(|_| "Invalid path")?;
 
         let resolved = commands::resolve_path(path);
 
-        if REDIRECT_APPEND {
+        let append_mode = core::ptr::read_volatile(addr_of_mut!(REDIRECT_APPEND));
+        let buf = &mut *addr_of_mut!(REDIRECT_BUFFER);
+        let redirect_len = &mut *addr_of_mut!(REDIRECT_LEN);
+
+        if append_mode {
             // Append mode - read existing content first
             let mut existing: [u8; 8192] = [0u8; 8192];
             let existing_len = match fs::open(resolved, 0) {
@@ -89,23 +101,23 @@ fn end_redirect() -> Result<(), &'static str> {
             };
 
             // Combine existing + new
-            let total_len = existing_len + REDIRECT_LEN;
+            let total_len = existing_len + *redirect_len;
             if total_len <= 8192 {
                 // Shift buffer to make room for existing content
-                for i in (0..REDIRECT_LEN).rev() {
+                for i in (0..*redirect_len).rev() {
                     if existing_len + i < 8192 {
-                        REDIRECT_BUFFER[existing_len + i] = REDIRECT_BUFFER[i];
+                        buf[existing_len + i] = buf[i];
                     }
                 }
-                REDIRECT_BUFFER[..existing_len].copy_from_slice(&existing[..existing_len]);
-                REDIRECT_LEN = total_len;
+                buf[..existing_len].copy_from_slice(&existing[..existing_len]);
+                *redirect_len = total_len;
             }
         }
 
         // Create/overwrite file and write content
         match fs::create(resolved, 0) {
             Ok(handle) => {
-                let result = fs::write(handle, &REDIRECT_BUFFER[..REDIRECT_LEN]);
+                let result = fs::write(handle, &buf[..*redirect_len]);
                 let _ = fs::close(handle);
                 match result {
                     Ok(_) => Ok(()),
@@ -149,6 +161,18 @@ const COMMANDS: &[&str] = &[
 /// Current working directory
 static mut CURRENT_DIR: [u8; 64] = [0u8; 64];
 static mut CURRENT_DIR_LEN: usize = 0;
+
+/// Get raw pointer to CURRENT_DIR
+#[inline]
+fn current_dir_ptr() -> *mut [u8; 64] {
+    addr_of_mut!(CURRENT_DIR)
+}
+
+/// Get raw pointer to CURRENT_DIR_LEN
+#[inline]
+fn current_dir_len_ptr() -> *mut usize {
+    addr_of_mut!(CURRENT_DIR_LEN)
+}
 
 /// Command history entry
 #[derive(Clone, Copy)]
@@ -214,10 +238,11 @@ impl Shell {
     pub fn init(&mut self) {
         // Set default directory to C:\
         unsafe {
-            CURRENT_DIR[0] = b'C';
-            CURRENT_DIR[1] = b':';
-            CURRENT_DIR[2] = b'\\';
-            CURRENT_DIR_LEN = 3;
+            let dir = &mut *current_dir_ptr();
+            dir[0] = b'C';
+            dir[1] = b':';
+            dir[2] = b'\\';
+            *current_dir_len_ptr() = 3;
         }
 
         self.print_banner();
@@ -1138,17 +1163,20 @@ fn find_common_prefix_bytes(matches: &[[u8; 64]; 16], lens: &[usize; 16], count:
 /// Get the current working directory as a string
 pub fn get_current_dir() -> &'static str {
     unsafe {
-        core::str::from_utf8_unchecked(&CURRENT_DIR[..CURRENT_DIR_LEN])
+        let dir = &*current_dir_ptr();
+        let len = *current_dir_len_ptr();
+        core::str::from_utf8_unchecked(&dir[..len])
     }
 }
 
 /// Set the current working directory
 pub fn set_current_dir(path: &str) {
     unsafe {
+        let dir = &mut *current_dir_ptr();
         let bytes = path.as_bytes();
-        let len = bytes.len().min(CURRENT_DIR.len());
-        CURRENT_DIR[..len].copy_from_slice(&bytes[..len]);
-        CURRENT_DIR_LEN = len;
+        let len = bytes.len().min(dir.len());
+        dir[..len].copy_from_slice(&bytes[..len]);
+        *current_dir_len_ptr() = len;
     }
 }
 
@@ -1158,8 +1186,9 @@ static mut SHELL: Shell = Shell::new();
 /// Initialize and run the shell
 pub fn run() {
     unsafe {
-        SHELL.init();
-        SHELL.run();
+        let shell = &mut *addr_of_mut!(SHELL);
+        shell.init();
+        shell.run();
     }
 }
 

@@ -13,11 +13,11 @@
 //! - `cm_enumerate_value` - Enumerate values
 
 use super::key::{
-    CmKeyNode, CmKeyStats,
-    cm_allocate_key, cm_free_key, cm_get_key, cm_get_key_mut, cm_get_key_pool_mut,
-    key_flags, MAX_KEY_NAME_LENGTH,
+    CmKeyNode,
+    cm_allocate_key, cm_free_key, cm_get_key, cm_get_key_mut,
+    key_flags,
 };
-use super::value::{CmKeyValue, CmValueData, RegType};
+use super::value::CmKeyValue;
 use super::hive::{cm_get_hive, cm_get_hive_mut, hive_indices};
 
 /// Registry status codes

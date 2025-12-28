@@ -10,10 +10,10 @@
 //! 4. This module mounts FAT32 volumes to drive letters
 
 use crate::io::disk::{
-    Volume, get_volume, volume_count, list_volumes, partition_type,
+    Volume, get_volume, partition_type,
     get_volume_read_callback, get_volume_write_callback,
 };
-use crate::io::block::{BlockStatus, SECTOR_SIZE};
+use crate::io::block::SECTOR_SIZE;
 use crate::fs::vfs::{FsType, FsStatus};
 use crate::fs::mount::{mount, mount_flags};
 use crate::fs::fat32::bpb::Fat32BootSector;

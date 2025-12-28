@@ -14,9 +14,8 @@
 //! ETHREAD is preceded by an OBJECT_HEADER for object manager integration.
 
 use core::ptr;
-use core::sync::atomic::{AtomicU32, AtomicBool, Ordering};
-use crate::ke::{KThread, ThreadState, list::ListEntry, SpinLock};
-use crate::ob::{ObjectHeader, type_index};
+use core::sync::atomic::{AtomicU32, Ordering};
+use crate::ke::{KThread, list::ListEntry, SpinLock};
 use super::cid::ClientId;
 use super::eprocess::EProcess;
 

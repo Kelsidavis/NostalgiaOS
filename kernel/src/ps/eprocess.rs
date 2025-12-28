@@ -15,9 +15,9 @@
 //! EPROCESS is preceded by an OBJECT_HEADER for object manager integration.
 
 use core::ptr;
-use core::sync::atomic::{AtomicU32, AtomicI32, Ordering};
+use core::sync::atomic::{AtomicU32, Ordering};
 use crate::ke::{KProcess, ProcessState, list::ListEntry, SpinLock};
-use crate::ob::{ObjectHeader, Handle, HandleTable, type_index};
+use crate::ob::HandleTable;
 use super::cid::ClientId;
 
 /// Maximum length of process image name

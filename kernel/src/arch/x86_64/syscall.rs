@@ -17,7 +17,6 @@
 //! - R11: Destroyed (contains return RFLAGS)
 
 use core::arch::{asm, naked_asm};
-use super::gdt;
 
 /// MSR addresses for syscall configuration
 mod msr {

@@ -16,8 +16,6 @@
 //! - SeShutdownPrivilege: Shut down the system
 //! - SeTakeOwnershipPrivilege: Take ownership of objects
 
-use core::ptr;
-
 /// Maximum number of privileges
 pub const SE_MAX_PRIVILEGES: usize = 36;
 

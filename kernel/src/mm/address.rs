@@ -20,9 +20,8 @@
 use core::ptr;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use crate::ke::SpinLock;
-use super::vad::{MmVadRoot, MmVad};
-use super::pte::{PageTable, HardwarePte, pte_flags, ENTRIES_PER_TABLE};
-use super::pfn::PAGE_SIZE;
+use super::vad::MmVadRoot;
+use super::pte::PageTable;
 
 /// Maximum address spaces (processes)
 pub const MAX_ADDRESS_SPACES: usize = 64;

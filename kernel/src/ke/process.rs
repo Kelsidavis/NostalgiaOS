@@ -8,7 +8,6 @@
 //! Note: This is a simplified implementation for the initial scheduler.
 //! Full NT EPROCESS would be built on top of this.
 
-use core::ptr;
 use super::list::ListEntry;
 
 /// Process states

@@ -15,7 +15,7 @@
 //! when an IRP of that type is sent to a device owned by the driver.
 
 use core::ptr;
-use crate::ke::{list::ListEntry, SpinLock};
+use crate::ke::SpinLock;
 use crate::ob::ObjectHeader;
 use super::irp::{Irp, IrpMajorFunction};
 use super::device::DeviceObject;

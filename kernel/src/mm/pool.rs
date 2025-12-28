@@ -16,7 +16,6 @@
 use core::ptr;
 use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::ke::SpinLock;
-use super::pfn::PAGE_SIZE;
 
 /// Pool types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

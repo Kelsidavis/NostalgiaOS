@@ -12,9 +12,8 @@
 //! - HKEY_USERS (HKU) - User-specific configuration
 //! - HKEY_CURRENT_CONFIG - Current hardware profile
 
-use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
-use super::value::{CmKeyValue, MAX_VALUE_NAME_LENGTH};
+use super::value::CmKeyValue;
 
 /// Maximum key name length (characters)
 pub const MAX_KEY_NAME_LENGTH: usize = 64;

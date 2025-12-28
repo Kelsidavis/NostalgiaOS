@@ -8,8 +8,8 @@
 
 use core::sync::atomic::{AtomicU32, Ordering};
 use crate::ke::SpinLock;
-use super::bpb::{Fat32BootSector, FsInfo, cluster_values, FatType};
-use super::dir::{FatDirEntry, LfnDirEntry, file_attr, entry_status, DIR_ENTRY_SIZE};
+use super::bpb::{Fat32BootSector, FsInfo, cluster_values};
+use super::dir::{FatDirEntry, file_attr, entry_status, DIR_ENTRY_SIZE};
 use crate::fs::vfs::{FsStatus, FileInfo, FileType, DirEntry, FsOps, FsInfo as VfsFsInfo, FsType};
 
 /// Maximum mounted FAT32 file systems

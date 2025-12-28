@@ -11,7 +11,6 @@
 
 use core::sync::atomic::{AtomicU64, Ordering};
 use super::pfn::{
-    MmPfn, MmPageState, MmStats,
     mm_allocate_page, mm_allocate_zeroed_page, mm_free_page,
     mm_pfn_entry, mm_get_stats,
     PAGE_SIZE, LARGE_PAGE_SIZE,

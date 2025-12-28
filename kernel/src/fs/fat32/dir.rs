@@ -11,7 +11,6 @@
 //! LFN entries precede the short entry and store up to 13 characters each.
 //! They are stored in reverse order.
 
-use super::bpb::cluster_values;
 
 /// Directory entry size
 pub const DIR_ENTRY_SIZE: usize = 32;

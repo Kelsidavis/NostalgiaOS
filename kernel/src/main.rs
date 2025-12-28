@@ -29,7 +29,8 @@
 #![no_main]
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
-#![feature(naked_functions)]
+#![allow(static_mut_refs)]
+#![allow(dead_code)]
 
 // Subsystem modules
 pub mod arch;

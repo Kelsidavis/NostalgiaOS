@@ -5,6 +5,7 @@
 use crate::fs;
 use super::{get_current_dir, set_current_dir, shell_write, shell_writeln};
 use core::fmt::Write;
+use core::ptr::addr_of_mut;
 
 /// Buffer for formatted output
 static mut FMT_BUF: [u8; 512] = [0u8; 512];
@@ -14,9 +15,14 @@ macro_rules! out {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
         unsafe {
-            let mut writer = FmtWriter { pos: 0 };
-            let _ = write!(writer, $($arg)*);
-            let s = core::str::from_utf8_unchecked(&FMT_BUF[..writer.pos]);
+            let buf = &mut *addr_of_mut!(FMT_BUF);
+            let mut pos = 0usize;
+            {
+                let mut writer = FmtWriter { buf, pos: &mut pos };
+                let _ = write!(writer, $($arg)*);
+            }
+            let buf = &*addr_of_mut!(FMT_BUF);
+            let s = core::str::from_utf8_unchecked(&buf[..pos]);
             shell_write(s);
         }
     }};
@@ -28,27 +34,31 @@ macro_rules! outln {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
         unsafe {
-            let mut writer = FmtWriter { pos: 0 };
-            let _ = write!(writer, $($arg)*);
-            let s = core::str::from_utf8_unchecked(&FMT_BUF[..writer.pos]);
+            let buf = &mut *addr_of_mut!(FMT_BUF);
+            let mut pos = 0usize;
+            {
+                let mut writer = FmtWriter { buf, pos: &mut pos };
+                let _ = write!(writer, $($arg)*);
+            }
+            let buf = &*addr_of_mut!(FMT_BUF);
+            let s = core::str::from_utf8_unchecked(&buf[..pos]);
             shell_writeln(s);
         }
     }};
 }
 
 /// Helper for formatted writing
-struct FmtWriter {
-    pos: usize,
+struct FmtWriter<'a> {
+    buf: &'a mut [u8; 512],
+    pos: &'a mut usize,
 }
 
-impl Write for FmtWriter {
+impl<'a> Write for FmtWriter<'a> {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        unsafe {
-            for &b in s.as_bytes() {
-                if self.pos < FMT_BUF.len() {
-                    FMT_BUF[self.pos] = b;
-                    self.pos += 1;
-                }
+        for &b in s.as_bytes() {
+            if *self.pos < self.buf.len() {
+                self.buf[*self.pos] = b;
+                *self.pos += 1;
             }
         }
         Ok(())
@@ -211,38 +221,38 @@ fn has_wildcards(s: &str) -> bool {
 
 /// Secondary path buffer for building paths
 static mut PATH_BUFFER2: [u8; 256] = [0u8; 256];
-static mut PATH_LEN2: usize = 0;
 
 /// Build a path by combining directory and filename
 fn build_path(dir: &str, filename: &str) -> &'static str {
     unsafe {
-        PATH_LEN2 = 0;
+        let buf = &mut *addr_of_mut!(PATH_BUFFER2);
+        let mut len = 0usize;
 
         // Copy directory
         for &b in dir.as_bytes() {
-            if PATH_LEN2 < PATH_BUFFER2.len() - 1 {
-                PATH_BUFFER2[PATH_LEN2] = b;
-                PATH_LEN2 += 1;
+            if len < buf.len() - 1 {
+                buf[len] = b;
+                len += 1;
             }
         }
 
         // Add separator if needed
-        if PATH_LEN2 > 0 && PATH_BUFFER2[PATH_LEN2 - 1] != b'\\' {
-            if PATH_LEN2 < PATH_BUFFER2.len() - 1 {
-                PATH_BUFFER2[PATH_LEN2] = b'\\';
-                PATH_LEN2 += 1;
+        if len > 0 && buf[len - 1] != b'\\' {
+            if len < buf.len() - 1 {
+                buf[len] = b'\\';
+                len += 1;
             }
         }
 
         // Copy filename
         for &b in filename.as_bytes() {
-            if PATH_LEN2 < PATH_BUFFER2.len() - 1 {
-                PATH_BUFFER2[PATH_LEN2] = b;
-                PATH_LEN2 += 1;
+            if len < buf.len() - 1 {
+                buf[len] = b;
+                len += 1;
             }
         }
 
-        core::str::from_utf8_unchecked(&PATH_BUFFER2[..PATH_LEN2])
+        core::str::from_utf8_unchecked(&buf[..len])
     }
 }
 
@@ -931,29 +941,29 @@ pub fn cmd_reboot() {
 
 /// Path buffer for resolved paths
 static mut PATH_BUFFER: [u8; 128] = [0u8; 128];
-static mut PATH_LEN: usize = 0;
 
 /// Resolve a path relative to current directory
 /// Returns a static string reference (not thread-safe, but OK for single shell)
 pub fn resolve_path(path: &str) -> &'static str {
     unsafe {
-        PATH_LEN = 0;
+        let buf = &mut *addr_of_mut!(PATH_BUFFER);
+        let mut path_len = 0usize;
 
         // Helper to append to path buffer
-        let mut append = |s: &str| {
+        let mut append = |s: &str, buf: &mut [u8; 128], len: &mut usize| {
             for &b in s.as_bytes() {
-                if PATH_LEN < PATH_BUFFER.len() {
+                if *len < buf.len() {
                     // Convert forward slash to backslash
-                    PATH_BUFFER[PATH_LEN] = if b == b'/' { b'\\' } else { b };
-                    PATH_LEN += 1;
+                    buf[*len] = if b == b'/' { b'\\' } else { b };
+                    *len += 1;
                 }
             }
         };
 
         // If path starts with drive letter, it's absolute
         if path.len() >= 2 && path.as_bytes()[1] == b':' {
-            append(path);
-            return core::str::from_utf8_unchecked(&PATH_BUFFER[..PATH_LEN]);
+            append(path, buf, &mut path_len);
+            return core::str::from_utf8_unchecked(&buf[..path_len]);
         }
 
         // If path starts with backslash, it's relative to drive root
@@ -961,27 +971,27 @@ pub fn resolve_path(path: &str) -> &'static str {
             let current = get_current_dir();
             if current.len() >= 2 {
                 // Add drive letter
-                PATH_BUFFER[0] = current.as_bytes()[0];
-                PATH_BUFFER[1] = b':';
-                PATH_LEN = 2;
-                append(path);
-                return core::str::from_utf8_unchecked(&PATH_BUFFER[..PATH_LEN]);
+                buf[0] = current.as_bytes()[0];
+                buf[1] = b':';
+                path_len = 2;
+                append(path, buf, &mut path_len);
+                return core::str::from_utf8_unchecked(&buf[..path_len]);
             }
         }
 
         // Relative path - append to current directory
         let current = get_current_dir();
-        append(current);
+        append(current, buf, &mut path_len);
 
         // Ensure current dir ends with backslash
-        if PATH_LEN > 0 && PATH_BUFFER[PATH_LEN - 1] != b'\\' {
-            if PATH_LEN < PATH_BUFFER.len() {
-                PATH_BUFFER[PATH_LEN] = b'\\';
-                PATH_LEN += 1;
+        if path_len > 0 && buf[path_len - 1] != b'\\' {
+            if path_len < buf.len() {
+                buf[path_len] = b'\\';
+                path_len += 1;
             }
         }
 
-        append(path);
-        core::str::from_utf8_unchecked(&PATH_BUFFER[..PATH_LEN])
+        append(path, buf, &mut path_len);
+        core::str::from_utf8_unchecked(&buf[..path_len])
     }
 }
