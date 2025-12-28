@@ -184,6 +184,14 @@ pub enum SyscallNumber {
     NtSetInformationJobObject = 154,
     NtTerminateJobObject = 155,
     NtIsProcessInJob = 156,
+
+    // System information
+    NtQuerySystemInformation = 160,
+    NtSetSystemInformation = 161,
+
+    // Time
+    NtQuerySystemTime = 170,
+    NtQueryPerformanceCounter = 171,
 }
 
 /// Syscall handler function type
@@ -415,6 +423,11 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtSetInformationJobObject as usize, sys_set_information_job);
     register_syscall(SyscallNumber::NtTerminateJobObject as usize, sys_terminate_job_object);
     register_syscall(SyscallNumber::NtIsProcessInJob as usize, sys_is_process_in_job);
+
+    // System information
+    register_syscall(SyscallNumber::NtQuerySystemInformation as usize, sys_query_system_information);
+    register_syscall(SyscallNumber::NtQuerySystemTime as usize, sys_query_system_time);
+    register_syscall(SyscallNumber::NtQueryPerformanceCounter as usize, sys_query_performance_counter);
 }
 
 /// Register a syscall handler
@@ -6714,4 +6727,730 @@ fn sys_is_process_in_job(
             }
         }
     }
+}
+
+// ============================================================================
+// System Information
+// ============================================================================
+
+/// System information class for NtQuerySystemInformation
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemInformationClass {
+    SystemBasicInformation = 0,
+    SystemProcessorInformation = 1,
+    SystemPerformanceInformation = 2,
+    SystemTimeOfDayInformation = 3,
+    SystemPathInformation = 4,
+    SystemProcessInformation = 5,
+    SystemCallCountInformation = 6,
+    SystemDeviceInformation = 7,
+    SystemProcessorPerformanceInformation = 8,
+    SystemFlagsInformation = 9,
+    SystemCallTimeInformation = 10,
+    SystemModuleInformation = 11,
+    SystemLocksInformation = 12,
+    SystemStackTraceInformation = 13,
+    SystemPagedPoolInformation = 14,
+    SystemNonPagedPoolInformation = 15,
+    SystemHandleInformation = 16,
+    SystemObjectInformation = 17,
+    SystemPageFileInformation = 18,
+    SystemVdmInstemulInformation = 19,
+    SystemVdmBopInformation = 20,
+    SystemFileCacheInformation = 21,
+    SystemPoolTagInformation = 22,
+    SystemInterruptInformation = 23,
+    SystemDpcBehaviorInformation = 24,
+    SystemFullMemoryInformation = 25,
+    SystemLoadGdiDriverInformation = 26,
+    SystemUnloadGdiDriverInformation = 27,
+    SystemTimeAdjustmentInformation = 28,
+    SystemSummaryMemoryInformation = 29,
+    SystemMirrorMemoryInformation = 30,
+    SystemPerformanceTraceInformation = 31,
+    SystemCrashDumpInformation = 32,
+    SystemExceptionInformation = 33,
+    SystemCrashDumpStateInformation = 34,
+    SystemKernelDebuggerInformation = 35,
+    SystemContextSwitchInformation = 36,
+    SystemRegistryQuotaInformation = 37,
+    SystemExtendServiceTableInformation = 38,
+    SystemPrioritySeperation = 39,
+    SystemVerifierAddDriverInformation = 40,
+    SystemVerifierRemoveDriverInformation = 41,
+    SystemProcessorIdleInformation = 42,
+    SystemLegacyDriverInformation = 43,
+    SystemCurrentTimeZoneInformation = 44,
+    SystemLookasideInformation = 45,
+    SystemTimeSlipNotification = 46,
+    SystemSessionCreate = 47,
+    SystemSessionDetach = 48,
+    SystemSessionInformation = 49,
+    SystemRangeStartInformation = 50,
+    SystemVerifierInformation = 51,
+    SystemVerifierThunkExtend = 52,
+    SystemSessionProcessInformation = 53,
+    SystemLoadGdiDriverInSystemSpace = 54,
+    SystemNumaProcessorMap = 55,
+    SystemPrefetcherInformation = 56,
+    SystemExtendedProcessInformation = 57,
+    SystemRecommendedSharedDataAlignment = 58,
+    SystemComPlusPackage = 59,
+    SystemNumaAvailableMemory = 60,
+    SystemProcessorPowerInformation = 61,
+    SystemEmulationBasicInformation = 62,
+    SystemEmulationProcessorInformation = 63,
+    SystemExtendedHandleInformation = 64,
+    SystemLostDelayedWriteInformation = 65,
+    SystemBigPoolInformation = 66,
+    SystemSessionPoolTagInformation = 67,
+    SystemSessionMappedViewInformation = 68,
+    SystemHotpatchInformation = 69,
+    SystemObjectSecurityMode = 70,
+    SystemWatchdogTimerHandler = 71,
+    SystemWatchdogTimerInformation = 72,
+    SystemLogicalProcessorInformation = 73,
+    SystemWow64SharedInformationObsolete = 74,
+    SystemRegisterFirmwareTableInformationHandler = 75,
+    SystemFirmwareTableInformation = 76,
+    SystemModuleInformationEx = 77,
+    SystemVerifierTriageInformation = 78,
+    SystemSuperfetchInformation = 79,
+    SystemMemoryListInformation = 80,
+    SystemFileCacheInformationEx = 81,
+    SystemThreadPriorityClientIdInformation = 82,
+    SystemProcessorIdleCycleTimeInformation = 83,
+    SystemVerifierCancellationInformation = 84,
+    SystemProcessorPowerInformationEx = 85,
+    SystemRefTraceInformation = 86,
+    SystemSpecialPoolInformation = 87,
+    SystemProcessIdInformation = 88,
+    SystemErrorPortInformation = 89,
+    SystemBootEnvironmentInformation = 90,
+    SystemHypervisorInformation = 91,
+    SystemVerifierInformationEx = 92,
+    SystemTimeZoneInformation = 93,
+    SystemImageFileExecutionOptionsInformation = 94,
+    SystemCoverageInformation = 95,
+    SystemPrefetchPatchInformation = 96,
+    SystemVerifierFaultsInformation = 97,
+    SystemSystemPartitionInformation = 98,
+    SystemSystemDiskInformation = 99,
+    SystemProcessorPerformanceDistribution = 100,
+}
+
+/// SYSTEM_BASIC_INFORMATION structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SystemBasicInformation {
+    pub reserved: u32,
+    pub timer_resolution: u32,
+    pub page_size: u32,
+    pub number_of_physical_pages: u32,
+    pub lowest_physical_page_number: u32,
+    pub highest_physical_page_number: u32,
+    pub allocation_granularity: u32,
+    pub minimum_user_mode_address: usize,
+    pub maximum_user_mode_address: usize,
+    pub active_processors_affinity_mask: usize,
+    pub number_of_processors: u8,
+}
+
+/// SYSTEM_PROCESSOR_INFORMATION structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SystemProcessorInformation {
+    pub processor_architecture: u16,
+    pub processor_level: u16,
+    pub processor_revision: u16,
+    pub maximum_processors: u16,
+    pub processor_feature_bits: u32,
+}
+
+/// SYSTEM_PERFORMANCE_INFORMATION structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SystemPerformanceInformation {
+    pub idle_process_time: i64,
+    pub io_read_transfer_count: i64,
+    pub io_write_transfer_count: i64,
+    pub io_other_transfer_count: i64,
+    pub io_read_operation_count: u32,
+    pub io_write_operation_count: u32,
+    pub io_other_operation_count: u32,
+    pub available_pages: u32,
+    pub committed_pages: u32,
+    pub commit_limit: u32,
+    pub peak_commitment: u32,
+    pub page_fault_count: u32,
+    pub copy_on_write_count: u32,
+    pub transition_count: u32,
+    pub cache_transition_count: u32,
+    pub demand_zero_count: u32,
+    pub page_read_count: u32,
+    pub page_read_io_count: u32,
+    pub cache_read_count: u32,
+    pub cache_io_count: u32,
+    pub dirty_pages_write_count: u32,
+    pub dirty_write_io_count: u32,
+    pub mapped_pages_write_count: u32,
+    pub mapped_write_io_count: u32,
+    pub paged_pool_pages: u32,
+    pub non_paged_pool_pages: u32,
+    pub paged_pool_allocs: u32,
+    pub paged_pool_frees: u32,
+    pub non_paged_pool_allocs: u32,
+    pub non_paged_pool_frees: u32,
+    pub free_system_ptes: u32,
+    pub resident_system_code_page: u32,
+    pub total_system_driver_pages: u32,
+    pub total_system_code_pages: u32,
+    pub non_paged_pool_lookaside_hits: u32,
+    pub paged_pool_lookaside_hits: u32,
+    pub available_paged_pool_pages: u32,
+    pub resident_system_cache_page: u32,
+    pub resident_paged_pool_page: u32,
+    pub resident_system_driver_page: u32,
+    pub cc_fast_read_no_wait: u32,
+    pub cc_fast_read_wait: u32,
+    pub cc_fast_read_resource_miss: u32,
+    pub cc_fast_read_not_possible: u32,
+    pub cc_fast_mdl_read_no_wait: u32,
+    pub cc_fast_mdl_read_wait: u32,
+    pub cc_fast_mdl_read_resource_miss: u32,
+    pub cc_fast_mdl_read_not_possible: u32,
+    pub cc_map_data_no_wait: u32,
+    pub cc_map_data_wait: u32,
+    pub cc_map_data_no_wait_miss: u32,
+    pub cc_map_data_wait_miss: u32,
+    pub cc_pin_mapped_data_count: u32,
+    pub cc_pin_read_no_wait: u32,
+    pub cc_pin_read_wait: u32,
+    pub cc_pin_read_no_wait_miss: u32,
+    pub cc_pin_read_wait_miss: u32,
+    pub cc_copy_read_no_wait: u32,
+    pub cc_copy_read_wait: u32,
+    pub cc_copy_read_no_wait_miss: u32,
+    pub cc_copy_read_wait_miss: u32,
+    pub cc_mdl_read_no_wait: u32,
+    pub cc_mdl_read_wait: u32,
+    pub cc_mdl_read_no_wait_miss: u32,
+    pub cc_mdl_read_wait_miss: u32,
+    pub cc_read_ahead_ios: u32,
+    pub cc_lazy_write_ios: u32,
+    pub cc_lazy_write_pages: u32,
+    pub cc_data_flushes: u32,
+    pub cc_data_pages: u32,
+    pub context_switches: u32,
+    pub first_level_tb_fills: u32,
+    pub second_level_tb_fills: u32,
+    pub system_calls: u32,
+}
+
+/// SYSTEM_TIMEOFDAY_INFORMATION structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SystemTimeOfDayInformation {
+    pub boot_time: i64,
+    pub current_time: i64,
+    pub time_zone_bias: i64,
+    pub time_zone_id: u32,
+    pub reserved: u32,
+    pub boot_time_bias: u64,
+    pub sleep_time_bias: u64,
+}
+
+/// SYSTEM_PROCESS_INFORMATION structure (simplified)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SystemProcessInformation {
+    pub next_entry_offset: u32,
+    pub number_of_threads: u32,
+    pub working_set_private_size: i64,
+    pub hard_fault_count: u32,
+    pub number_of_threads_high_watermark: u32,
+    pub cycle_time: u64,
+    pub create_time: i64,
+    pub user_time: i64,
+    pub kernel_time: i64,
+    pub image_name_length: u16,
+    pub image_name_maximum_length: u16,
+    pub image_name_ptr: usize, // UNICODE_STRING buffer pointer
+    pub base_priority: i32,
+    pub unique_process_id: usize,
+    pub inherited_from_unique_process_id: usize,
+    pub handle_count: u32,
+    pub session_id: u32,
+    pub unique_process_key: usize,
+    pub peak_virtual_size: usize,
+    pub virtual_size: usize,
+    pub page_fault_count: u32,
+    pub peak_working_set_size: usize,
+    pub working_set_size: usize,
+    pub quota_peak_paged_pool_usage: usize,
+    pub quota_paged_pool_usage: usize,
+    pub quota_peak_non_paged_pool_usage: usize,
+    pub quota_non_paged_pool_usage: usize,
+    pub pagefile_usage: usize,
+    pub peak_pagefile_usage: usize,
+    pub private_page_count: usize,
+    pub read_operation_count: i64,
+    pub write_operation_count: i64,
+    pub other_operation_count: i64,
+    pub read_transfer_count: i64,
+    pub write_transfer_count: i64,
+    pub other_transfer_count: i64,
+}
+
+/// NtQuerySystemInformation - Query system-wide information
+fn sys_query_system_information(
+    info_class: usize,
+    system_info: usize,
+    system_info_length: usize,
+    return_length: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    use core::ptr;
+
+    crate::serial_println!("[SYSCALL] NtQuerySystemInformation(class={}, buf={:#x}, len={})",
+        info_class, system_info, system_info_length);
+
+    // Validate buffer pointer
+    if system_info == 0 {
+        return 0xC0000005u32 as isize; // STATUS_ACCESS_VIOLATION
+    }
+
+    match info_class as u32 {
+        // SystemBasicInformation = 0
+        0 => {
+            let required_size = core::mem::size_of::<SystemBasicInformation>();
+
+            // Write return length if provided
+            if return_length != 0 {
+                unsafe {
+                    ptr::write(return_length as *mut u32, required_size as u32);
+                }
+            }
+
+            if system_info_length < required_size {
+                return 0xC0000004u32 as isize; // STATUS_INFO_LENGTH_MISMATCH
+            }
+
+            let stats = crate::mm::pfn::mm_get_stats();
+            let info = SystemBasicInformation {
+                reserved: 0,
+                timer_resolution: 10000, // 1ms in 100ns units
+                page_size: 4096,
+                number_of_physical_pages: stats.total_pages,
+                lowest_physical_page_number: 1,
+                highest_physical_page_number: stats.total_pages,
+                allocation_granularity: 65536, // 64KB
+                minimum_user_mode_address: 0x10000,
+                maximum_user_mode_address: 0x7FFFFFFEFFFF,
+                active_processors_affinity_mask: 1, // Single processor
+                number_of_processors: 1,
+            };
+
+            unsafe {
+                ptr::write(system_info as *mut SystemBasicInformation, info);
+            }
+
+            crate::serial_println!("[SYSCALL] NtQuerySystemInformation: BasicInfo - pages={}, page_size={}",
+                info.number_of_physical_pages, info.page_size);
+
+            0 // STATUS_SUCCESS
+        }
+
+        // SystemProcessorInformation = 1
+        1 => {
+            let required_size = core::mem::size_of::<SystemProcessorInformation>();
+
+            if return_length != 0 {
+                unsafe {
+                    ptr::write(return_length as *mut u32, required_size as u32);
+                }
+            }
+
+            if system_info_length < required_size {
+                return 0xC0000004u32 as isize;
+            }
+
+            let info = SystemProcessorInformation {
+                processor_architecture: 9, // PROCESSOR_ARCHITECTURE_AMD64
+                processor_level: 6,        // Pentium Pro family
+                processor_revision: 0x0F00,
+                maximum_processors: 64,
+                processor_feature_bits: 0x00000001, // Basic features
+            };
+
+            unsafe {
+                ptr::write(system_info as *mut SystemProcessorInformation, info);
+            }
+
+            crate::serial_println!("[SYSCALL] NtQuerySystemInformation: ProcessorInfo - arch=AMD64");
+
+            0
+        }
+
+        // SystemPerformanceInformation = 2
+        2 => {
+            let required_size = core::mem::size_of::<SystemPerformanceInformation>();
+
+            if return_length != 0 {
+                unsafe {
+                    ptr::write(return_length as *mut u32, required_size as u32);
+                }
+            }
+
+            if system_info_length < required_size {
+                return 0xC0000004u32 as isize;
+            }
+
+            let tick_count = crate::hal::apic::get_tick_count();
+            let stats = crate::mm::pfn::mm_get_stats();
+
+            let info = SystemPerformanceInformation {
+                idle_process_time: 0,
+                io_read_transfer_count: 0,
+                io_write_transfer_count: 0,
+                io_other_transfer_count: 0,
+                io_read_operation_count: 0,
+                io_write_operation_count: 0,
+                io_other_operation_count: 0,
+                available_pages: stats.free_pages + stats.zeroed_pages,
+                committed_pages: 0,
+                commit_limit: stats.total_pages,
+                peak_commitment: 0,
+                page_fault_count: 0,
+                copy_on_write_count: 0,
+                transition_count: 0,
+                cache_transition_count: 0,
+                demand_zero_count: 0,
+                page_read_count: 0,
+                page_read_io_count: 0,
+                cache_read_count: 0,
+                cache_io_count: 0,
+                dirty_pages_write_count: 0,
+                dirty_write_io_count: 0,
+                mapped_pages_write_count: 0,
+                mapped_write_io_count: 0,
+                paged_pool_pages: 0,
+                non_paged_pool_pages: 0,
+                paged_pool_allocs: 0,
+                paged_pool_frees: 0,
+                non_paged_pool_allocs: 0,
+                non_paged_pool_frees: 0,
+                free_system_ptes: 0,
+                resident_system_code_page: 0,
+                total_system_driver_pages: 0,
+                total_system_code_pages: 0,
+                non_paged_pool_lookaside_hits: 0,
+                paged_pool_lookaside_hits: 0,
+                available_paged_pool_pages: 0,
+                resident_system_cache_page: 0,
+                resident_paged_pool_page: 0,
+                resident_system_driver_page: 0,
+                cc_fast_read_no_wait: 0,
+                cc_fast_read_wait: 0,
+                cc_fast_read_resource_miss: 0,
+                cc_fast_read_not_possible: 0,
+                cc_fast_mdl_read_no_wait: 0,
+                cc_fast_mdl_read_wait: 0,
+                cc_fast_mdl_read_resource_miss: 0,
+                cc_fast_mdl_read_not_possible: 0,
+                cc_map_data_no_wait: 0,
+                cc_map_data_wait: 0,
+                cc_map_data_no_wait_miss: 0,
+                cc_map_data_wait_miss: 0,
+                cc_pin_mapped_data_count: 0,
+                cc_pin_read_no_wait: 0,
+                cc_pin_read_wait: 0,
+                cc_pin_read_no_wait_miss: 0,
+                cc_pin_read_wait_miss: 0,
+                cc_copy_read_no_wait: 0,
+                cc_copy_read_wait: 0,
+                cc_copy_read_no_wait_miss: 0,
+                cc_copy_read_wait_miss: 0,
+                cc_mdl_read_no_wait: 0,
+                cc_mdl_read_wait: 0,
+                cc_mdl_read_no_wait_miss: 0,
+                cc_mdl_read_wait_miss: 0,
+                cc_read_ahead_ios: 0,
+                cc_lazy_write_ios: 0,
+                cc_lazy_write_pages: 0,
+                cc_data_flushes: 0,
+                cc_data_pages: 0,
+                context_switches: tick_count as u32, // Approximate
+                first_level_tb_fills: 0,
+                second_level_tb_fills: 0,
+                system_calls: tick_count as u32 * 100, // Approximate
+            };
+
+            unsafe {
+                ptr::write(system_info as *mut SystemPerformanceInformation, info);
+            }
+
+            crate::serial_println!("[SYSCALL] NtQuerySystemInformation: PerformanceInfo - available_pages={}",
+                info.available_pages);
+
+            0
+        }
+
+        // SystemTimeOfDayInformation = 3
+        3 => {
+            let required_size = core::mem::size_of::<SystemTimeOfDayInformation>();
+
+            if return_length != 0 {
+                unsafe {
+                    ptr::write(return_length as *mut u32, required_size as u32);
+                }
+            }
+
+            if system_info_length < required_size {
+                return 0xC0000004u32 as isize;
+            }
+
+            let tick_count = crate::hal::apic::get_tick_count();
+            // Convert ticks to 100ns units (1 tick = 1ms = 10000 * 100ns)
+            let current_time = tick_count as i64 * 10000;
+
+            let info = SystemTimeOfDayInformation {
+                boot_time: 0, // System boot time
+                current_time,
+                time_zone_bias: 0, // UTC
+                time_zone_id: 0,
+                reserved: 0,
+                boot_time_bias: 0,
+                sleep_time_bias: 0,
+            };
+
+            unsafe {
+                ptr::write(system_info as *mut SystemTimeOfDayInformation, info);
+            }
+
+            crate::serial_println!("[SYSCALL] NtQuerySystemInformation: TimeOfDay - current_time={}",
+                current_time);
+
+            0
+        }
+
+        // SystemProcessInformation = 5
+        5 => {
+            use crate::ps::EProcess;
+
+            // Return list of all processes
+            let mut offset = 0usize;
+            let mut prev_entry_offset_ptr: Option<*mut u32> = None;
+
+            unsafe {
+                // Iterate through all processes
+                for pid in 0..crate::ps::MAX_PROCESSES {
+                    let process_ptr = crate::ps::ps_lookup_process_by_id(pid as u32);
+                    if process_ptr.is_null() {
+                        continue;
+                    }
+
+                    let entry_size = core::mem::size_of::<SystemProcessInformation>();
+
+                    // Check if we have enough space
+                    if offset + entry_size > system_info_length {
+                        if return_length != 0 {
+                            ptr::write(return_length as *mut u32, (offset + entry_size) as u32);
+                        }
+                        return 0xC0000004u32 as isize; // STATUS_INFO_LENGTH_MISMATCH
+                    }
+
+                    // Cast to proper EProcess type
+                    let process = &*(process_ptr as *const EProcess);
+                    let entry_ptr = (system_info + offset) as *mut SystemProcessInformation;
+
+                    // Get thread count from the atomic field
+                    let thread_count = process.thread_count.load(core::sync::atomic::Ordering::Relaxed);
+
+                    let info = SystemProcessInformation {
+                        next_entry_offset: 0, // Will be updated
+                        number_of_threads: thread_count,
+                        working_set_private_size: 0,
+                        hard_fault_count: 0,
+                        number_of_threads_high_watermark: thread_count,
+                        cycle_time: 0,
+                        create_time: process.create_time as i64,
+                        user_time: 0,
+                        kernel_time: 0,
+                        image_name_length: 0,
+                        image_name_maximum_length: 0,
+                        image_name_ptr: 0,
+                        base_priority: process.pcb.base_priority as i32,
+                        unique_process_id: pid,
+                        inherited_from_unique_process_id: process.inherited_from_unique_process_id as usize,
+                        handle_count: 0, // Handle count not easily available
+                        session_id: process.session_id,
+                        unique_process_key: 0,
+                        peak_virtual_size: 0,
+                        virtual_size: 0,
+                        page_fault_count: 0,
+                        peak_working_set_size: 0,
+                        working_set_size: 0,
+                        quota_peak_paged_pool_usage: 0,
+                        quota_paged_pool_usage: 0,
+                        quota_peak_non_paged_pool_usage: 0,
+                        quota_non_paged_pool_usage: 0,
+                        pagefile_usage: 0,
+                        peak_pagefile_usage: 0,
+                        private_page_count: 0,
+                        read_operation_count: 0,
+                        write_operation_count: 0,
+                        other_operation_count: 0,
+                        read_transfer_count: 0,
+                        write_transfer_count: 0,
+                        other_transfer_count: 0,
+                    };
+
+                    ptr::write(entry_ptr, info);
+
+                    // Update previous entry's next_entry_offset
+                    if let Some(prev_ptr) = prev_entry_offset_ptr {
+                        ptr::write(prev_ptr, offset as u32 - (prev_ptr as usize - system_info) as u32 + entry_size as u32);
+                    }
+
+                    prev_entry_offset_ptr = Some(&mut (*entry_ptr).next_entry_offset as *mut u32);
+                    offset += entry_size;
+                }
+
+                // Update return length
+                if return_length != 0 {
+                    ptr::write(return_length as *mut u32, offset as u32);
+                }
+
+                crate::serial_println!("[SYSCALL] NtQuerySystemInformation: ProcessInfo - {} bytes", offset);
+            }
+
+            0
+        }
+
+        // SystemHandleInformation = 16
+        16 => {
+            // Simplified - just return count
+            if return_length != 0 {
+                unsafe {
+                    ptr::write(return_length as *mut u32, 8);
+                }
+            }
+
+            if system_info_length < 8 {
+                return 0xC0000004u32 as isize;
+            }
+
+            unsafe {
+                // Write handle count and first handle entry placeholder
+                ptr::write(system_info as *mut u32, 0); // Number of handles
+                ptr::write((system_info + 4) as *mut u32, 0);
+            }
+
+            crate::serial_println!("[SYSCALL] NtQuerySystemInformation: HandleInfo");
+
+            0
+        }
+
+        // SystemKernelDebuggerInformation = 35
+        35 => {
+            if return_length != 0 {
+                unsafe {
+                    ptr::write(return_length as *mut u32, 2);
+                }
+            }
+
+            if system_info_length < 2 {
+                return 0xC0000004u32 as isize;
+            }
+
+            unsafe {
+                // KernelDebuggerEnabled, KernelDebuggerNotPresent
+                ptr::write(system_info as *mut u8, 0); // Not enabled
+                ptr::write((system_info + 1) as *mut u8, 1); // Not present
+            }
+
+            crate::serial_println!("[SYSCALL] NtQuerySystemInformation: KernelDebuggerInfo");
+
+            0
+        }
+
+        _ => {
+            crate::serial_println!("[SYSCALL] NtQuerySystemInformation: unsupported class {}", info_class);
+            0xC0000003u32 as isize // STATUS_INVALID_INFO_CLASS
+        }
+    }
+}
+
+/// NtQuerySystemTime - Query current system time
+fn sys_query_system_time(
+    system_time: usize,
+    _arg2: usize,
+    _arg3: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    if system_time == 0 {
+        return 0xC0000005u32 as isize; // STATUS_ACCESS_VIOLATION
+    }
+
+    let tick_count = crate::hal::apic::get_tick_count();
+    // Convert ticks to 100ns units (1 tick = 1ms = 10000 * 100ns)
+    // Add a base time (Jan 1, 1601 to Jan 1, 2024 in 100ns units, approximately)
+    let base_time: i64 = 132_537_600_000_000_000; // Approximate
+    let current_time = base_time + (tick_count as i64 * 10000);
+
+    unsafe {
+        core::ptr::write(system_time as *mut i64, current_time);
+    }
+
+    crate::serial_println!("[SYSCALL] NtQuerySystemTime = {}", current_time);
+
+    0
+}
+
+/// NtQueryPerformanceCounter - Query high-resolution performance counter
+fn sys_query_performance_counter(
+    performance_counter: usize,
+    performance_frequency: usize,
+    _arg3: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    if performance_counter == 0 {
+        return 0xC0000005u32 as isize; // STATUS_ACCESS_VIOLATION
+    }
+
+    // Read TSC (Time Stamp Counter)
+    let tsc: u64;
+    unsafe {
+        core::arch::asm!(
+            "rdtsc",
+            "shl rdx, 32",
+            "or rax, rdx",
+            out("rax") tsc,
+            out("rdx") _,
+            options(nostack, nomem)
+        );
+    }
+
+    unsafe {
+        core::ptr::write(performance_counter as *mut i64, tsc as i64);
+    }
+
+    // If frequency requested, return approximate TSC frequency
+    // Assume ~2GHz for now (would need CPUID calibration for accuracy)
+    if performance_frequency != 0 {
+        unsafe {
+            core::ptr::write(performance_frequency as *mut i64, 2_000_000_000i64);
+        }
+    }
+
+    crate::serial_println!("[SYSCALL] NtQueryPerformanceCounter = {}", tsc);
+
+    0
 }
