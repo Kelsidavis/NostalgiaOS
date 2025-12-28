@@ -5838,45 +5838,176 @@ fn sys_resume_process(
 // ============================================================================
 
 /// Thread access rights
+#[allow(non_snake_case, non_upper_case_globals)]
 pub mod thread_access {
+    /// Permission to terminate the thread
     pub const THREAD_TERMINATE: u32 = 0x0001;
+    /// Permission to suspend or resume the thread
     pub const THREAD_SUSPEND_RESUME: u32 = 0x0002;
+    /// Permission to alert the thread
+    pub const THREAD_ALERT: u32 = 0x0004;
+    /// Permission to get the thread context
     pub const THREAD_GET_CONTEXT: u32 = 0x0008;
+    /// Permission to set the thread context
     pub const THREAD_SET_CONTEXT: u32 = 0x0010;
+    /// Permission to set thread information
     pub const THREAD_SET_INFORMATION: u32 = 0x0020;
+    /// Permission to query thread information
     pub const THREAD_QUERY_INFORMATION: u32 = 0x0040;
+    /// Permission to set thread token
     pub const THREAD_SET_THREAD_TOKEN: u32 = 0x0080;
+    /// Permission to impersonate
     pub const THREAD_IMPERSONATE: u32 = 0x0100;
+    /// Permission for direct impersonation
     pub const THREAD_DIRECT_IMPERSONATION: u32 = 0x0200;
+    /// Permission to set limited information
+    pub const THREAD_SET_LIMITED_INFORMATION: u32 = 0x0400;
+    /// Permission to query limited information
+    pub const THREAD_QUERY_LIMITED_INFORMATION: u32 = 0x0800;
+    /// Permission to resume thread (Vista+)
+    pub const THREAD_RESUME: u32 = 0x1000;
+    /// All access rights
     pub const THREAD_ALL_ACCESS: u32 = 0x1FFFFF;
+
+    /// Standard rights
+    pub const DELETE: u32 = 0x00010000;
+    pub const READ_CONTROL: u32 = 0x00020000;
+    pub const WRITE_DAC: u32 = 0x00040000;
+    pub const WRITE_OWNER: u32 = 0x00080000;
+    pub const SYNCHRONIZE: u32 = 0x00100000;
+
+    // Compatibility aliases
+    pub const ThreadTerminate: u32 = THREAD_TERMINATE;
+    pub const ThreadSuspendResume: u32 = THREAD_SUSPEND_RESUME;
+    pub const ThreadGetContext: u32 = THREAD_GET_CONTEXT;
+    pub const ThreadSetContext: u32 = THREAD_SET_CONTEXT;
+    pub const ThreadQueryInformation: u32 = THREAD_QUERY_INFORMATION;
+    pub const ThreadSetInformation: u32 = THREAD_SET_INFORMATION;
+    pub const ThreadAllAccess: u32 = THREAD_ALL_ACCESS;
+}
+
+/// CLIENT_ID structure for NtOpenThread
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ClientIdForThread {
+    /// Process ID (can be 0 to match any process)
+    pub unique_process: u64,
+    /// Thread ID to open
+    pub unique_thread: u64,
 }
 
 /// NtOpenThread - Open a thread by ID
+///
+/// Opens an existing thread object and returns a handle to it.
+///
+/// # Arguments
+/// * `thread_handle` - Pointer to receive the thread handle
+/// * `desired_access` - Access rights to request (THREAD_* flags)
+/// * `object_attributes` - Optional object attributes (can be NULL)
+/// * `client_id` - Pointer to CLIENT_ID containing thread ID to open
+///
+/// # Returns
+/// * STATUS_SUCCESS - Thread opened successfully
+/// * STATUS_INVALID_PARAMETER - Invalid parameters
+/// * STATUS_INVALID_CID - Thread not found
+/// * STATUS_ACCESS_DENIED - Access denied
 fn sys_open_thread(
     thread_handle_ptr: usize,
     desired_access: usize,
-    _object_attributes: usize,
+    object_attributes: usize,
     client_id_ptr: usize,
     _: usize, _: usize,
 ) -> isize {
-    if thread_handle_ptr == 0 || client_id_ptr == 0 {
-        return -1;
+    const STATUS_SUCCESS: isize = 0;
+    const STATUS_INVALID_PARAMETER: isize = 0xC000000Du32 as isize;
+    const STATUS_INVALID_CID: isize = 0xC000000Bu32 as isize;
+    const STATUS_ACCESS_DENIED: isize = 0xC0000022u32 as isize;
+    const STATUS_INSUFFICIENT_RESOURCES: isize = 0xC000009Au32 as isize;
+    const STATUS_OBJECT_TYPE_MISMATCH: isize = 0xC0000024u32 as isize;
+
+    // Validate required parameters
+    if thread_handle_ptr == 0 {
+        return STATUS_INVALID_PARAMETER;
     }
 
-    // Read thread ID from CLIENT_ID (offset 4)
-    let tid = unsafe { *((client_id_ptr + 4) as *const u32) };
+    if client_id_ptr == 0 {
+        return STATUS_INVALID_PARAMETER;
+    }
 
-    crate::serial_println!("[SYSCALL] NtOpenThread(tid={}, access={:#x})",
-        tid, desired_access);
-
-    // Verify thread exists
-    let thread_exists = unsafe {
-        !crate::ps::cid::ps_lookup_thread_by_id(tid).is_null()
+    // Read CLIENT_ID structure
+    // CLIENT_ID is { HANDLE UniqueProcess; HANDLE UniqueThread; }
+    // On x64, HANDLEs are 64-bit
+    let (pid, tid) = unsafe {
+        let client_id = client_id_ptr as *const ClientIdForThread;
+        ((*client_id).unique_process as u32, (*client_id).unique_thread as u32)
     };
 
-    if !thread_exists {
+    crate::serial_println!("[SYSCALL] NtOpenThread(pid={}, tid={}, access={:#x})",
+        pid, tid, desired_access);
+
+    // Thread ID must be specified
+    if tid == 0 {
+        crate::serial_println!("[SYSCALL] NtOpenThread: thread ID is zero");
+        return STATUS_INVALID_CID;
+    }
+
+    // Look up the thread
+    let thread = unsafe { crate::ps::cid::ps_lookup_thread_by_id(tid) };
+
+    if thread.is_null() {
         crate::serial_println!("[SYSCALL] NtOpenThread: thread {} not found", tid);
-        return -1;
+        return STATUS_INVALID_CID;
+    }
+
+    // If process ID is specified (non-zero), verify the thread belongs to that process
+    if pid != 0 {
+        unsafe {
+            let ethread = thread as *mut crate::ps::EThread;
+            if (*ethread).cid.unique_process != pid {
+                crate::serial_println!(
+                    "[SYSCALL] NtOpenThread: thread {} belongs to process {}, not {}",
+                    tid, (*ethread).cid.unique_process, pid
+                );
+                return STATUS_INVALID_CID;
+            }
+        }
+    }
+
+    // Check if thread is terminated
+    unsafe {
+        let ethread = thread as *mut crate::ps::EThread;
+        if (*ethread).is_terminating() {
+            crate::serial_println!("[SYSCALL] NtOpenThread: thread {} is terminated", tid);
+            // Still allow opening terminated threads (for querying exit status)
+        }
+    }
+
+    // Parse object attributes if provided
+    let _inherit_handle = if object_attributes != 0 {
+        unsafe {
+            // OBJECT_ATTRIBUTES.Attributes is at offset 8 (after Length and RootDirectory)
+            let attrs = *((object_attributes + 8) as *const u32);
+            (attrs & 0x00000002) != 0 // OBJ_INHERIT
+        }
+    } else {
+        false
+    };
+
+    // Access check would go here in a full implementation
+    // For now, we grant the requested access
+
+    // Validate access mask
+    let access = desired_access as u32;
+    let valid_access = thread_access::THREAD_ALL_ACCESS |
+                       thread_access::DELETE |
+                       thread_access::READ_CONTROL |
+                       thread_access::WRITE_DAC |
+                       thread_access::WRITE_OWNER |
+                       thread_access::SYNCHRONIZE;
+
+    if (access & !valid_access) != 0 {
+        crate::serial_println!("[SYSCALL] NtOpenThread: invalid access mask {:#x}", access);
+        // Don't fail - just mask to valid bits for compatibility
     }
 
     // Allocate handle
@@ -5884,10 +6015,13 @@ fn sys_open_thread(
     match handle {
         Some(h) => {
             unsafe { *(thread_handle_ptr as *mut usize) = h; }
-            crate::serial_println!("[SYSCALL] NtOpenThread -> handle {:#x}", h);
-            0
+            crate::serial_println!("[SYSCALL] NtOpenThread(tid={}) -> handle {:#x}", tid, h);
+            STATUS_SUCCESS
         }
-        None => -1,
+        None => {
+            crate::serial_println!("[SYSCALL] NtOpenThread: failed to allocate handle");
+            STATUS_INSUFFICIENT_RESOURCES
+        }
     }
 }
 
