@@ -4700,48 +4700,247 @@ fn sys_query_object(
 // ============================================================================
 
 /// Process access rights
+#[allow(non_snake_case, non_upper_case_globals)]
 pub mod process_access {
+    /// Permission to terminate the process
     pub const PROCESS_TERMINATE: u32 = 0x0001;
+    /// Permission to create threads in the process
     pub const PROCESS_CREATE_THREAD: u32 = 0x0002;
+    /// Permission to set session ID
     pub const PROCESS_SET_SESSIONID: u32 = 0x0004;
+    /// Permission for VM operations (allocate, free, protect)
     pub const PROCESS_VM_OPERATION: u32 = 0x0008;
+    /// Permission to read process memory
     pub const PROCESS_VM_READ: u32 = 0x0010;
+    /// Permission to write process memory
     pub const PROCESS_VM_WRITE: u32 = 0x0020;
+    /// Permission to duplicate handles
     pub const PROCESS_DUP_HANDLE: u32 = 0x0040;
+    /// Permission to create child processes
     pub const PROCESS_CREATE_PROCESS: u32 = 0x0080;
+    /// Permission to set quota limits
     pub const PROCESS_SET_QUOTA: u32 = 0x0100;
+    /// Permission to set process information
     pub const PROCESS_SET_INFORMATION: u32 = 0x0200;
+    /// Permission to query process information
     pub const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+    /// Permission to suspend or resume the process
     pub const PROCESS_SUSPEND_RESUME: u32 = 0x0800;
-    pub const PROCESS_ALL_ACCESS: u32 = 0x1FFFFF;
+    /// Permission to query limited information (Vista+)
+    pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    /// Permission to set limited information (Vista+)
+    pub const PROCESS_SET_LIMITED_INFORMATION: u32 = 0x2000;
+    /// All access rights (pre-Vista)
+    pub const PROCESS_ALL_ACCESS_XP: u32 = 0x001F0FFF;
+    /// All access rights (Vista+)
+    pub const PROCESS_ALL_ACCESS: u32 = 0x001FFFFF;
+
+    /// Standard rights
+    pub const DELETE: u32 = 0x00010000;
+    pub const READ_CONTROL: u32 = 0x00020000;
+    pub const WRITE_DAC: u32 = 0x00040000;
+    pub const WRITE_OWNER: u32 = 0x00080000;
+    pub const SYNCHRONIZE: u32 = 0x00100000;
+    pub const STANDARD_RIGHTS_REQUIRED: u32 = 0x000F0000;
+    pub const STANDARD_RIGHTS_ALL: u32 = 0x001F0000;
+
+    // Compatibility aliases with NT naming
+    pub const ProcessTerminate: u32 = PROCESS_TERMINATE;
+    pub const ProcessCreateThread: u32 = PROCESS_CREATE_THREAD;
+    pub const ProcessVmOperation: u32 = PROCESS_VM_OPERATION;
+    pub const ProcessVmRead: u32 = PROCESS_VM_READ;
+    pub const ProcessVmWrite: u32 = PROCESS_VM_WRITE;
+    pub const ProcessDupHandle: u32 = PROCESS_DUP_HANDLE;
+    pub const ProcessCreateProcess: u32 = PROCESS_CREATE_PROCESS;
+    pub const ProcessSetQuota: u32 = PROCESS_SET_QUOTA;
+    pub const ProcessSetInformation: u32 = PROCESS_SET_INFORMATION;
+    pub const ProcessQueryInformation: u32 = PROCESS_QUERY_INFORMATION;
+    pub const ProcessSuspendResume: u32 = PROCESS_SUSPEND_RESUME;
+    pub const ProcessAllAccess: u32 = PROCESS_ALL_ACCESS;
+}
+
+/// CLIENT_ID structure for NtOpenProcess
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ClientIdForProcess {
+    /// Process ID to open
+    pub unique_process: u64,
+    /// Thread ID (usually 0 for NtOpenProcess)
+    pub unique_thread: u64,
+}
+
+/// OBJECT_ATTRIBUTES structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectAttributes {
+    /// Size of this structure
+    pub length: u32,
+    /// Root directory handle (optional)
+    pub root_directory: u64,
+    /// Object name (optional, UNICODE_STRING pointer)
+    pub object_name: u64,
+    /// Attributes flags (OBJ_*)
+    pub attributes: u32,
+    /// Security descriptor (optional)
+    pub security_descriptor: u64,
+    /// Security QoS (optional)
+    pub security_quality_of_service: u64,
+}
+
+/// Object attribute flags
+#[allow(non_snake_case, non_upper_case_globals)]
+pub mod obj_attributes {
+    /// Handle is inheritable
+    pub const OBJ_INHERIT: u32 = 0x00000002;
+    /// Object is permanent
+    pub const OBJ_PERMANENT: u32 = 0x00000010;
+    /// Open with exclusive access
+    pub const OBJ_EXCLUSIVE: u32 = 0x00000020;
+    /// Case insensitive name lookup
+    pub const OBJ_CASE_INSENSITIVE: u32 = 0x00000040;
+    /// Open existing object only
+    pub const OBJ_OPENIF: u32 = 0x00000080;
+    /// Open symbolic link, not target
+    pub const OBJ_OPENLINK: u32 = 0x00000100;
+    /// Kernel handle only
+    pub const OBJ_KERNEL_HANDLE: u32 = 0x00000200;
+    /// Force access check
+    pub const OBJ_FORCE_ACCESS_CHECK: u32 = 0x00000400;
+    /// Ignore impersonated device map
+    pub const OBJ_IGNORE_IMPERSONATED_DEVICEMAP: u32 = 0x00000800;
+    /// Don't reparse
+    pub const OBJ_DONT_REPARSE: u32 = 0x00001000;
+    /// Valid attribute mask
+    pub const OBJ_VALID_ATTRIBUTES: u32 = 0x00001FF2;
 }
 
 /// NtOpenProcess - Open a process by ID
+///
+/// Opens an existing process object and returns a handle to it.
+///
+/// # Arguments
+/// * `process_handle` - Pointer to receive the process handle
+/// * `desired_access` - Access rights to request (PROCESS_* flags)
+/// * `object_attributes` - Optional object attributes (can be NULL)
+/// * `client_id` - Pointer to CLIENT_ID containing process ID to open
+///
+/// # Returns
+/// * STATUS_SUCCESS - Process opened successfully
+/// * STATUS_INVALID_PARAMETER - Invalid parameters
+/// * STATUS_INVALID_CID - Process not found
+/// * STATUS_ACCESS_DENIED - Access denied
 fn sys_open_process(
     process_handle_ptr: usize,
     desired_access: usize,
-    _object_attributes: usize,
+    object_attributes: usize,
     client_id_ptr: usize,
     _: usize, _: usize,
 ) -> isize {
-    if process_handle_ptr == 0 || client_id_ptr == 0 {
-        return -1;
+    const STATUS_SUCCESS: isize = 0;
+    const STATUS_INVALID_PARAMETER: isize = 0xC000000Du32 as isize;
+    const STATUS_INVALID_CID: isize = 0xC000000Bu32 as isize;
+    const STATUS_ACCESS_DENIED: isize = 0xC0000022u32 as isize;
+    const STATUS_INSUFFICIENT_RESOURCES: isize = 0xC000009Au32 as isize;
+    const STATUS_PROCESS_IS_TERMINATING: isize = 0xC000010Au32 as isize;
+
+    // Validate required parameters
+    if process_handle_ptr == 0 {
+        return STATUS_INVALID_PARAMETER;
     }
 
-    // Read process ID from CLIENT_ID
-    let pid = unsafe { *(client_id_ptr as *const u32) };
+    if client_id_ptr == 0 {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Read CLIENT_ID structure
+    // CLIENT_ID is { HANDLE UniqueProcess; HANDLE UniqueThread; }
+    // On x64, HANDLEs are 64-bit, but PIDs fit in 32 bits
+    let pid = unsafe {
+        let client_id = client_id_ptr as *const ClientIdForProcess;
+        (*client_id).unique_process as u32
+    };
 
     crate::serial_println!("[SYSCALL] NtOpenProcess(pid={}, access={:#x})",
         pid, desired_access);
 
-    // Verify process exists (check CID table)
-    let process_exists = unsafe {
-        !crate::ps::cid::ps_lookup_process_by_id(pid).is_null()
+    // Process ID must be specified
+    if pid == 0 {
+        crate::serial_println!("[SYSCALL] NtOpenProcess: process ID is zero");
+        return STATUS_INVALID_CID;
+    }
+
+    // Look up the process
+    let process = unsafe { crate::ps::cid::ps_lookup_process_by_id(pid) };
+
+    if process.is_null() {
+        crate::serial_println!("[SYSCALL] NtOpenProcess: process {} not found", pid);
+        return STATUS_INVALID_CID;
+    }
+
+    // Check if process is terminating/terminated
+    unsafe {
+        let eprocess = process as *mut crate::ps::EProcess;
+        use core::sync::atomic::Ordering;
+        let flags = (*eprocess).flags.load(Ordering::Acquire);
+
+        if (flags & crate::ps::eprocess::process_flags::PS_PROCESS_FLAGS_EXITING) != 0 {
+            crate::serial_println!("[SYSCALL] NtOpenProcess: process {} is exiting", pid);
+            // Still allow opening exiting processes (for querying exit status)
+        }
+
+        if (flags & crate::ps::eprocess::process_flags::PS_PROCESS_FLAGS_DEAD) != 0 {
+            crate::serial_println!("[SYSCALL] NtOpenProcess: process {} is dead", pid);
+            // Allow opening dead processes too (for cleanup)
+        }
+    }
+
+    // Parse object attributes if provided
+    let (inherit_handle, case_insensitive) = if object_attributes != 0 {
+        unsafe {
+            let oa = object_attributes as *const ObjectAttributes;
+            let attrs = (*oa).attributes;
+            (
+                (attrs & obj_attributes::OBJ_INHERIT) != 0,
+                (attrs & obj_attributes::OBJ_CASE_INSENSITIVE) != 0
+            )
+        }
+    } else {
+        (false, false)
     };
 
-    if !process_exists {
-        crate::serial_println!("[SYSCALL] NtOpenProcess: process {} not found", pid);
-        return -1; // STATUS_INVALID_CID
+    let _ = inherit_handle; // Will be used when handle inheritance is implemented
+    let _ = case_insensitive; // Not relevant for process handles
+
+    // Validate access mask
+    let access = desired_access as u32;
+    let valid_access = process_access::PROCESS_ALL_ACCESS |
+                       process_access::DELETE |
+                       process_access::READ_CONTROL |
+                       process_access::WRITE_DAC |
+                       process_access::WRITE_OWNER |
+                       process_access::SYNCHRONIZE;
+
+    if (access & !valid_access) != 0 {
+        crate::serial_println!("[SYSCALL] NtOpenProcess: invalid access mask {:#x}", access);
+        // Don't fail - just warn for compatibility
+    }
+
+    // Access check would go here in a full implementation
+    // Check if the caller has permission to open the process with requested access
+    // For now, we grant the requested access
+
+    // Special handling for protected processes
+    unsafe {
+        let eprocess = process as *mut crate::ps::EProcess;
+        use core::sync::atomic::Ordering;
+        let flags = (*eprocess).flags.load(Ordering::Acquire);
+
+        // Check for system process protection
+        if (flags & crate::ps::eprocess::process_flags::PS_PROCESS_FLAGS_SYSTEM) != 0 {
+            // System process - check if we're allowing access
+            // In a full implementation, we'd check for SeDebugPrivilege
+            crate::serial_println!("[SYSCALL] NtOpenProcess: opening system process {}", pid);
+        }
     }
 
     // Allocate handle
@@ -4749,10 +4948,13 @@ fn sys_open_process(
     match handle {
         Some(h) => {
             unsafe { *(process_handle_ptr as *mut usize) = h; }
-            crate::serial_println!("[SYSCALL] NtOpenProcess -> handle {:#x}", h);
-            0
+            crate::serial_println!("[SYSCALL] NtOpenProcess(pid={}) -> handle {:#x}", pid, h);
+            STATUS_SUCCESS
         }
-        None => -1,
+        None => {
+            crate::serial_println!("[SYSCALL] NtOpenProcess: failed to allocate handle");
+            STATUS_INSUFFICIENT_RESOURCES
+        }
     }
 }
 
