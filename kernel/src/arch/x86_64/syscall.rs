@@ -5047,8 +5047,81 @@ fn sys_open_thread(
     }
 }
 
-/// Thread information class
+/// Thread information class constants for query operations
+#[allow(non_snake_case, non_upper_case_globals)]
 pub mod thread_info_class {
+    /// Basic thread information (exit status, TEB, client ID, priority)
+    pub const ThreadBasicInformation: u32 = 0;
+    /// Thread times (creation, exit, kernel, user)
+    pub const ThreadTimes: u32 = 1;
+    /// Thread priority (KPRIORITY)
+    pub const ThreadPriority: u32 = 2;
+    /// Thread base priority
+    pub const ThreadBasePriority: u32 = 3;
+    /// Thread affinity mask
+    pub const ThreadAffinityMask: u32 = 4;
+    /// Thread impersonation token
+    pub const ThreadImpersonationToken: u32 = 5;
+    /// Thread descriptor table info
+    pub const ThreadDescriptorTableEntry: u32 = 6;
+    /// Enable alignment fault fixup
+    pub const ThreadEnableAlignmentFaultFixup: u32 = 7;
+    /// Event pair client (obsolete)
+    pub const ThreadEventPair_Reusable: u32 = 8;
+    /// Win32 start address
+    pub const ThreadQuerySetWin32StartAddress: u32 = 9;
+    /// Zero TLS cell
+    pub const ThreadZeroTlsCell: u32 = 10;
+    /// Performance counter
+    pub const ThreadPerformanceCount: u32 = 11;
+    /// Is in a terminated state
+    pub const ThreadAmILastThread: u32 = 12;
+    /// Thread ideal processor
+    pub const ThreadIdealProcessor: u32 = 13;
+    /// Thread priority boost
+    pub const ThreadPriorityBoost: u32 = 14;
+    /// Set TLS array address
+    pub const ThreadSetTlsArrayAddress: u32 = 15;
+    /// Is I/O pending
+    pub const ThreadIsIoPending: u32 = 16;
+    /// Hide from debugger
+    pub const ThreadHideFromDebugger: u32 = 17;
+    /// Break on termination
+    pub const ThreadBreakOnTermination: u32 = 18;
+    /// Switch legacy state
+    pub const ThreadSwitchLegacyState: u32 = 19;
+    /// Is terminated
+    pub const ThreadIsTerminated: u32 = 20;
+    /// Last system call
+    pub const ThreadLastSystemCall: u32 = 21;
+    /// I/O priority
+    pub const ThreadIoPriority: u32 = 22;
+    /// Cycle time
+    pub const ThreadCycleTime: u32 = 23;
+    /// Page priority
+    pub const ThreadPagePriority: u32 = 24;
+    /// Actual base priority
+    pub const ThreadActualBasePriority: u32 = 25;
+    /// TEB information
+    pub const ThreadTebInformation: u32 = 26;
+    /// CSR API message
+    pub const ThreadCSwitchMon: u32 = 27;
+    /// CSR message process
+    pub const ThreadCSwitchPmu: u32 = 28;
+    /// WOW64 context
+    pub const ThreadWow64Context: u32 = 29;
+    /// Group information
+    pub const ThreadGroupInformation: u32 = 30;
+    /// UMS information
+    pub const ThreadUmsInformation: u32 = 31;
+    /// Counter profiling
+    pub const ThreadCounterProfiling: u32 = 32;
+    /// Ideal processor extended
+    pub const ThreadIdealProcessorEx: u32 = 33;
+    /// Suspend count
+    pub const ThreadSuspendCount: u32 = 35;
+
+    // Legacy names for compatibility
     pub const THREAD_BASIC_INFORMATION: u32 = 0;
     pub const THREAD_TIMES: u32 = 1;
     pub const THREAD_PRIORITY: u32 = 2;
@@ -5059,19 +5132,104 @@ pub mod thread_info_class {
     pub const THREAD_IS_TERMINATED: u32 = 20;
 }
 
-/// THREAD_BASIC_INFORMATION structure
+/// THREAD_BASIC_INFORMATION structure (class 0)
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct ThreadBasicInformation {
+    /// Thread exit status (STATUS_PENDING if running)
     pub exit_status: i32,
+    /// Pointer to Thread Environment Block
     pub teb_base_address: u64,
+    /// Process ID
     pub client_id_process: u32,
+    /// Thread ID
     pub client_id_thread: u32,
+    /// CPU affinity mask
     pub affinity_mask: u64,
+    /// Current scheduling priority
     pub priority: i32,
+    /// Base scheduling priority
     pub base_priority: i32,
 }
 
+/// KERNEL_USER_TIMES structure (class 1)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct KernelUserTimes {
+    /// Creation time (100-nanosecond intervals since 1601)
+    pub create_time: i64,
+    /// Exit time (0 if still running)
+    pub exit_time: i64,
+    /// Time spent in kernel mode
+    pub kernel_time: i64,
+    /// Time spent in user mode
+    pub user_time: i64,
+}
+
+/// Thread performance counter structure (class 11)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadPerformanceCounter {
+    /// Performance counter value
+    pub performance_count: i64,
+}
+
+/// Thread cycle time information (class 23)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadCycleTimeInformation {
+    /// Accumulated cycle time
+    pub accumulated_cycles: u64,
+    /// Current cycle count
+    pub current_cycle_count: u64,
+}
+
+/// Thread last system call information (class 21)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadLastSystemCall {
+    /// First argument of last system call
+    pub first_argument: u64,
+    /// System call number
+    pub system_call_number: u16,
+    /// Padding
+    pub _padding: u16,
+    /// Reserved
+    pub _reserved: u32,
+}
+
+/// Thread TEB information (class 26)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadTebInformation {
+    /// TEB base address
+    pub teb_base: u64,
+    /// TEB offset
+    pub teb_offset: u32,
+    /// Bytes to read
+    pub bytes_to_read: u32,
+}
+
+/// Thread group information (class 30)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadGroupInformation {
+    /// Processor group
+    pub group: u16,
+    /// Reserved
+    pub _reserved: [u16; 3],
+}
+
 /// NtQueryInformationThread - Query thread information
+///
+/// Retrieves information about a thread based on the specified information class.
+///
+/// # Arguments
+/// * `thread_handle` - Handle to the thread (0xFFFFFFFE = current thread)
+/// * `thread_information_class` - Type of information to query
+/// * `thread_information` - Buffer to receive the information
+/// * `thread_information_length` - Size of the buffer
+/// * `return_length` - Optional pointer to receive actual size needed
 fn sys_query_information_thread(
     thread_handle: usize,
     thread_information_class: usize,
@@ -5080,32 +5238,48 @@ fn sys_query_information_thread(
     return_length: usize,
     _: usize,
 ) -> isize {
-    if thread_handle == 0 || thread_information == 0 {
-        return -1;
+    const STATUS_SUCCESS: isize = 0;
+    const STATUS_INVALID_HANDLE: isize = 0xC0000008u32 as isize;
+    const STATUS_INFO_LENGTH_MISMATCH: isize = 0xC0000004u32 as isize;
+    const STATUS_BUFFER_TOO_SMALL: isize = 0xC0000023u32 as isize;
+    const STATUS_INVALID_INFO_CLASS: isize = 0xC0000003u32 as isize;
+    const STATUS_PENDING: i32 = 0x103;
+
+    // Validate buffer pointer
+    if thread_information == 0 {
+        return STATUS_INVALID_HANDLE;
     }
 
-    // Special handle -2 means current thread
-    let tid = if thread_handle == usize::MAX - 1 {
+    // Get thread ID from handle
+    // Special handle -2 (0xFFFFFFFE) means current thread
+    let tid = if thread_handle == usize::MAX - 1 || thread_handle == 0xFFFFFFFE {
         unsafe {
             let prcb = crate::ke::prcb::get_current_prcb();
             if !prcb.current_thread.is_null() {
                 (*prcb.current_thread).thread_id
             } else {
-                0
+                return STATUS_INVALID_HANDLE;
             }
         }
+    } else if thread_handle == 0 {
+        return STATUS_INVALID_HANDLE;
     } else {
         match unsafe { get_thread_id(thread_handle) } {
             Some(t) => t,
-            None => return -1,
+            None => return STATUS_INVALID_HANDLE,
         }
     };
+
+    // Look up thread structure
+    let thread = unsafe { crate::ps::cid::ps_lookup_thread_by_id(tid) };
+    let ethread = thread as *mut crate::ps::EThread;
 
     crate::serial_println!("[SYSCALL] NtQueryInformationThread(tid={}, class={})",
         tid, thread_information_class);
 
     match thread_information_class as u32 {
-        thread_info_class::THREAD_BASIC_INFORMATION => {
+        // Class 0: ThreadBasicInformation
+        thread_info_class::ThreadBasicInformation => {
             let required = core::mem::size_of::<ThreadBasicInformation>();
 
             if return_length != 0 {
@@ -5113,53 +5287,507 @@ fn sys_query_information_thread(
             }
 
             if thread_information_length < required {
-                return 0x80000005u32 as isize;
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
-
-            // Look up thread
-            let thread = unsafe { crate::ps::cid::ps_lookup_thread_by_id(tid) };
 
             unsafe {
                 let info = thread_information as *mut ThreadBasicInformation;
-                (*info).exit_status = 0x103; // STATUS_PENDING
-                (*info).teb_base_address = 0;
-                if !thread.is_null() {
-                    let t = thread as *mut crate::ps::EThread;
-                    (*info).client_id_process = (*t).cid.unique_process;
-                    (*info).client_id_thread = (*t).cid.unique_thread;
-                    (*info).priority = (*(*t).get_tcb()).priority as i32;
-                    (*info).base_priority = (*(*t).get_tcb()).base_priority as i32;
+                if !ethread.is_null() {
+                    let t = &*ethread;
+                    (*info).exit_status = if t.is_terminating() { t.exit_status } else { STATUS_PENDING };
+                    (*info).teb_base_address = t.teb as u64;
+                    (*info).client_id_process = t.cid.unique_process;
+                    (*info).client_id_thread = t.cid.unique_thread;
+                    (*info).affinity_mask = 1; // Single processor for now
+                    (*info).priority = (*t.get_tcb()).priority as i32;
+                    (*info).base_priority = (*t.get_tcb()).base_priority as i32;
                 } else {
+                    (*info).exit_status = STATUS_PENDING;
+                    (*info).teb_base_address = 0;
                     (*info).client_id_process = 0;
                     (*info).client_id_thread = tid;
+                    (*info).affinity_mask = 1;
                     (*info).priority = 8;
                     (*info).base_priority = 8;
                 }
-                (*info).affinity_mask = 1;
             }
 
-            0
+            STATUS_SUCCESS
         }
-        thread_info_class::THREAD_IS_TERMINATED => {
+
+        // Class 1: ThreadTimes
+        thread_info_class::ThreadTimes => {
+            let required = core::mem::size_of::<KernelUserTimes>();
+
             if return_length != 0 {
-                unsafe { *(return_length as *mut usize) = 4; }
+                unsafe { *(return_length as *mut usize) = required; }
             }
 
-            if thread_information_length < 4 {
-                return 0x80000005u32 as isize;
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
 
-            // Check if thread is terminated
             unsafe {
-                *(thread_information as *mut u32) = 0; // Not terminated
+                let info = thread_information as *mut KernelUserTimes;
+                if !ethread.is_null() {
+                    let t = &*ethread;
+                    // Convert ticks to 100-nanosecond intervals
+                    // 1 tick = 1ms = 10000 * 100ns
+                    (*info).create_time = (t.create_time as i64) * 10000;
+                    (*info).exit_time = if t.exit_time > 0 { (t.exit_time as i64) * 10000 } else { 0 };
+                    // Estimate kernel/user time (we don't track this precisely yet)
+                    let total_time = crate::hal::apic::get_tick_count().saturating_sub(t.create_time);
+                    (*info).kernel_time = (total_time as i64) * 10000;
+                    (*info).user_time = 0; // No user mode yet
+                } else {
+                    (*info).create_time = 0;
+                    (*info).exit_time = 0;
+                    (*info).kernel_time = 0;
+                    (*info).user_time = 0;
+                }
             }
 
-            0
+            STATUS_SUCCESS
         }
+
+        // Class 2: ThreadPriority
+        thread_info_class::ThreadPriority => {
+            let required = 4usize; // KPRIORITY is i32
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let priority = if !ethread.is_null() {
+                    (*(*ethread).get_tcb()).priority as i32
+                } else {
+                    8 // Normal priority
+                };
+                *(thread_information as *mut i32) = priority;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 3: ThreadBasePriority
+        thread_info_class::ThreadBasePriority => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let base_priority = if !ethread.is_null() {
+                    (*(*ethread).get_tcb()).base_priority as i32
+                } else {
+                    8
+                };
+                *(thread_information as *mut i32) = base_priority;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 4: ThreadAffinityMask
+        thread_info_class::ThreadAffinityMask => {
+            let required = 8usize; // KAFFINITY is u64 on x64
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // For now, single processor affinity
+                *(thread_information as *mut u64) = 1;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 9: ThreadQuerySetWin32StartAddress
+        thread_info_class::ThreadQuerySetWin32StartAddress => {
+            let required = 8usize; // Pointer size
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let start_addr = if !ethread.is_null() {
+                    (*ethread).win32_start_address as u64
+                } else {
+                    0
+                };
+                *(thread_information as *mut u64) = start_addr;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 11: ThreadPerformanceCount
+        thread_info_class::ThreadPerformanceCount => {
+            let required = core::mem::size_of::<ThreadPerformanceCounter>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = thread_information as *mut ThreadPerformanceCounter;
+                // Read TSC for performance counter
+                let tsc: u64;
+                core::arch::asm!("rdtsc", "shl rdx, 32", "or rax, rdx", out("rax") tsc, out("rdx") _);
+                (*info).performance_count = tsc as i64;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 12: ThreadAmILastThread
+        thread_info_class::ThreadAmILastThread => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Check if this is the last thread in the process
+                let is_last = if !ethread.is_null() {
+                    let process = (*ethread).thread_process;
+                    if !process.is_null() {
+                        (*process).thread_count() <= 1
+                    } else {
+                        true
+                    }
+                } else {
+                    false
+                };
+                *(thread_information as *mut u32) = if is_last { 1 } else { 0 };
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 13: ThreadIdealProcessor
+        thread_info_class::ThreadIdealProcessor => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Return processor 0 for now (single processor)
+                *(thread_information as *mut u32) = 0;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 14: ThreadPriorityBoost
+        thread_info_class::ThreadPriorityBoost => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Priority boost disabled = 0, enabled = 1
+                // We don't track this yet, assume enabled
+                *(thread_information as *mut u32) = 0; // Not disabled
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 16: ThreadIsIoPending
+        thread_info_class::ThreadIsIoPending => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let has_pending_io = if !ethread.is_null() {
+                    use core::sync::atomic::Ordering;
+                    (*ethread).pending_irp_count.load(Ordering::Relaxed) > 0
+                } else {
+                    false
+                };
+                *(thread_information as *mut u32) = if has_pending_io { 1 } else { 0 };
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 17: ThreadHideFromDebugger
+        thread_info_class::ThreadHideFromDebugger => {
+            let required = 1usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // We don't implement debugger hiding yet
+                *(thread_information as *mut u8) = 0;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 18: ThreadBreakOnTermination
+        thread_info_class::ThreadBreakOnTermination => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Not implemented yet
+                *(thread_information as *mut u32) = 0;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 20: ThreadIsTerminated
+        thread_info_class::ThreadIsTerminated => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let is_terminated = if !ethread.is_null() {
+                    (*ethread).is_terminating()
+                } else {
+                    true // If we can't find the thread, assume terminated
+                };
+                *(thread_information as *mut u32) = if is_terminated { 1 } else { 0 };
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 22: ThreadIoPriority
+        thread_info_class::ThreadIoPriority => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Default I/O priority (IoPriorityNormal = 2)
+                *(thread_information as *mut u32) = 2;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 23: ThreadCycleTime
+        thread_info_class::ThreadCycleTime => {
+            let required = core::mem::size_of::<ThreadCycleTimeInformation>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = thread_information as *mut ThreadCycleTimeInformation;
+                // Read current TSC
+                let tsc: u64;
+                core::arch::asm!("rdtsc", "shl rdx, 32", "or rax, rdx", out("rax") tsc, out("rdx") _);
+                (*info).accumulated_cycles = tsc;
+                (*info).current_cycle_count = tsc;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 24: ThreadPagePriority
+        thread_info_class::ThreadPagePriority => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Default page priority (5 = normal)
+                *(thread_information as *mut u32) = 5;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 25: ThreadActualBasePriority
+        thread_info_class::ThreadActualBasePriority => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let base_priority = if !ethread.is_null() {
+                    (*(*ethread).get_tcb()).base_priority as i32
+                } else {
+                    8
+                };
+                *(thread_information as *mut i32) = base_priority;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 26: ThreadTebInformation
+        thread_info_class::ThreadTebInformation => {
+            let required = core::mem::size_of::<ThreadTebInformation>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = thread_information as *mut ThreadTebInformation;
+                if !ethread.is_null() {
+                    (*info).teb_base = (*ethread).teb as u64;
+                } else {
+                    (*info).teb_base = 0;
+                }
+                (*info).teb_offset = 0;
+                (*info).bytes_to_read = 0;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 30: ThreadGroupInformation
+        thread_info_class::ThreadGroupInformation => {
+            let required = core::mem::size_of::<ThreadGroupInformation>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = thread_information as *mut ThreadGroupInformation;
+                (*info).group = 0; // Group 0 (single group system)
+                (*info)._reserved = [0; 3];
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 35: ThreadSuspendCount
+        thread_info_class::ThreadSuspendCount => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if thread_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let suspend_count = if !ethread.is_null() {
+                    (*ethread).suspend_count as u32
+                } else {
+                    0
+                };
+                *(thread_information as *mut u32) = suspend_count;
+            }
+
+            STATUS_SUCCESS
+        }
+
         _ => {
             crate::serial_println!("[SYSCALL] NtQueryInformationThread: unsupported class {}",
                 thread_information_class);
-            -1
+            STATUS_INVALID_INFO_CLASS
         }
     }
 }
