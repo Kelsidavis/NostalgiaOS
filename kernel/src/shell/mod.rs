@@ -2,6 +2,7 @@
 //!
 //! A basic interactive shell for Nostalgia OS that provides:
 //! - Command line editing with backspace
+//! - Command history with up/down arrow navigation
 //! - Built-in commands (help, echo, clear, ver, etc.)
 //! - File system commands (ls, cd, cat, mkdir, rmdir, rm, type)
 //! - System information commands (mem, time)
@@ -17,9 +18,30 @@ const MAX_CMD_LEN: usize = 256;
 /// Maximum number of arguments
 const MAX_ARGS: usize = 16;
 
+/// Maximum number of commands in history
+const HISTORY_SIZE: usize = 32;
+
 /// Current working directory
 static mut CURRENT_DIR: [u8; 64] = [0u8; 64];
 static mut CURRENT_DIR_LEN: usize = 0;
+
+/// Command history entry
+#[derive(Clone, Copy)]
+struct HistoryEntry {
+    /// Command text
+    data: [u8; MAX_CMD_LEN],
+    /// Length of command
+    len: usize,
+}
+
+impl HistoryEntry {
+    const fn new() -> Self {
+        Self {
+            data: [0u8; MAX_CMD_LEN],
+            len: 0,
+        }
+    }
+}
 
 /// Shell state
 pub struct Shell {
@@ -29,15 +51,34 @@ pub struct Shell {
     cmd_pos: usize,
     /// Is the shell running?
     running: bool,
+    /// Command history (circular buffer)
+    history: [HistoryEntry; HISTORY_SIZE],
+    /// Index of next entry to write (also count when < HISTORY_SIZE)
+    history_write: usize,
+    /// Total commands added to history
+    history_count: usize,
+    /// Current position when navigating history (-1 = current line)
+    history_nav: isize,
+    /// Saved current line when navigating history
+    saved_line: [u8; MAX_CMD_LEN],
+    /// Saved current line length
+    saved_len: usize,
 }
 
 impl Shell {
     /// Create a new shell instance
     pub const fn new() -> Self {
+        const EMPTY_ENTRY: HistoryEntry = HistoryEntry::new();
         Self {
             cmd_buf: [0u8; MAX_CMD_LEN],
             cmd_pos: 0,
             running: true,
+            history: [EMPTY_ENTRY; HISTORY_SIZE],
+            history_write: 0,
+            history_count: 0,
+            history_nav: -1,
+            saved_line: [0u8; MAX_CMD_LEN],
+            saved_len: 0,
         }
     }
 
@@ -86,10 +127,14 @@ impl Shell {
             b'\r' | b'\n' => {
                 serial_println!("");
                 if self.cmd_pos > 0 {
+                    // Add to history before executing
+                    self.add_to_history();
                     self.execute_command();
                 }
+                // Reset state
                 self.cmd_pos = 0;
                 self.cmd_buf = [0u8; MAX_CMD_LEN];
+                self.history_nav = -1;
                 if self.running {
                     self.print_prompt();
                 }
@@ -107,9 +152,7 @@ impl Shell {
 
             // Escape sequences (arrow keys, etc.)
             0x1B => {
-                // Read the escape sequence but ignore it for now
-                let _ = keyboard::try_read_char();
-                let _ = keyboard::try_read_char();
+                self.handle_escape_sequence();
             }
 
             // Tab - could be used for completion later
@@ -131,6 +174,7 @@ impl Shell {
                 serial_println!("^C");
                 self.cmd_pos = 0;
                 self.cmd_buf = [0u8; MAX_CMD_LEN];
+                self.history_nav = -1;
                 self.print_prompt();
             }
 
@@ -145,6 +189,177 @@ impl Shell {
                 // Ignore other control characters
             }
         }
+    }
+
+    /// Handle escape sequences (arrow keys, etc.)
+    fn handle_escape_sequence(&mut self) {
+        // Read the next character (should be '[' for CSI sequences)
+        if let Some(c1) = keyboard::try_read_char() {
+            if c1 == b'[' {
+                // CSI sequence - read the command character
+                if let Some(c2) = keyboard::try_read_char() {
+                    match c2 {
+                        b'A' => self.history_up(),   // Up arrow
+                        b'B' => self.history_down(), // Down arrow
+                        b'C' => {}                   // Right arrow (TODO)
+                        b'D' => {}                   // Left arrow (TODO)
+                        b'H' => {}                   // Home (TODO)
+                        b'F' => {}                   // End (TODO)
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
+    /// Add current command to history
+    fn add_to_history(&mut self) {
+        if self.cmd_pos == 0 {
+            return;
+        }
+
+        // Don't add duplicate of last command
+        if self.history_count > 0 {
+            let last_idx = if self.history_write == 0 {
+                HISTORY_SIZE - 1
+            } else {
+                self.history_write - 1
+            };
+            let last = &self.history[last_idx];
+            if last.len == self.cmd_pos {
+                let mut same = true;
+                for i in 0..self.cmd_pos {
+                    if last.data[i] != self.cmd_buf[i] {
+                        same = false;
+                        break;
+                    }
+                }
+                if same {
+                    return;
+                }
+            }
+        }
+
+        // Add to history
+        let entry = &mut self.history[self.history_write];
+        entry.data[..self.cmd_pos].copy_from_slice(&self.cmd_buf[..self.cmd_pos]);
+        entry.len = self.cmd_pos;
+
+        self.history_write = (self.history_write + 1) % HISTORY_SIZE;
+        if self.history_count < HISTORY_SIZE {
+            self.history_count += 1;
+        }
+    }
+
+    /// Navigate up in history (older commands)
+    fn history_up(&mut self) {
+        if self.history_count == 0 {
+            return;
+        }
+
+        // Save current line if we're just starting to navigate
+        if self.history_nav < 0 {
+            self.saved_line[..self.cmd_pos].copy_from_slice(&self.cmd_buf[..self.cmd_pos]);
+            self.saved_len = self.cmd_pos;
+            self.history_nav = 0;
+        } else if (self.history_nav as usize) < self.history_count - 1 {
+            self.history_nav += 1;
+        } else {
+            // Already at oldest entry
+            return;
+        }
+
+        self.load_history_entry();
+    }
+
+    /// Navigate down in history (newer commands)
+    fn history_down(&mut self) {
+        if self.history_nav < 0 {
+            // Not navigating history
+            return;
+        }
+
+        if self.history_nav > 0 {
+            self.history_nav -= 1;
+            self.load_history_entry();
+        } else {
+            // Return to saved line
+            self.history_nav = -1;
+            self.clear_line();
+            self.cmd_buf[..self.saved_len].copy_from_slice(&self.saved_line[..self.saved_len]);
+            self.cmd_pos = self.saved_len;
+            self.redisplay_line();
+        }
+    }
+
+    /// Load a history entry into the command buffer
+    fn load_history_entry(&mut self) {
+        // Calculate actual index in circular buffer
+        // history_nav = 0 means most recent, 1 means second most recent, etc.
+        let offset = self.history_nav as usize;
+
+        // Most recent entry is at (history_write - 1), older entries go backwards
+        let idx = if self.history_write > offset {
+            self.history_write - 1 - offset
+        } else {
+            HISTORY_SIZE - 1 - (offset - self.history_write)
+        };
+
+        let entry = &self.history[idx];
+
+        // Clear current line and display history entry
+        self.clear_line();
+        self.cmd_buf[..entry.len].copy_from_slice(&entry.data[..entry.len]);
+        self.cmd_pos = entry.len;
+        self.redisplay_line();
+    }
+
+    /// Clear the current line on screen
+    fn clear_line(&self) {
+        // Move cursor back to start of input and clear to end of line
+        for _ in 0..self.cmd_pos {
+            crate::serial_print!("\x08");
+        }
+        for _ in 0..self.cmd_pos {
+            crate::serial_print!(" ");
+        }
+        for _ in 0..self.cmd_pos {
+            crate::serial_print!("\x08");
+        }
+    }
+
+    /// Redisplay the current command buffer
+    fn redisplay_line(&self) {
+        for i in 0..self.cmd_pos {
+            crate::serial_print!("{}", self.cmd_buf[i] as char);
+        }
+    }
+
+    /// Print command history
+    fn print_history(&self) {
+        if self.history_count == 0 {
+            serial_println!("No commands in history.");
+            return;
+        }
+
+        serial_println!("");
+        let count = self.history_count.min(HISTORY_SIZE);
+
+        for i in 0..count {
+            // Calculate index from oldest to newest
+            let idx = if self.history_count <= HISTORY_SIZE {
+                i
+            } else {
+                (self.history_write + i) % HISTORY_SIZE
+            };
+
+            let entry = &self.history[idx];
+            if entry.len > 0 {
+                let cmd = core::str::from_utf8(&entry.data[..entry.len]).unwrap_or("<invalid>");
+                serial_println!("  {:>3}  {}", i + 1, cmd);
+            }
+        }
+        serial_println!("");
     }
 
     /// Execute the current command
@@ -219,6 +434,8 @@ impl Shell {
             commands::cmd_time();
         } else if eq_ignore_case(cmd, "ps") || eq_ignore_case(cmd, "tasks") {
             commands::cmd_ps();
+        } else if eq_ignore_case(cmd, "history") {
+            self.print_history();
         } else if eq_ignore_case(cmd, "reboot") {
             commands::cmd_reboot();
         } else {

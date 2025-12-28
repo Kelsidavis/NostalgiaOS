@@ -34,7 +34,10 @@ pub fn cmd_help(args: &[&str]) {
         serial_println!("    mem            Show memory usage");
         serial_println!("    time           Show system time");
         serial_println!("    ps, tasks      Show running threads");
+        serial_println!("    history        Show command history");
         serial_println!("    reboot         Restart the system");
+        serial_println!("");
+        serial_println!("  Use UP/DOWN arrows to navigate command history.");
     } else {
         let topic = args[0];
         if eq_ignore_case(topic, "dir") || eq_ignore_case(topic, "ls") {
