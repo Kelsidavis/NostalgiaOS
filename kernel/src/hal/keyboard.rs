@@ -182,7 +182,7 @@ static mut EXTENDED_SCANCODE: bool = false;
 
 /// Handle a keyboard interrupt
 pub fn handle_interrupt() {
-    // Read scancode
+    // Read scancode from the PS/2 data port
     let scancode = unsafe { inb(ps2_ports::DATA) };
 
     // Handle the scancode
@@ -321,15 +321,38 @@ fn process_scancode(scancode: u8) {
     }
 }
 
+/// Poll the keyboard for available data (non-interrupt based)
+/// Returns true if data is available
+fn poll_keyboard() -> bool {
+    unsafe {
+        (inb(ps2_ports::STATUS) & ps2_status::OUTPUT_FULL) != 0
+    }
+}
+
 /// Read a character from the keyboard buffer (blocking)
+/// Uses polling as fallback if interrupt-driven input isn't working
 pub fn read_char() -> u8 {
     loop {
+        // First check buffer (from interrupt-driven input)
         {
             let mut buf = KEYBOARD_BUFFER.lock();
             if let Some(c) = buf.pop() {
                 return c;
             }
         }
+
+        // Poll the keyboard directly as fallback
+        if poll_keyboard() {
+            let scancode = unsafe { inb(ps2_ports::DATA) };
+            // Process it directly
+            process_scancode(scancode);
+            // Check buffer again
+            let mut buf = KEYBOARD_BUFFER.lock();
+            if let Some(c) = buf.pop() {
+                return c;
+            }
+        }
+
         // Yield to other threads while waiting
         unsafe { crate::ke::scheduler::ki_yield(); }
     }

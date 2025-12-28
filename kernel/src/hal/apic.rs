@@ -116,7 +116,15 @@ impl LocalApic {
         self.write(reg::LVT_TIMER, 1 << 16);    // Masked
         self.write(reg::LVT_THERMAL, 1 << 16);
         self.write(reg::LVT_PERF, 1 << 16);
-        self.write(reg::LVT_LINT0, 1 << 16);
+
+        // Configure LINT0 for ExtINT to pass through PIC interrupts (Virtual Wire Mode)
+        // This allows the 8259 PIC interrupts to reach the CPU via the APIC
+        // Bits: 0-7 = vector (not used for ExtINT), 8-10 = delivery mode (111 = ExtINT),
+        //       12 = delivery status, 13 = polarity, 14 = remote IRR, 15 = trigger mode,
+        //       16 = mask (0 = unmasked)
+        self.write(reg::LVT_LINT0, 0x700); // ExtINT mode, unmasked
+
+        // LINT1 is typically used for NMI, mask it for now
         self.write(reg::LVT_LINT1, 1 << 16);
         self.write(reg::LVT_ERROR, 1 << 16);
     }
