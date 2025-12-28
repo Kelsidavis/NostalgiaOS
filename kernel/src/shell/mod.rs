@@ -5,6 +5,7 @@
 //! - Left/right arrow keys for cursor navigation
 //! - Home/End keys to jump to start/end of line
 //! - Command history with up/down arrow navigation
+//! - Tab completion for commands
 //! - Built-in commands (help, echo, clear, ver, etc.)
 //! - File system commands (ls, cd, cat, mkdir, rmdir, rm, type)
 //! - System information commands (mem, time)
@@ -22,6 +23,20 @@ const MAX_ARGS: usize = 16;
 
 /// Maximum number of commands in history
 const HISTORY_SIZE: usize = 32;
+
+/// List of available commands for tab completion
+const COMMANDS: &[&str] = &[
+    "cat", "cd", "clear", "cls", "copy", "cp",
+    "del", "dir", "echo", "erase", "exit",
+    "help", "history",
+    "ls",
+    "md", "mem", "memory", "mkdir", "mv",
+    "ps", "pwd",
+    "quit",
+    "rd", "reboot", "ren", "rename", "rm", "rmdir",
+    "tasks", "time", "touch", "type",
+    "ver", "version",
+];
 
 /// Current working directory
 static mut CURRENT_DIR: [u8; 64] = [0u8; 64];
@@ -188,9 +203,9 @@ impl Shell {
                 self.handle_escape_sequence();
             }
 
-            // Tab - could be used for completion later
+            // Tab - command completion
             b'\t' => {
-                // Ignore for now
+                self.tab_complete();
             }
 
             // Regular printable characters
@@ -337,6 +352,108 @@ impl Shell {
         if self.cursor_pos < self.cmd_len {
             crate::serial_print!("{}", self.cmd_buf[self.cursor_pos] as char);
             self.cursor_pos += 1;
+        }
+    }
+
+    /// Handle tab completion for commands
+    fn tab_complete(&mut self) {
+        // Only complete if we're at the first word (command)
+        // Check if there's a space in the buffer (meaning we're past first word)
+        for i in 0..self.cmd_len {
+            if self.cmd_buf[i] == b' ' {
+                // Past the first word - don't complete
+                return;
+            }
+        }
+
+        // Get the prefix to complete
+        let prefix_len = self.cmd_len;
+        if prefix_len == 0 {
+            // Show all commands if nothing typed
+            serial_println!("");
+            let mut col = 0;
+            for cmd in COMMANDS.iter() {
+                crate::serial_print!("{:<12}", cmd);
+                col += 1;
+                if col >= 6 {
+                    serial_println!("");
+                    col = 0;
+                }
+            }
+            if col > 0 {
+                serial_println!("");
+            }
+            self.print_prompt();
+            return;
+        }
+
+        // Find matching commands
+        let mut matches: [&str; 16] = [""; 16];
+        let mut match_count = 0;
+
+        for &cmd in COMMANDS.iter() {
+            if cmd.len() >= prefix_len && starts_with_ignore_case(cmd, &self.cmd_buf[..prefix_len]) {
+                if match_count < 16 {
+                    matches[match_count] = cmd;
+                    match_count += 1;
+                }
+            }
+        }
+
+        if match_count == 0 {
+            // No matches - beep or do nothing
+            return;
+        } else if match_count == 1 {
+            // Exactly one match - complete it
+            let completion = matches[0];
+
+            // Clear current line
+            self.clear_line();
+
+            // Copy completion to buffer
+            let comp_bytes = completion.as_bytes();
+            self.cmd_buf[..comp_bytes.len()].copy_from_slice(comp_bytes);
+            self.cmd_len = comp_bytes.len();
+
+            // Add a space after the command
+            if self.cmd_len < MAX_CMD_LEN - 1 {
+                self.cmd_buf[self.cmd_len] = b' ';
+                self.cmd_len += 1;
+            }
+
+            self.cursor_pos = self.cmd_len;
+            self.redisplay_line();
+        } else {
+            // Multiple matches - find common prefix and show options
+            let common_len = find_common_prefix(&matches[..match_count]);
+
+            if common_len > prefix_len {
+                // Complete the common prefix
+                let first_match = matches[0].as_bytes();
+
+                self.clear_line();
+                self.cmd_buf[..common_len].copy_from_slice(&first_match[..common_len]);
+                self.cmd_len = common_len;
+                self.cursor_pos = self.cmd_len;
+                self.redisplay_line();
+            } else {
+                // Show all matching commands
+                serial_println!("");
+                let mut col = 0;
+                for i in 0..match_count {
+                    crate::serial_print!("{:<12}", matches[i]);
+                    col += 1;
+                    if col >= 6 {
+                        serial_println!("");
+                        col = 0;
+                    }
+                }
+                if col > 0 {
+                    serial_println!("");
+                }
+                self.print_prompt();
+                self.redisplay_line();
+            }
         }
     }
 
@@ -623,6 +740,55 @@ fn eq_ignore_case(a: &str, b: &str) -> bool {
         }
     }
     true
+}
+
+/// Check if string starts with prefix (case-insensitive)
+fn starts_with_ignore_case(s: &str, prefix: &[u8]) -> bool {
+    let s_bytes = s.as_bytes();
+    if s_bytes.len() < prefix.len() {
+        return false;
+    }
+    for i in 0..prefix.len() {
+        let ca = s_bytes[i];
+        let cb = prefix[i];
+        let ca_lower = if ca >= b'A' && ca <= b'Z' { ca + 32 } else { ca };
+        let cb_lower = if cb >= b'A' && cb <= b'Z' { cb + 32 } else { cb };
+        if ca_lower != cb_lower {
+            return false;
+        }
+    }
+    true
+}
+
+/// Find common prefix length among matching commands
+fn find_common_prefix(matches: &[&str]) -> usize {
+    if matches.is_empty() {
+        return 0;
+    }
+    if matches.len() == 1 {
+        return matches[0].len();
+    }
+
+    let first = matches[0].as_bytes();
+    let mut common_len = first.len();
+
+    for &m in &matches[1..] {
+        let m_bytes = m.as_bytes();
+        let mut i = 0;
+        while i < common_len && i < m_bytes.len() {
+            let ca = first[i];
+            let cb = m_bytes[i];
+            let ca_lower = if ca >= b'A' && ca <= b'Z' { ca + 32 } else { ca };
+            let cb_lower = if cb >= b'A' && cb <= b'Z' { cb + 32 } else { cb };
+            if ca_lower != cb_lower {
+                break;
+            }
+            i += 1;
+        }
+        common_len = common_len.min(i);
+    }
+
+    common_len
 }
 
 /// Get the current working directory as a string
