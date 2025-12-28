@@ -33,6 +33,8 @@ pub enum ThreadState {
     Transition = 6,
     /// Thread is deferred ready (will be made ready)
     DeferredReady = 7,
+    /// Thread is suspended (suspend_count > 0)
+    Suspended = 8,
 }
 
 /// Scheduling constants (NT compatible)
@@ -177,6 +179,12 @@ pub struct KThread {
 
     /// Number of objects being waited on
     pub wait_count: u8,
+
+    // Suspension support
+    /// Suspend count (thread is suspended when > 0)
+    pub suspend_count: i8,
+    /// State to return to when resumed
+    pub suspend_saved_state: ThreadState,
 }
 
 impl KThread {
@@ -208,7 +216,44 @@ impl KThread {
             wait_block_list: ptr::null_mut(),
             wait_type: WaitType::WaitAny,
             wait_count: 0,
+            suspend_count: 0,
+            suspend_saved_state: ThreadState::Initialized,
         }
+    }
+
+    /// Suspend the thread, returning the previous suspend count
+    pub fn suspend(&mut self) -> i8 {
+        let prev_count = self.suspend_count;
+        self.suspend_count = self.suspend_count.saturating_add(1);
+
+        // If this is the first suspension, save state and mark as suspended
+        if prev_count == 0 && self.state != ThreadState::Terminated {
+            self.suspend_saved_state = self.state;
+            self.state = ThreadState::Suspended;
+        }
+
+        prev_count
+    }
+
+    /// Resume the thread, returning the previous suspend count
+    pub fn resume(&mut self) -> i8 {
+        let prev_count = self.suspend_count;
+
+        if self.suspend_count > 0 {
+            self.suspend_count -= 1;
+
+            // If suspend count reaches 0, restore previous state
+            if self.suspend_count == 0 && self.state == ThreadState::Suspended {
+                self.state = self.suspend_saved_state;
+            }
+        }
+
+        prev_count
+    }
+
+    /// Check if thread is suspended
+    pub fn is_suspended(&self) -> bool {
+        self.suspend_count > 0
     }
 
     /// Initialize a thread with a stack and entry point

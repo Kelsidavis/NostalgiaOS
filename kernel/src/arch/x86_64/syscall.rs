@@ -153,6 +153,18 @@ pub enum SyscallNumber {
     NtAdjustPrivilegesToken = 105,
     NtAdjustGroupsToken = 106,
     NtImpersonateThread = 107,
+
+    // Virtual Memory extended operations
+    NtFlushVirtualMemory = 110,
+    NtLockVirtualMemory = 111,
+    NtUnlockVirtualMemory = 112,
+
+    // Debug operations
+    NtCreateDebugObject = 120,
+    NtDebugActiveProcess = 121,
+    NtRemoveProcessDebug = 122,
+    NtWaitForDebugEvent = 123,
+    NtDebugContinue = 124,
 }
 
 /// Syscall handler function type
@@ -284,6 +296,8 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtFreeVirtualMemory as usize, sys_free_virtual_memory);
     register_syscall(SyscallNumber::NtProtectVirtualMemory as usize, sys_protect_virtual_memory);
     register_syscall(SyscallNumber::NtQueryVirtualMemory as usize, sys_query_virtual_memory);
+    register_syscall(SyscallNumber::NtReadVirtualMemory as usize, sys_read_virtual_memory);
+    register_syscall(SyscallNumber::NtWriteVirtualMemory as usize, sys_write_virtual_memory);
 
     // Section (shared memory) syscalls
     register_syscall(SyscallNumber::NtCreateSection as usize, sys_create_section);
@@ -342,6 +356,27 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtQueryInformationToken as usize, sys_query_information_token);
     register_syscall(SyscallNumber::NtDuplicateToken as usize, sys_duplicate_token);
     register_syscall(SyscallNumber::NtAdjustPrivilegesToken as usize, sys_adjust_privileges_token);
+    register_syscall(SyscallNumber::NtAdjustGroupsToken as usize, sys_adjust_groups_token);
+    register_syscall(SyscallNumber::NtImpersonateThread as usize, sys_impersonate_thread);
+
+    // Set Information syscalls
+    register_syscall(SyscallNumber::NtSetInformationProcess as usize, sys_set_information_process);
+    register_syscall(SyscallNumber::NtSetInformationThread as usize, sys_set_information_thread);
+    register_syscall(SyscallNumber::NtSetInformationObject as usize, sys_set_information_object);
+    register_syscall(SyscallNumber::NtSetInformationToken as usize, sys_set_information_token);
+
+    // Virtual Memory extended syscalls
+    register_syscall(SyscallNumber::NtFlushVirtualMemory as usize, sys_flush_virtual_memory);
+    register_syscall(SyscallNumber::NtLockVirtualMemory as usize, sys_lock_virtual_memory);
+    register_syscall(SyscallNumber::NtUnlockVirtualMemory as usize, sys_unlock_virtual_memory);
+    // NtReadVirtualMemory and NtWriteVirtualMemory are already registered at 50/51
+
+    // Debug syscalls
+    register_syscall(SyscallNumber::NtCreateDebugObject as usize, sys_create_debug_object);
+    register_syscall(SyscallNumber::NtDebugActiveProcess as usize, sys_debug_active_process);
+    register_syscall(SyscallNumber::NtRemoveProcessDebug as usize, sys_remove_process_debug);
+    register_syscall(SyscallNumber::NtWaitForDebugEvent as usize, sys_wait_for_debug_event);
+    register_syscall(SyscallNumber::NtDebugContinue as usize, sys_debug_continue);
 }
 
 /// Register a syscall handler
@@ -4665,12 +4700,24 @@ fn sys_suspend_thread(
 
     crate::serial_println!("[SYSCALL] NtSuspendThread(tid={})", tid);
 
-    // TODO: Actually suspend the thread
-    // For now, just return previous count of 0
+    // Look up the thread by ID
+    let thread_ptr = unsafe { crate::ps::cid::ps_lookup_thread_by_id(tid) };
+    if thread_ptr.is_null() {
+        return -1; // STATUS_INVALID_HANDLE
+    }
+
+    // Get KTHREAD from ETHREAD and suspend it
+    let prev_count = unsafe {
+        let ethread = thread_ptr as *mut crate::ps::EThread;
+        let kthread = (*ethread).get_tcb_mut();
+        (*kthread).suspend()
+    };
 
     if previous_suspend_count != 0 {
-        unsafe { *(previous_suspend_count as *mut u32) = 0; }
+        unsafe { *(previous_suspend_count as *mut u32) = prev_count as u32; }
     }
+
+    crate::serial_println!("[SYSCALL] NtSuspendThread: prev_count={}", prev_count);
 
     0
 }
@@ -4688,11 +4735,24 @@ fn sys_resume_thread(
 
     crate::serial_println!("[SYSCALL] NtResumeThread(tid={})", tid);
 
-    // TODO: Actually resume the thread
+    // Look up the thread by ID
+    let thread_ptr = unsafe { crate::ps::cid::ps_lookup_thread_by_id(tid) };
+    if thread_ptr.is_null() {
+        return -1; // STATUS_INVALID_HANDLE
+    }
+
+    // Get KTHREAD from ETHREAD and resume it
+    let prev_count = unsafe {
+        let ethread = thread_ptr as *mut crate::ps::EThread;
+        let kthread = (*ethread).get_tcb_mut();
+        (*kthread).resume()
+    };
 
     if previous_suspend_count != 0 {
-        unsafe { *(previous_suspend_count as *mut u32) = 0; }
+        unsafe { *(previous_suspend_count as *mut u32) = prev_count as u32; }
     }
+
+    crate::serial_println!("[SYSCALL] NtResumeThread: prev_count={}", prev_count);
 
     0
 }
@@ -4994,5 +5054,858 @@ fn sys_adjust_privileges_token(
     }
 
     // For now, always succeed (all privileges are granted)
+    0
+}
+
+// ============================================================================
+// NtSetInformation Syscalls
+// ============================================================================
+
+/// Process information classes for Set operations
+pub mod set_process_info_class {
+    pub const PROCESS_PRIORITY_CLASS: u32 = 18;
+    pub const PROCESS_AFFINITY_MASK: u32 = 21;
+    pub const PROCESS_RAISE_PRIORITY: u32 = 23;
+    pub const PROCESS_EXCEPTION_PORT: u32 = 8;
+    pub const PROCESS_ACCESS_TOKEN: u32 = 9;
+    pub const PROCESS_BREAK_ON_TERMINATION: u32 = 29;
+    pub const PROCESS_HANDLE_TRACING: u32 = 32;
+}
+
+/// NtSetInformationProcess - Set process attributes
+fn sys_set_information_process(
+    process_handle: usize,
+    process_information_class: usize,
+    process_information: usize,
+    process_information_length: usize,
+    _: usize, _: usize,
+) -> isize {
+    let pid = if process_handle == 0xFFFFFFFF || process_handle == usize::MAX {
+        // Current process (System process = 4)
+        4u32
+    } else {
+        match unsafe { get_process_id(process_handle) } {
+            Some(p) => p,
+            None => return -1,
+        }
+    };
+
+    crate::serial_println!("[SYSCALL] NtSetInformationProcess(pid={}, class={})",
+        pid, process_information_class);
+
+    if process_information == 0 && process_information_length > 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    match process_information_class as u32 {
+        set_process_info_class::PROCESS_PRIORITY_CLASS => {
+            if process_information_length < 2 {
+                return -1;
+            }
+
+            let priority_class = unsafe { *(process_information as *const u8) };
+            crate::serial_println!("[SYSCALL] SetInformationProcess: priority class = {}", priority_class);
+
+            // TODO: Actually set process priority class
+            // Would modify process->base_priority based on class
+            // Classes: Idle=4, BelowNormal=6, Normal=8, AboveNormal=10, High=13, Realtime=24
+
+            0
+        }
+        set_process_info_class::PROCESS_AFFINITY_MASK => {
+            if process_information_length < 8 {
+                return -1;
+            }
+
+            let affinity = unsafe { *(process_information as *const u64) };
+            crate::serial_println!("[SYSCALL] SetInformationProcess: affinity = {:#x}", affinity);
+
+            // TODO: Actually set process affinity mask
+            // Would update process->affinity_mask and propagate to threads
+
+            0
+        }
+        set_process_info_class::PROCESS_BREAK_ON_TERMINATION => {
+            if process_information_length < 4 {
+                return -1;
+            }
+
+            let break_on_term = unsafe { *(process_information as *const u32) };
+            crate::serial_println!("[SYSCALL] SetInformationProcess: break on termination = {}",
+                break_on_term != 0);
+
+            // This is a critical process flag - would cause bugcheck if process terminates
+            // TODO: Store in process flags
+
+            0
+        }
+        set_process_info_class::PROCESS_EXCEPTION_PORT => {
+            // Set the exception port for the process
+            crate::serial_println!("[SYSCALL] SetInformationProcess: exception port");
+            // TODO: Store port handle in process structure
+            0
+        }
+        set_process_info_class::PROCESS_ACCESS_TOKEN => {
+            // Change process token (requires SeAssignPrimaryTokenPrivilege)
+            crate::serial_println!("[SYSCALL] SetInformationProcess: access token");
+            // TODO: Validate privilege and assign new token
+            0
+        }
+        _ => {
+            crate::serial_println!("[SYSCALL] NtSetInformationProcess: unsupported class {}",
+                process_information_class);
+            -1 // STATUS_INVALID_INFO_CLASS
+        }
+    }
+}
+
+/// Thread information classes for Set operations
+pub mod set_thread_info_class {
+    pub const THREAD_PRIORITY: u32 = 1;
+    pub const THREAD_BASE_PRIORITY: u32 = 3;
+    pub const THREAD_AFFINITY_MASK: u32 = 4;
+    pub const THREAD_IMPERSONATION_TOKEN: u32 = 5;
+    pub const THREAD_IDEAL_PROCESSOR: u32 = 13;
+    pub const THREAD_ZERO_TLS_CELL: u32 = 14;
+    pub const THREAD_BREAK_ON_TERMINATION: u32 = 18;
+    pub const THREAD_HIDE_FROM_DEBUGGER: u32 = 17;
+}
+
+/// NtSetInformationThread - Set thread attributes
+fn sys_set_information_thread(
+    thread_handle: usize,
+    thread_information_class: usize,
+    thread_information: usize,
+    thread_information_length: usize,
+    _: usize, _: usize,
+) -> isize {
+    let tid = if thread_handle == 0xFFFFFFFE || thread_handle == (usize::MAX - 1) {
+        // Current thread
+        unsafe {
+            let prcb = crate::ke::prcb::get_current_prcb();
+            if !prcb.current_thread.is_null() {
+                (*prcb.current_thread).thread_id
+            } else {
+                0
+            }
+        }
+    } else {
+        match unsafe { get_thread_id(thread_handle) } {
+            Some(t) => t,
+            None => return -1,
+        }
+    };
+
+    crate::serial_println!("[SYSCALL] NtSetInformationThread(tid={}, class={})",
+        tid, thread_information_class);
+
+    if thread_information == 0 && thread_information_length > 0 {
+        return -1;
+    }
+
+    match thread_information_class as u32 {
+        set_thread_info_class::THREAD_PRIORITY => {
+            if thread_information_length < 4 {
+                return -1;
+            }
+
+            let priority = unsafe { *(thread_information as *const i32) };
+            crate::serial_println!("[SYSCALL] SetInformationThread: priority = {}", priority);
+
+            // Validate priority range (-15 to +15 relative, or 0-31 absolute)
+            if priority < -15 || priority > 15 {
+                return -1; // STATUS_INVALID_PARAMETER
+            }
+
+            // TODO: Actually set thread priority
+            // Would call ke::set_thread_priority(thread, priority)
+
+            0
+        }
+        set_thread_info_class::THREAD_BASE_PRIORITY => {
+            if thread_information_length < 4 {
+                return -1;
+            }
+
+            let base_priority = unsafe { *(thread_information as *const i32) };
+            crate::serial_println!("[SYSCALL] SetInformationThread: base priority = {}", base_priority);
+
+            // TODO: Set thread base priority
+
+            0
+        }
+        set_thread_info_class::THREAD_AFFINITY_MASK => {
+            if thread_information_length < 8 {
+                return -1;
+            }
+
+            let affinity = unsafe { *(thread_information as *const u64) };
+            crate::serial_println!("[SYSCALL] SetInformationThread: affinity = {:#x}", affinity);
+
+            // Affinity must be subset of process affinity
+            // TODO: Validate and set thread affinity
+
+            0
+        }
+        set_thread_info_class::THREAD_IMPERSONATION_TOKEN => {
+            // Set thread impersonation token (or clear it with NULL handle)
+            if thread_information_length < 8 {
+                return -1;
+            }
+
+            let token_handle = unsafe { *(thread_information as *const usize) };
+            crate::serial_println!("[SYSCALL] SetInformationThread: impersonation token = {:#x}",
+                token_handle);
+
+            // TODO: Implement thread impersonation
+            // Would store token in thread->impersonation_token
+
+            0
+        }
+        set_thread_info_class::THREAD_IDEAL_PROCESSOR => {
+            if thread_information_length < 4 {
+                return -1;
+            }
+
+            let ideal_proc = unsafe { *(thread_information as *const u32) };
+            crate::serial_println!("[SYSCALL] SetInformationThread: ideal processor = {}", ideal_proc);
+
+            // TODO: Set ideal processor for scheduler hints
+
+            0
+        }
+        set_thread_info_class::THREAD_HIDE_FROM_DEBUGGER => {
+            crate::serial_println!("[SYSCALL] SetInformationThread: hide from debugger");
+            // TODO: Set thread flag to hide from debugger
+            0
+        }
+        set_thread_info_class::THREAD_BREAK_ON_TERMINATION => {
+            if thread_information_length < 4 {
+                return -1;
+            }
+
+            let break_on_term = unsafe { *(thread_information as *const u32) };
+            crate::serial_println!("[SYSCALL] SetInformationThread: break on termination = {}",
+                break_on_term != 0);
+
+            // TODO: Set critical thread flag
+
+            0
+        }
+        _ => {
+            crate::serial_println!("[SYSCALL] NtSetInformationThread: unsupported class {}",
+                thread_information_class);
+            -1
+        }
+    }
+}
+
+/// Object information classes for Set operations
+pub mod set_object_info_class {
+    pub const OBJECT_FLAGS_INFORMATION: u32 = 4;
+}
+
+/// NtSetInformationObject - Set object attributes
+fn sys_set_information_object(
+    handle: usize,
+    object_information_class: usize,
+    object_information: usize,
+    object_information_length: usize,
+    _: usize, _: usize,
+) -> isize {
+    crate::serial_println!("[SYSCALL] NtSetInformationObject(handle={:#x}, class={})",
+        handle, object_information_class);
+
+    if object_information == 0 && object_information_length > 0 {
+        return -1;
+    }
+
+    match object_information_class as u32 {
+        set_object_info_class::OBJECT_FLAGS_INFORMATION => {
+            if object_information_length < 4 {
+                return -1;
+            }
+
+            // Object flags structure:
+            // BOOLEAN Inherit
+            // BOOLEAN ProtectFromClose
+            let flags = unsafe { *(object_information as *const u32) };
+            let inherit = (flags & 1) != 0;
+            let protect_from_close = (flags & 2) != 0;
+
+            crate::serial_println!("[SYSCALL] SetInformationObject: inherit={}, protect={}",
+                inherit, protect_from_close);
+
+            // TODO: Store flags in handle table entry
+
+            0
+        }
+        _ => {
+            crate::serial_println!("[SYSCALL] NtSetInformationObject: unsupported class {}",
+                object_information_class);
+            -1
+        }
+    }
+}
+
+/// Token information classes for Set operations
+pub mod set_token_info_class {
+    pub const TOKEN_OWNER: u32 = 4;
+    pub const TOKEN_PRIMARY_GROUP: u32 = 5;
+    pub const TOKEN_DEFAULT_DACL: u32 = 6;
+    pub const TOKEN_SESSION_ID: u32 = 12;
+    pub const TOKEN_SESSION_REFERENCE: u32 = 14;
+    pub const TOKEN_ORIGIN: u32 = 17;
+}
+
+/// NtSetInformationToken - Set token attributes
+fn sys_set_information_token(
+    token_handle: usize,
+    token_information_class: usize,
+    token_information: usize,
+    token_information_length: usize,
+    _: usize, _: usize,
+) -> isize {
+    let token_id = match unsafe { get_token_id(token_handle) } {
+        Some(t) => t,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtSetInformationToken(token={}, class={})",
+        token_id, token_information_class);
+
+    if token_information == 0 && token_information_length > 0 {
+        return -1;
+    }
+
+    match token_information_class as u32 {
+        set_token_info_class::TOKEN_OWNER => {
+            if token_information_length < 8 {
+                return -1;
+            }
+
+            // TOKEN_OWNER contains a pointer to SID
+            let owner_sid_ptr = unsafe { *(token_information as *const usize) };
+            crate::serial_println!("[SYSCALL] SetInformationToken: owner SID at {:#x}",
+                owner_sid_ptr);
+
+            // TODO: Validate SID and update token owner
+
+            0
+        }
+        set_token_info_class::TOKEN_PRIMARY_GROUP => {
+            if token_information_length < 8 {
+                return -1;
+            }
+
+            let group_sid_ptr = unsafe { *(token_information as *const usize) };
+            crate::serial_println!("[SYSCALL] SetInformationToken: primary group SID at {:#x}",
+                group_sid_ptr);
+
+            // TODO: Validate SID and update token primary group
+
+            0
+        }
+        set_token_info_class::TOKEN_DEFAULT_DACL => {
+            // TOKEN_DEFAULT_DACL contains ACL pointer (can be NULL to remove)
+            crate::serial_println!("[SYSCALL] SetInformationToken: default DACL");
+
+            // TODO: Validate ACL and update token default DACL
+
+            0
+        }
+        set_token_info_class::TOKEN_SESSION_ID => {
+            if token_information_length < 4 {
+                return -1;
+            }
+
+            let session_id = unsafe { *(token_information as *const u32) };
+            crate::serial_println!("[SYSCALL] SetInformationToken: session ID = {}", session_id);
+
+            // Requires SeTcbPrivilege to change
+            // TODO: Validate privilege and update token session ID
+
+            0
+        }
+        set_token_info_class::TOKEN_ORIGIN => {
+            if token_information_length < 8 {
+                return -1;
+            }
+
+            // TOKEN_ORIGIN contains LUID of originating logon session
+            let origin_luid = unsafe { *(token_information as *const u64) };
+            crate::serial_println!("[SYSCALL] SetInformationToken: origin LUID = {:#x}", origin_luid);
+
+            // TODO: Store origin LUID
+
+            0
+        }
+        _ => {
+            crate::serial_println!("[SYSCALL] NtSetInformationToken: unsupported class {}",
+                token_information_class);
+            -1
+        }
+    }
+}
+
+/// NtAdjustGroupsToken - Enable/disable token groups
+fn sys_adjust_groups_token(
+    token_handle: usize,
+    reset_to_default: usize,
+    new_state: usize,
+    buffer_length: usize,
+    previous_state: usize,
+    return_length: usize,
+) -> isize {
+    let token_id = match unsafe { get_token_id(token_handle) } {
+        Some(t) => t,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtAdjustGroupsToken(token={}, reset={})",
+        token_id, reset_to_default != 0);
+
+    if reset_to_default != 0 {
+        // Reset all groups to their default enabled state
+        crate::serial_println!("[SYSCALL] AdjustGroupsToken: resetting to defaults");
+        // TODO: Reset group enabled flags to defaults
+
+        if return_length != 0 {
+            unsafe { *(return_length as *mut usize) = 0; }
+        }
+        return 0;
+    }
+
+    // new_state points to TOKEN_GROUPS structure
+    if new_state == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    // TOKEN_GROUPS structure:
+    // ULONG GroupCount
+    // SID_AND_ATTRIBUTES Groups[ANYSIZE_ARRAY]
+    let group_count = unsafe { *(new_state as *const u32) };
+    crate::serial_println!("[SYSCALL] AdjustGroupsToken: {} groups", group_count);
+
+    let _ = buffer_length;
+    let _ = previous_state;
+
+    // TODO: Process each group and enable/disable accordingly
+    // Groups with SE_GROUP_USE_FOR_DENY_ONLY cannot be enabled
+
+    if return_length != 0 {
+        unsafe { *(return_length as *mut usize) = 0; }
+    }
+
+    0
+}
+
+/// NtImpersonateThread - Impersonate another thread's security context
+fn sys_impersonate_thread(
+    server_thread_handle: usize,
+    client_thread_handle: usize,
+    security_qos: usize,
+    _: usize, _: usize, _: usize,
+) -> isize {
+    let server_tid = if server_thread_handle == 0xFFFFFFFE || server_thread_handle == (usize::MAX - 1) {
+        // Current thread
+        unsafe {
+            let prcb = crate::ke::prcb::get_current_prcb();
+            if !prcb.current_thread.is_null() {
+                (*prcb.current_thread).thread_id
+            } else {
+                0
+            }
+        }
+    } else {
+        match unsafe { get_thread_id(server_thread_handle) } {
+            Some(t) => t,
+            None => return -1,
+        }
+    };
+
+    let client_tid = match unsafe { get_thread_id(client_thread_handle) } {
+        Some(t) => t,
+        None => return -1, // STATUS_INVALID_HANDLE
+    };
+
+    crate::serial_println!("[SYSCALL] NtImpersonateThread(server={}, client={})",
+        server_tid, client_tid);
+
+    // security_qos points to SECURITY_QUALITY_OF_SERVICE
+    // Contains: Length, ImpersonationLevel, ContextTrackingMode, EffectiveOnly
+    if security_qos != 0 {
+        let length = unsafe { *(security_qos as *const u32) };
+        if length >= 8 {
+            let impersonation_level = unsafe { *((security_qos + 4) as *const u32) };
+            crate::serial_println!("[SYSCALL] ImpersonateThread: level = {}", impersonation_level);
+            // Levels: 0=Anonymous, 1=Identification, 2=Impersonation, 3=Delegation
+        }
+    }
+
+    // TODO: Implement actual impersonation:
+    // 1. Get client thread's effective token
+    // 2. Duplicate it as an impersonation token
+    // 3. Set it on the server thread
+
+    0
+}
+
+// ============================================================================
+// Virtual Memory Extended Operations
+// ============================================================================
+
+/// NtFlushVirtualMemory - Flush modified pages to backing store
+fn sys_flush_virtual_memory(
+    process_handle: usize,
+    base_address: usize,
+    region_size: usize,
+    io_status: usize,
+    _: usize, _: usize,
+) -> isize {
+    let _ = process_handle;
+
+    crate::serial_println!("[SYSCALL] NtFlushVirtualMemory(base={:#x}, size={:#x})",
+        base_address, region_size);
+
+    // For memory-mapped files, this would write dirty pages to disk
+    // For now, just succeed
+
+    if io_status != 0 {
+        unsafe {
+            // IO_STATUS_BLOCK: Status, Information
+            *(io_status as *mut i32) = 0; // STATUS_SUCCESS
+            *((io_status + 8) as *mut usize) = region_size;
+        }
+    }
+
+    0
+}
+
+/// NtLockVirtualMemory - Lock pages in physical memory
+fn sys_lock_virtual_memory(
+    process_handle: usize,
+    base_address_ptr: usize,
+    region_size_ptr: usize,
+    map_type: usize,
+    _: usize, _: usize,
+) -> isize {
+    let _ = process_handle;
+
+    if base_address_ptr == 0 || region_size_ptr == 0 {
+        return -1;
+    }
+
+    let base = unsafe { *(base_address_ptr as *const usize) };
+    let size = unsafe { *(region_size_ptr as *const usize) };
+
+    crate::serial_println!("[SYSCALL] NtLockVirtualMemory(base={:#x}, size={:#x}, type={})",
+        base, size, map_type);
+
+    // map_type: 1 = MAP_PROCESS (lock in working set), 2 = MAP_SYSTEM (lock in physical memory)
+
+    // TODO: Actually lock pages
+    // Would mark PTEs as non-pageable
+
+    0
+}
+
+/// NtUnlockVirtualMemory - Unlock previously locked pages
+fn sys_unlock_virtual_memory(
+    process_handle: usize,
+    base_address_ptr: usize,
+    region_size_ptr: usize,
+    map_type: usize,
+    _: usize, _: usize,
+) -> isize {
+    let _ = process_handle;
+
+    if base_address_ptr == 0 || region_size_ptr == 0 {
+        return -1;
+    }
+
+    let base = unsafe { *(base_address_ptr as *const usize) };
+    let size = unsafe { *(region_size_ptr as *const usize) };
+
+    crate::serial_println!("[SYSCALL] NtUnlockVirtualMemory(base={:#x}, size={:#x}, type={})",
+        base, size, map_type);
+
+    // TODO: Actually unlock pages
+
+    0
+}
+
+/// NtReadVirtualMemory - Read memory from another process
+fn sys_read_virtual_memory(
+    process_handle: usize,
+    base_address: usize,
+    buffer: usize,
+    buffer_size: usize,
+    number_of_bytes_read: usize,
+    _: usize,
+) -> isize {
+    let pid = if process_handle == 0xFFFFFFFF || process_handle == usize::MAX {
+        // Current process (System = 4)
+        4u32
+    } else {
+        match unsafe { get_process_id(process_handle) } {
+            Some(p) => p,
+            None => return -1,
+        }
+    };
+
+    crate::serial_println!("[SYSCALL] NtReadVirtualMemory(pid={}, addr={:#x}, size={})",
+        pid, base_address, buffer_size);
+
+    if buffer == 0 || buffer_size == 0 {
+        return -1;
+    }
+
+    // TODO: Implement cross-process memory read
+    // Would need to:
+    // 1. Attach to target process address space
+    // 2. Validate source address is readable
+    // 3. Copy memory
+    // 4. Detach
+
+    // For now, if reading from current process, just memcpy
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            base_address as *const u8,
+            buffer as *mut u8,
+            buffer_size,
+        );
+    }
+
+    if number_of_bytes_read != 0 {
+        unsafe { *(number_of_bytes_read as *mut usize) = buffer_size; }
+    }
+
+    0
+}
+
+/// NtWriteVirtualMemory - Write memory to another process
+fn sys_write_virtual_memory(
+    process_handle: usize,
+    base_address: usize,
+    buffer: usize,
+    buffer_size: usize,
+    number_of_bytes_written: usize,
+    _: usize,
+) -> isize {
+    let pid = if process_handle == 0xFFFFFFFF || process_handle == usize::MAX {
+        // Current process (System = 4)
+        4u32
+    } else {
+        match unsafe { get_process_id(process_handle) } {
+            Some(p) => p,
+            None => return -1,
+        }
+    };
+
+    crate::serial_println!("[SYSCALL] NtWriteVirtualMemory(pid={}, addr={:#x}, size={})",
+        pid, base_address, buffer_size);
+
+    if buffer == 0 || buffer_size == 0 {
+        return -1;
+    }
+
+    // TODO: Implement cross-process memory write
+    // Similar to read, but validates write access
+
+    // For now, if writing to current process, just memcpy
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            buffer as *const u8,
+            base_address as *mut u8,
+            buffer_size,
+        );
+    }
+
+    if number_of_bytes_written != 0 {
+        unsafe { *(number_of_bytes_written as *mut usize) = buffer_size; }
+    }
+
+    0
+}
+
+// ============================================================================
+// Debug Object Support
+// ============================================================================
+
+/// Debug object handle base
+const DEBUG_HANDLE_BASE: usize = 0x7000;
+const MAX_DEBUG_HANDLES: usize = 64;
+
+/// Debug object table
+static mut DEBUG_OBJECTS: [u32; MAX_DEBUG_HANDLES] = [0; MAX_DEBUG_HANDLES];
+
+/// Allocate a debug handle
+unsafe fn alloc_debug_handle(debugged_pid: u32) -> Option<usize> {
+    for i in 0..MAX_DEBUG_HANDLES {
+        if DEBUG_OBJECTS[i] == 0 {
+            DEBUG_OBJECTS[i] = debugged_pid;
+            return Some(i + DEBUG_HANDLE_BASE);
+        }
+    }
+    None
+}
+
+/// Get debugged process from debug handle
+unsafe fn get_debug_object(handle: usize) -> Option<u32> {
+    if handle >= DEBUG_HANDLE_BASE && handle < DEBUG_HANDLE_BASE + MAX_DEBUG_HANDLES {
+        let idx = handle - DEBUG_HANDLE_BASE;
+        if DEBUG_OBJECTS[idx] != 0 {
+            return Some(DEBUG_OBJECTS[idx]);
+        }
+    }
+    None
+}
+
+/// Free a debug handle
+unsafe fn free_debug_handle(handle: usize) {
+    if handle >= DEBUG_HANDLE_BASE && handle < DEBUG_HANDLE_BASE + MAX_DEBUG_HANDLES {
+        let idx = handle - DEBUG_HANDLE_BASE;
+        DEBUG_OBJECTS[idx] = 0;
+    }
+}
+
+/// NtCreateDebugObject - Create a debug object for debugging processes
+fn sys_create_debug_object(
+    debug_object_handle: usize,
+    desired_access: usize,
+    _object_attributes: usize,
+    flags: usize,
+    _: usize, _: usize,
+) -> isize {
+    if debug_object_handle == 0 {
+        return -1;
+    }
+
+    crate::serial_println!("[SYSCALL] NtCreateDebugObject(access={:#x}, flags={:#x})",
+        desired_access, flags);
+
+    // flags: DEBUG_KILL_ON_CLOSE (0x1) - terminate debugged process when debug object closed
+
+    // Allocate debug object (placeholder PID 0 until attached)
+    let handle = unsafe { alloc_debug_handle(0) };
+
+    match handle {
+        Some(h) => {
+            unsafe { *(debug_object_handle as *mut usize) = h; }
+            crate::serial_println!("[SYSCALL] NtCreateDebugObject -> handle {:#x}", h);
+            0
+        }
+        None => -1,
+    }
+}
+
+/// NtDebugActiveProcess - Attach debugger to a process
+fn sys_debug_active_process(
+    process_handle: usize,
+    debug_object_handle: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    let pid = match unsafe { get_process_id(process_handle) } {
+        Some(p) => p,
+        None => return -1,
+    };
+
+    let _ = match unsafe { get_debug_object(debug_object_handle) } {
+        Some(_) => (),
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtDebugActiveProcess(pid={}, debug_handle={:#x})",
+        pid, debug_object_handle);
+
+    // Update debug object with target PID
+    let idx = debug_object_handle - DEBUG_HANDLE_BASE;
+    unsafe {
+        if idx < MAX_DEBUG_HANDLES {
+            DEBUG_OBJECTS[idx] = pid;
+        }
+    }
+
+    // TODO: Actually attach debugger
+    // Would set process->debug_port and generate initial debug events
+
+    0
+}
+
+/// NtRemoveProcessDebug - Detach debugger from process
+fn sys_remove_process_debug(
+    process_handle: usize,
+    debug_object_handle: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    let pid = match unsafe { get_process_id(process_handle) } {
+        Some(p) => p,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtRemoveProcessDebug(pid={}, debug_handle={:#x})",
+        pid, debug_object_handle);
+
+    // TODO: Actually detach debugger
+    // Would clear process->debug_port
+
+    0
+}
+
+/// NtWaitForDebugEvent - Wait for debug event from debugged process
+fn sys_wait_for_debug_event(
+    debug_object_handle: usize,
+    alertable: usize,
+    timeout: usize,
+    wait_state_change: usize,
+    _: usize, _: usize,
+) -> isize {
+    let debugged_pid = match unsafe { get_debug_object(debug_object_handle) } {
+        Some(p) => p,
+        None => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtWaitForDebugEvent(pid={}, alertable={}, timeout={:#x})",
+        debugged_pid, alertable != 0, timeout);
+
+    if wait_state_change == 0 {
+        return -1;
+    }
+
+    // TODO: Actually wait for and return debug events
+    // Would block until breakpoint, exception, thread create/exit, etc.
+
+    // For now, just return timeout
+    0x102 // STATUS_TIMEOUT
+}
+
+/// NtDebugContinue - Continue from debug event
+fn sys_debug_continue(
+    debug_object_handle: usize,
+    client_id: usize,
+    continue_status: usize,
+    _: usize, _: usize, _: usize,
+) -> isize {
+    let debugged_pid = match unsafe { get_debug_object(debug_object_handle) } {
+        Some(p) => p,
+        None => return -1,
+    };
+
+    let (pid, tid) = if client_id != 0 {
+        unsafe {
+            (*(client_id as *const u32), *((client_id + 4) as *const u32))
+        }
+    } else {
+        (debugged_pid, 0)
+    };
+
+    crate::serial_println!("[SYSCALL] NtDebugContinue(pid={}, tid={}, status={:#x})",
+        pid, tid, continue_status);
+
+    // continue_status: DBG_CONTINUE (0x10002) or DBG_EXCEPTION_NOT_HANDLED (0x80010001)
+
+    // TODO: Actually continue the debugged thread
+
     0
 }

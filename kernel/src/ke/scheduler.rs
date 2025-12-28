@@ -340,6 +340,7 @@ pub unsafe fn list_threads() {
                 ThreadState::Waiting => "Wait  ",
                 ThreadState::Transition => "Trans ",
                 ThreadState::DeferredReady => "DfRdy ",
+                ThreadState::Suspended => "Suspnd",
             };
 
             crate::serial_println!("  {:>3}  {}      {:>2}",
