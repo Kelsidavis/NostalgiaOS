@@ -12,6 +12,7 @@
 
 use crate::hal::keyboard;
 use crate::serial_println;
+use crate::fs;
 
 mod commands;
 
@@ -355,18 +356,24 @@ impl Shell {
         }
     }
 
-    /// Handle tab completion for commands
+    /// Handle tab completion for commands and filenames
     fn tab_complete(&mut self) {
-        // Only complete if we're at the first word (command)
-        // Check if there's a space in the buffer (meaning we're past first word)
+        // Find the last space to determine if we're completing command or filename
+        let mut last_space: Option<usize> = None;
         for i in 0..self.cmd_len {
             if self.cmd_buf[i] == b' ' {
-                // Past the first word - don't complete
-                return;
+                last_space = Some(i);
             }
         }
 
-        // Get the prefix to complete
+        match last_space {
+            None => self.complete_command(),
+            Some(space_pos) => self.complete_filename(space_pos + 1),
+        }
+    }
+
+    /// Complete command name (first word)
+    fn complete_command(&mut self) {
         let prefix_len = self.cmd_len;
         if prefix_len == 0 {
             // Show all commands if nothing typed
@@ -401,16 +408,11 @@ impl Shell {
         }
 
         if match_count == 0 {
-            // No matches - beep or do nothing
             return;
         } else if match_count == 1 {
             // Exactly one match - complete it
             let completion = matches[0];
-
-            // Clear current line
             self.clear_line();
-
-            // Copy completion to buffer
             let comp_bytes = completion.as_bytes();
             self.cmd_buf[..comp_bytes.len()].copy_from_slice(comp_bytes);
             self.cmd_len = comp_bytes.len();
@@ -420,7 +422,6 @@ impl Shell {
                 self.cmd_buf[self.cmd_len] = b' ';
                 self.cmd_len += 1;
             }
-
             self.cursor_pos = self.cmd_len;
             self.redisplay_line();
         } else {
@@ -428,22 +429,193 @@ impl Shell {
             let common_len = find_common_prefix(&matches[..match_count]);
 
             if common_len > prefix_len {
-                // Complete the common prefix
                 let first_match = matches[0].as_bytes();
-
                 self.clear_line();
                 self.cmd_buf[..common_len].copy_from_slice(&first_match[..common_len]);
                 self.cmd_len = common_len;
                 self.cursor_pos = self.cmd_len;
                 self.redisplay_line();
             } else {
-                // Show all matching commands
                 serial_println!("");
                 let mut col = 0;
                 for i in 0..match_count {
                     crate::serial_print!("{:<12}", matches[i]);
                     col += 1;
                     if col >= 6 {
+                        serial_println!("");
+                        col = 0;
+                    }
+                }
+                if col > 0 {
+                    serial_println!("");
+                }
+                self.print_prompt();
+                self.redisplay_line();
+            }
+        }
+    }
+
+    /// Complete filename (after command)
+    fn complete_filename(&mut self, word_start: usize) {
+        // Get the current word being typed
+        let word_len = self.cmd_len - word_start;
+
+        // Extract the word into a buffer
+        let mut word_buf: [u8; 128] = [0u8; 128];
+        let word_len = word_len.min(127);
+        word_buf[..word_len].copy_from_slice(&self.cmd_buf[word_start..word_start + word_len]);
+
+        // Find the last path separator to split directory and filename prefix
+        let mut last_sep: Option<usize> = None;
+        for i in 0..word_len {
+            if word_buf[i] == b'\\' || word_buf[i] == b'/' {
+                last_sep = Some(i);
+            }
+        }
+
+        // Determine directory to search and filename prefix
+        let (dir_path, prefix_start, prefix_len) = match last_sep {
+            Some(sep_pos) => {
+                // Has path separator - directory is before it, prefix after
+                let mut dir_buf: [u8; 128] = [0u8; 128];
+
+                // Build full directory path
+                if word_buf[0] == b'\\' || word_buf[0] == b'/' ||
+                   (word_len >= 2 && word_buf[1] == b':') {
+                    // Absolute path
+                    dir_buf[..sep_pos + 1].copy_from_slice(&word_buf[..sep_pos + 1]);
+                } else {
+                    // Relative path - prepend current directory
+                    let cur_dir = get_current_dir();
+                    let cur_bytes = cur_dir.as_bytes();
+                    let mut pos = cur_bytes.len();
+                    dir_buf[..pos].copy_from_slice(cur_bytes);
+                    if pos > 0 && dir_buf[pos - 1] != b'\\' {
+                        dir_buf[pos] = b'\\';
+                        pos += 1;
+                    }
+                    dir_buf[pos..pos + sep_pos + 1].copy_from_slice(&word_buf[..sep_pos + 1]);
+                }
+
+                (dir_buf, word_start + sep_pos + 1, word_len - sep_pos - 1)
+            }
+            None => {
+                // No path separator - use current directory
+                let cur_dir = get_current_dir();
+                let cur_bytes = cur_dir.as_bytes();
+                let mut dir_buf: [u8; 128] = [0u8; 128];
+                dir_buf[..cur_bytes.len()].copy_from_slice(cur_bytes);
+                (dir_buf, word_start, word_len)
+            }
+        };
+
+        // Get prefix to match
+        let prefix = &self.cmd_buf[prefix_start..prefix_start + prefix_len];
+
+        // Convert dir_path to string for fs::readdir
+        let dir_str = {
+            let mut len = 0;
+            while len < dir_path.len() && dir_path[len] != 0 {
+                len += 1;
+            }
+            core::str::from_utf8(&dir_path[..len]).unwrap_or("")
+        };
+
+        // Collect matching files
+        const MAX_FILE_MATCHES: usize = 16;
+        let mut file_matches: [[u8; 64]; MAX_FILE_MATCHES] = [[0u8; 64]; MAX_FILE_MATCHES];
+        let mut file_lens: [usize; MAX_FILE_MATCHES] = [0; MAX_FILE_MATCHES];
+        let mut is_dir: [bool; MAX_FILE_MATCHES] = [false; MAX_FILE_MATCHES];
+        let mut match_count = 0;
+
+        let mut offset = 0u32;
+        loop {
+            match fs::readdir(dir_str, offset) {
+                Ok(entry) => {
+                    let name = entry.name_str();
+                    let name_bytes = name.as_bytes();
+
+                    // Skip . and ..
+                    if name == "." || name == ".." {
+                        offset = entry.next_offset;
+                        continue;
+                    }
+
+                    // Check if name starts with prefix (case-insensitive)
+                    if prefix_len == 0 || starts_with_ignore_case(name, prefix) {
+                        if match_count < MAX_FILE_MATCHES && name_bytes.len() < 64 {
+                            file_matches[match_count][..name_bytes.len()].copy_from_slice(name_bytes);
+                            file_lens[match_count] = name_bytes.len();
+                            is_dir[match_count] = entry.file_type == fs::FileType::Directory;
+                            match_count += 1;
+                        }
+                    }
+
+                    offset = entry.next_offset;
+                    if offset == 0 {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        if match_count == 0 {
+            return;
+        } else if match_count == 1 {
+            // Single match - complete it
+            let name_len = file_lens[0];
+            let is_directory = is_dir[0];
+
+            // Calculate new command length
+            let new_len = prefix_start + name_len + if is_directory { 1 } else { 1 };
+            if new_len >= MAX_CMD_LEN {
+                return;
+            }
+
+            // Replace prefix with full filename
+            self.cmd_buf[prefix_start..prefix_start + name_len].copy_from_slice(&file_matches[0][..name_len]);
+            self.cmd_len = prefix_start + name_len;
+
+            // Add trailing backslash for directories or space for files
+            if is_directory {
+                self.cmd_buf[self.cmd_len] = b'\\';
+            } else {
+                self.cmd_buf[self.cmd_len] = b' ';
+            }
+            self.cmd_len += 1;
+
+            self.cursor_pos = self.cmd_len;
+            self.clear_line();
+            self.redisplay_line();
+        } else {
+            // Multiple matches - find common prefix
+            let common_len = find_common_prefix_bytes(&file_matches, &file_lens, match_count);
+
+            if common_len > prefix_len {
+                // Complete common prefix
+                let new_len = prefix_start + common_len;
+                if new_len < MAX_CMD_LEN {
+                    self.cmd_buf[prefix_start..prefix_start + common_len]
+                        .copy_from_slice(&file_matches[0][..common_len]);
+                    self.cmd_len = new_len;
+                    self.cursor_pos = self.cmd_len;
+                    self.clear_line();
+                    self.redisplay_line();
+                }
+            } else {
+                // Show all matches
+                serial_println!("");
+                let mut col = 0;
+                for i in 0..match_count {
+                    let name = core::str::from_utf8(&file_matches[i][..file_lens[i]]).unwrap_or("?");
+                    if is_dir[i] {
+                        crate::serial_print!("{:<12}/", name);
+                    } else {
+                        crate::serial_print!("{:<13}", name);
+                    }
+                    col += 1;
+                    if col >= 5 {
                         serial_println!("");
                         col = 0;
                     }
@@ -786,6 +958,38 @@ fn find_common_prefix(matches: &[&str]) -> usize {
             i += 1;
         }
         common_len = common_len.min(i);
+    }
+
+    common_len
+}
+
+/// Find common prefix length among matching filenames (byte arrays)
+fn find_common_prefix_bytes(matches: &[[u8; 64]; 16], lens: &[usize; 16], count: usize) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    if count == 1 {
+        return lens[0];
+    }
+
+    let first = &matches[0];
+    let mut common_len = lens[0];
+
+    for i in 1..count {
+        let m = &matches[i];
+        let m_len = lens[i];
+        let mut j = 0;
+        while j < common_len && j < m_len {
+            let ca = first[j];
+            let cb = m[j];
+            let ca_lower = if ca >= b'A' && ca <= b'Z' { ca + 32 } else { ca };
+            let cb_lower = if cb >= b'A' && cb <= b'Z' { cb + 32 } else { cb };
+            if ca_lower != cb_lower {
+                break;
+            }
+            j += 1;
+        }
+        common_len = common_len.min(j);
     }
 
     common_len
