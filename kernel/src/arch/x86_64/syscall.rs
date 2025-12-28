@@ -2394,40 +2394,328 @@ fn sys_protect_virtual_memory(
     }
 }
 
+// ============================================================================
+// NtQueryVirtualMemory Types and Structures
+// ============================================================================
+
+/// Memory information class for NtQueryVirtualMemory
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryInformationClass {
+    /// Basic memory information (MEMORY_BASIC_INFORMATION)
+    MemoryBasicInformation = 0,
+    /// Working set information
+    MemoryWorkingSetInformation = 1,
+    /// Mapped file name
+    MemoryMappedFilenameInformation = 2,
+    /// Region information
+    MemoryRegionInformation = 3,
+    /// Working set list (extended)
+    MemoryWorkingSetExInformation = 4,
+    /// Shared commit information
+    MemorySharedCommitInformation = 5,
+    /// Image information
+    MemoryImageInformation = 6,
+    /// Region information (extended)
+    MemoryRegionInformationEx = 7,
+    /// Priority information
+    MemoryPriorityInformation = 8,
+    /// Partition information
+    MemoryPartitionInformation = 9,
+}
+
+/// MEMORY_BASIC_INFORMATION structure (NT compatible)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct MemoryBasicInformation {
+    /// Base address of the region
+    pub base_address: usize,
+    /// Base address of the allocation (first reserved page)
+    pub allocation_base: usize,
+    /// Initial protection when region was allocated
+    pub allocation_protect: u32,
+    /// Partition ID (Windows 10+)
+    pub partition_id: u16,
+    /// Reserved
+    pub _reserved: u16,
+    /// Size of the region in bytes
+    pub region_size: usize,
+    /// State of pages: MEM_COMMIT, MEM_FREE, MEM_RESERVE
+    pub state: u32,
+    /// Current protection
+    pub protect: u32,
+    /// Type of pages: MEM_IMAGE, MEM_MAPPED, MEM_PRIVATE
+    pub mem_type: u32,
+}
+
+/// Memory state constants
+pub mod mem_state {
+    pub const MEM_COMMIT: u32 = 0x1000;
+    pub const MEM_RESERVE: u32 = 0x2000;
+    pub const MEM_FREE: u32 = 0x10000;
+    pub const MEM_RESET: u32 = 0x80000;
+    pub const MEM_RESET_UNDO: u32 = 0x1000000;
+}
+
+/// Memory type constants
+pub mod mem_type {
+    pub const MEM_PRIVATE: u32 = 0x20000;
+    pub const MEM_MAPPED: u32 = 0x40000;
+    pub const MEM_IMAGE: u32 = 0x1000000;
+}
+
+/// Page protection constants
+pub mod page_protect {
+    pub const PAGE_NOACCESS: u32 = 0x01;
+    pub const PAGE_READONLY: u32 = 0x02;
+    pub const PAGE_READWRITE: u32 = 0x04;
+    pub const PAGE_WRITECOPY: u32 = 0x08;
+    pub const PAGE_EXECUTE: u32 = 0x10;
+    pub const PAGE_EXECUTE_READ: u32 = 0x20;
+    pub const PAGE_EXECUTE_READWRITE: u32 = 0x40;
+    pub const PAGE_EXECUTE_WRITECOPY: u32 = 0x80;
+    pub const PAGE_GUARD: u32 = 0x100;
+    pub const PAGE_NOCACHE: u32 = 0x200;
+    pub const PAGE_WRITECOMBINE: u32 = 0x400;
+}
+
+/// MEMORY_REGION_INFORMATION structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct MemoryRegionInformation {
+    /// Base address of allocation
+    pub allocation_base: usize,
+    /// Protection at allocation time
+    pub allocation_protect: u32,
+    /// Flags
+    pub region_type: u32,
+    /// Size of allocation
+    pub region_size: usize,
+    /// Commit size
+    pub commit_size: usize,
+    /// Partition ID
+    pub partition_id: usize,
+    /// Node preference
+    pub node_preference: usize,
+}
+
+/// MEMORY_IMAGE_INFORMATION structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct MemoryImageInformation {
+    /// Image base address
+    pub image_base: usize,
+    /// Image size
+    pub size_of_image: usize,
+    /// Flags
+    pub image_flags: u32,
+}
+
 /// NtQueryVirtualMemory - Query information about virtual memory
+///
+/// Parameters:
+/// - process_handle: Handle to the process (use -1 for current process)
+/// - base_address: Address to query
+/// - info_class: MemoryInformationClass value
+/// - buffer: Output buffer for information
+/// - buffer_size: Size of output buffer
+/// - return_length: Optional pointer to receive required size
 fn sys_query_virtual_memory(
-    _process_handle: usize,
+    process_handle: usize,
     base_address: usize,
-    _info_class: usize,
+    info_class: usize,
     buffer: usize,
     buffer_size: usize,
     return_length: usize,
 ) -> isize {
-    if buffer == 0 || buffer_size < core::mem::size_of::<crate::mm::MmMemoryInfo>() {
-        return -1;
+    use core::ptr;
+
+    crate::serial_println!("[SYSCALL] NtQueryVirtualMemory(handle={:#x}, addr={:#x}, class={}, buf={:#x}, size={})",
+        process_handle, base_address, info_class, buffer, buffer_size);
+
+    // Validate buffer pointer
+    if buffer == 0 {
+        return 0xC0000005u32 as isize; // STATUS_ACCESS_VIOLATION
     }
 
-    // Get the system address space
-    let aspace = unsafe { crate::mm::mm_get_system_address_space() };
-
-    let result = unsafe {
-        crate::mm::mm_query_virtual_memory(aspace, base_address as u64)
+    // Get the address space for the target process
+    // For now, we only support the current process (-1 or 0xFFFFFFFF...)
+    let aspace = if process_handle == usize::MAX || process_handle == 0 {
+        unsafe { crate::mm::mm_get_system_address_space() }
+    } else {
+        // TODO: Look up process by handle and get its address space
+        // For now, just use system address space
+        unsafe { crate::mm::mm_get_system_address_space() }
     };
 
-    match result {
-        Some(info) => {
-            // Copy result to user buffer
-            unsafe {
-                *(buffer as *mut crate::mm::MmMemoryInfo) = info;
-            }
+    if aspace.is_null() {
+        return 0xC0000008u32 as isize; // STATUS_INVALID_HANDLE
+    }
+
+    match info_class as u32 {
+        // MemoryBasicInformation = 0
+        0 => {
+            let required_size = core::mem::size_of::<MemoryBasicInformation>();
+
+            // Write return length if provided
             if return_length != 0 {
                 unsafe {
-                    *(return_length as *mut usize) = core::mem::size_of::<crate::mm::MmMemoryInfo>();
+                    ptr::write(return_length as *mut usize, required_size);
                 }
             }
-            0
+
+            if buffer_size < required_size {
+                return 0xC0000004u32 as isize; // STATUS_INFO_LENGTH_MISMATCH
+            }
+
+            // Query the memory region
+            let result = unsafe {
+                crate::mm::mm_query_virtual_memory(aspace, base_address as u64)
+            };
+
+            match result {
+                Some(mm_info) => {
+                    // Convert internal format to NT format
+                    let info = MemoryBasicInformation {
+                        base_address: mm_info.base_address as usize,
+                        allocation_base: mm_info.allocation_base as usize,
+                        allocation_protect: mm_info.allocation_protect,
+                        partition_id: 0,
+                        _reserved: 0,
+                        region_size: mm_info.region_size as usize,
+                        state: mm_info.state,
+                        protect: mm_info.protect,
+                        mem_type: match mm_info.vad_type {
+                            0 => mem_type::MEM_PRIVATE,  // Private memory
+                            1 => mem_type::MEM_MAPPED,   // Mapped view
+                            2 => mem_type::MEM_IMAGE,    // Image section
+                            _ => mem_type::MEM_PRIVATE,
+                        },
+                    };
+
+                    unsafe {
+                        ptr::write(buffer as *mut MemoryBasicInformation, info);
+                    }
+
+                    crate::serial_println!("[SYSCALL] NtQueryVirtualMemory: base={:#x}, size={:#x}, state={:#x}, protect={:#x}",
+                        info.base_address, info.region_size, info.state, info.protect);
+
+                    0 // STATUS_SUCCESS
+                }
+                None => {
+                    // Address not in any VAD - return FREE memory info
+                    let info = MemoryBasicInformation {
+                        base_address,
+                        allocation_base: 0,
+                        allocation_protect: 0,
+                        partition_id: 0,
+                        _reserved: 0,
+                        region_size: 0x1000, // One page
+                        state: mem_state::MEM_FREE,
+                        protect: page_protect::PAGE_NOACCESS,
+                        mem_type: 0,
+                    };
+
+                    unsafe {
+                        ptr::write(buffer as *mut MemoryBasicInformation, info);
+                    }
+
+                    crate::serial_println!("[SYSCALL] NtQueryVirtualMemory: address {:#x} is FREE", base_address);
+
+                    0 // STATUS_SUCCESS - free memory is valid to query
+                }
+            }
         }
-        None => -1,
+
+        // MemoryRegionInformation = 3
+        3 => {
+            let required_size = core::mem::size_of::<MemoryRegionInformation>();
+
+            if return_length != 0 {
+                unsafe {
+                    ptr::write(return_length as *mut usize, required_size);
+                }
+            }
+
+            if buffer_size < required_size {
+                return 0xC0000004u32 as isize;
+            }
+
+            let result = unsafe {
+                crate::mm::mm_query_virtual_memory(aspace, base_address as u64)
+            };
+
+            match result {
+                Some(mm_info) => {
+                    let info = MemoryRegionInformation {
+                        allocation_base: mm_info.allocation_base as usize,
+                        allocation_protect: mm_info.allocation_protect,
+                        region_type: mm_info.vad_type,
+                        region_size: mm_info.region_size as usize,
+                        commit_size: if mm_info.state == mem_state::MEM_COMMIT {
+                            mm_info.region_size as usize
+                        } else {
+                            0
+                        },
+                        partition_id: 0,
+                        node_preference: 0,
+                    };
+
+                    unsafe {
+                        ptr::write(buffer as *mut MemoryRegionInformation, info);
+                    }
+
+                    0
+                }
+                None => 0xC0000005u32 as isize, // STATUS_ACCESS_VIOLATION
+            }
+        }
+
+        // MemoryImageInformation = 6
+        6 => {
+            let required_size = core::mem::size_of::<MemoryImageInformation>();
+
+            if return_length != 0 {
+                unsafe {
+                    ptr::write(return_length as *mut usize, required_size);
+                }
+            }
+
+            if buffer_size < required_size {
+                return 0xC0000004u32 as isize;
+            }
+
+            let result = unsafe {
+                crate::mm::mm_query_virtual_memory(aspace, base_address as u64)
+            };
+
+            match result {
+                Some(mm_info) => {
+                    // Only valid for image mappings
+                    if mm_info.vad_type != 2 {
+                        return 0xC0000005u32 as isize; // Not an image mapping
+                    }
+
+                    let info = MemoryImageInformation {
+                        image_base: mm_info.allocation_base as usize,
+                        size_of_image: mm_info.region_size as usize,
+                        image_flags: 0,
+                    };
+
+                    unsafe {
+                        ptr::write(buffer as *mut MemoryImageInformation, info);
+                    }
+
+                    0
+                }
+                None => 0xC0000005u32 as isize,
+            }
+        }
+
+        _ => {
+            crate::serial_println!("[SYSCALL] NtQueryVirtualMemory: unsupported class {}", info_class);
+            0xC0000003u32 as isize // STATUS_INVALID_INFO_CLASS
+        }
     }
 }
 
