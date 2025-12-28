@@ -19,7 +19,7 @@ pub fn cmd_help(args: &[&str]) {
         serial_println!("    exit           Exit the shell");
         serial_println!("");
         serial_println!("  File System:");
-        serial_println!("    dir, ls [path] List directory contents");
+        serial_println!("    dir, ls [pat]  List directory (supports *, ? wildcards)");
         serial_println!("    cd [path]      Change directory");
         serial_println!("    pwd            Print working directory");
         serial_println!("    type, cat      Display file contents");
@@ -41,9 +41,18 @@ pub fn cmd_help(args: &[&str]) {
     } else {
         let topic = args[0];
         if eq_ignore_case(topic, "dir") || eq_ignore_case(topic, "ls") {
-            serial_println!("DIR [path]");
+            serial_println!("DIR [path] [pattern]");
             serial_println!("  Lists files and directories.");
             serial_println!("  If no path given, lists current directory.");
+            serial_println!("");
+            serial_println!("  Wildcards:");
+            serial_println!("    *      Matches any characters");
+            serial_println!("    ?      Matches single character");
+            serial_println!("");
+            serial_println!("  Examples:");
+            serial_println!("    DIR *.TXT      List all .TXT files");
+            serial_println!("    DIR TEST*.*    List files starting with TEST");
+            serial_println!("    DIR C:\\*.EXE   List .EXE files in C:\\");
         } else if eq_ignore_case(topic, "cd") {
             serial_println!("CD [path]");
             serial_println!("  Changes the current directory.");
@@ -74,6 +83,81 @@ fn eq_ignore_case(a: &str, b: &str) -> bool {
         }
     }
     true
+}
+
+/// Check if a filename matches a wildcard pattern (case-insensitive)
+/// Supports:
+///   * - matches any sequence of characters (including empty)
+///   ? - matches exactly one character
+fn wildcard_match(pattern: &str, name: &str) -> bool {
+    let pat = pattern.as_bytes();
+    let txt = name.as_bytes();
+    wildcard_match_bytes(pat, txt)
+}
+
+/// Recursive wildcard matching on byte slices
+fn wildcard_match_bytes(pattern: &[u8], text: &[u8]) -> bool {
+    let mut p = 0;
+    let mut t = 0;
+    let mut star_p: Option<usize> = None;
+    let mut star_t: Option<usize> = None;
+
+    while t < text.len() {
+        if p < pattern.len() {
+            let pc = pattern[p];
+            let tc = text[t];
+
+            if pc == b'*' {
+                // Star: remember position and try to match zero chars first
+                star_p = Some(p);
+                star_t = Some(t);
+                p += 1;
+                continue;
+            } else if pc == b'?' {
+                // Question mark: match any single character
+                p += 1;
+                t += 1;
+                continue;
+            } else {
+                // Regular character: case-insensitive compare
+                let pc_lower = if pc >= b'A' && pc <= b'Z' { pc + 32 } else { pc };
+                let tc_lower = if tc >= b'A' && tc <= b'Z' { tc + 32 } else { tc };
+                if pc_lower == tc_lower {
+                    p += 1;
+                    t += 1;
+                    continue;
+                }
+            }
+        }
+
+        // No match at current position - try to use a previous star
+        if let (Some(sp), Some(st)) = (star_p, star_t) {
+            // Backtrack: advance star_t and retry
+            p = sp + 1;
+            star_t = Some(st + 1);
+            t = st + 1;
+        } else {
+            // No star to backtrack to - no match
+            return false;
+        }
+    }
+
+    // Consume any trailing stars in pattern
+    while p < pattern.len() && pattern[p] == b'*' {
+        p += 1;
+    }
+
+    p == pattern.len()
+}
+
+/// Check if a string contains wildcard characters
+fn has_wildcards(s: &str) -> bool {
+    for c in s.bytes() {
+        if c == b'*' || c == b'?' {
+            return true;
+        }
+    }
+    false
 }
 
 /// Display version information
@@ -109,25 +193,60 @@ pub fn cmd_clear() {
     crate::serial_print!("\x1B[2J\x1B[H");
 }
 
-/// List directory contents
+/// List directory contents with optional wildcard pattern
 pub fn cmd_ls(args: &[&str]) {
-    let path = if args.is_empty() {
-        get_current_dir()
+    let arg = if args.is_empty() {
+        ""
     } else {
         args[0]
     };
 
-    // Resolve path
-    let full_path = resolve_path(path);
+    // Parse path and pattern
+    // If arg contains wildcards, split into directory and pattern
+    let (dir_path, pattern): (&str, Option<&str>) = if arg.is_empty() {
+        (get_current_dir(), None)
+    } else if has_wildcards(arg) {
+        // Find last path separator to split directory from pattern
+        let bytes = arg.as_bytes();
+        let mut last_sep = None;
+        for i in 0..bytes.len() {
+            if bytes[i] == b'\\' || bytes[i] == b'/' {
+                last_sep = Some(i);
+            }
+        }
+        match last_sep {
+            Some(pos) => {
+                // Pattern has directory component
+                let dir_part = &arg[..pos + 1];
+                let pat_part = &arg[pos + 1..];
+                (dir_part, Some(pat_part))
+            }
+            None => {
+                // Pattern only, use current directory
+                (get_current_dir(), Some(arg))
+            }
+        }
+    } else {
+        // No wildcards - treat as directory path
+        (arg, None)
+    };
+
+    // Resolve the directory path
+    let full_path = resolve_path(dir_path);
 
     serial_println!("");
-    serial_println!(" Directory of {}", full_path);
+    if let Some(pat) = pattern {
+        serial_println!(" Directory of {}  ({})", full_path, pat);
+    } else {
+        serial_println!(" Directory of {}", full_path);
+    }
     serial_println!("");
 
     let mut offset = 0u32;
     let mut file_count = 0u32;
     let mut dir_count = 0u32;
     let mut total_size = 0u64;
+    let mut shown_count = 0u32;
 
     loop {
         match fs::readdir(&full_path, offset) {
@@ -140,24 +259,33 @@ pub fn cmd_ls(args: &[&str]) {
                     continue;
                 }
 
-                let type_str = match entry.file_type {
-                    fs::FileType::Directory => {
-                        dir_count += 1;
-                        "<DIR>     "
-                    }
-                    fs::FileType::Regular => {
-                        file_count += 1;
-                        total_size += entry.size;
-                        "          "
-                    }
-                    _ => "          ",
+                // Apply wildcard filter if present
+                let matches = match pattern {
+                    Some(pat) => wildcard_match(pat, name),
+                    None => true,
                 };
 
-                // Format: type  size  name
-                if entry.file_type == fs::FileType::Directory {
-                    serial_println!("{}           {}", type_str, name);
-                } else {
-                    serial_println!("{}{:>10}  {}", type_str, entry.size, name);
+                if matches {
+                    shown_count += 1;
+                    let type_str = match entry.file_type {
+                        fs::FileType::Directory => {
+                            dir_count += 1;
+                            "<DIR>     "
+                        }
+                        fs::FileType::Regular => {
+                            file_count += 1;
+                            total_size += entry.size;
+                            "          "
+                        }
+                        _ => "          ",
+                    };
+
+                    // Format: type  size  name
+                    if entry.file_type == fs::FileType::Directory {
+                        serial_println!("{}           {}", type_str, name);
+                    } else {
+                        serial_println!("{}{:>10}  {}", type_str, entry.size, name);
+                    }
                 }
 
                 offset = entry.next_offset;
@@ -168,6 +296,10 @@ pub fn cmd_ls(args: &[&str]) {
                 return;
             }
         }
+    }
+
+    if shown_count == 0 && pattern.is_some() {
+        serial_println!("File Not Found");
     }
 
     serial_println!("");
