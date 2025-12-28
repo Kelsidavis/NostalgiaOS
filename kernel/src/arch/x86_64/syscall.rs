@@ -201,8 +201,15 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtDelayExecution as usize, sys_delay_execution);
     register_syscall(SyscallNumber::NtDebugPrint as usize, sys_debug_print);
     register_syscall(SyscallNumber::NtClose as usize, sys_close);
+
+    // File operation syscalls
+    register_syscall(SyscallNumber::NtCreateFile as usize, sys_create_file);
+    register_syscall(SyscallNumber::NtOpenFile as usize, sys_open_file);
     register_syscall(SyscallNumber::NtReadFile as usize, sys_read_file);
     register_syscall(SyscallNumber::NtWriteFile as usize, sys_write_file);
+    register_syscall(SyscallNumber::NtQueryInformationFile as usize, sys_query_information_file);
+    register_syscall(SyscallNumber::NtSetInformationFile as usize, sys_set_information_file);
+    register_syscall(SyscallNumber::NtDeleteFile as usize, sys_delete_file);
     register_syscall(SyscallNumber::NtQueryDirectoryFile as usize, sys_query_directory_file);
     register_syscall(SyscallNumber::NtLockFile as usize, sys_lock_file);
 
@@ -553,7 +560,17 @@ fn sys_close(
     _: usize, _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
     crate::serial_println!("[SYSCALL] NtClose(handle={})", handle);
-    // TODO: Implement handle closing via object manager
+
+    // Check if this is a file handle
+    if let Some(fs_handle) = unsafe { get_fs_handle(handle) } {
+        // Close the fs handle
+        let _ = crate::fs::close(fs_handle);
+        // Free the syscall handle mapping
+        unsafe { free_file_handle(handle); }
+        return 0;
+    }
+
+    // TODO: Handle other handle types via object manager
     0
 }
 
@@ -565,17 +582,47 @@ fn sys_read_file(
     bytes_read_ptr: usize,
     _: usize, _: usize,
 ) -> isize {
-    crate::serial_println!("[SYSCALL] NtReadFile(handle={}, buffer={:#x}, len={})",
-        handle, buffer, length);
+    if buffer == 0 || length == 0 {
+        return -1;
+    }
 
-    // TODO: Implement file reading
-    // For now, just return 0 bytes read
-    if bytes_read_ptr != 0 {
-        unsafe {
-            *(bytes_read_ptr as *mut usize) = 0;
+    // Special case: handle 0 = stdin (not implemented)
+    if handle == 0 {
+        if bytes_read_ptr != 0 {
+            unsafe { *(bytes_read_ptr as *mut usize) = 0; }
+        }
+        return 0;
+    }
+
+    // Try to get fs handle
+    let fs_handle = match unsafe { get_fs_handle(handle) } {
+        Some(h) => h,
+        None => {
+            // Not a file handle - return error
+            crate::serial_println!("[SYSCALL] NtReadFile: invalid handle {}", handle);
+            return -1;
+        }
+    };
+
+    // Read from file system
+    let buf_slice = unsafe { core::slice::from_raw_parts_mut(buffer as *mut u8, length) };
+
+    match crate::fs::read(fs_handle, buf_slice) {
+        Ok(bytes_read) => {
+            if bytes_read_ptr != 0 {
+                unsafe { *(bytes_read_ptr as *mut usize) = bytes_read; }
+            }
+            crate::serial_println!("[SYSCALL] NtReadFile(handle={}) -> {} bytes", handle, bytes_read);
+            0
+        }
+        Err(e) => {
+            crate::serial_println!("[SYSCALL] NtReadFile(handle={}) -> error {:?}", handle, e);
+            if bytes_read_ptr != 0 {
+                unsafe { *(bytes_read_ptr as *mut usize) = 0; }
+            }
+            -1
         }
     }
-    0
 }
 
 /// NtWriteFile - Write to a file
@@ -586,11 +633,12 @@ fn sys_write_file(
     bytes_written_ptr: usize,
     _: usize, _: usize,
 ) -> isize {
-    crate::serial_println!("[SYSCALL] NtWriteFile(handle={}, buffer={:#x}, len={})",
-        handle, buffer, length);
+    if buffer == 0 || length == 0 {
+        return -1;
+    }
 
     // Special case: handle 1 = stdout (serial console)
-    if handle == 1 && buffer != 0 && length > 0 && length <= 4096 {
+    if handle == 1 && length <= 4096 {
         let slice = unsafe {
             core::slice::from_raw_parts(buffer as *const u8, length)
         };
@@ -598,15 +646,436 @@ fn sys_write_file(
         if let Ok(s) = core::str::from_utf8(slice) {
             crate::serial_print!("{}", s);
             if bytes_written_ptr != 0 {
-                unsafe {
-                    *(bytes_written_ptr as *mut usize) = length;
-                }
+                unsafe { *(bytes_written_ptr as *mut usize) = length; }
             }
             return 0;
         }
     }
 
-    -1
+    // Special case: handle 2 = stderr (serial console)
+    if handle == 2 && length <= 4096 {
+        let slice = unsafe {
+            core::slice::from_raw_parts(buffer as *const u8, length)
+        };
+
+        if let Ok(s) = core::str::from_utf8(slice) {
+            crate::serial_print!("{}", s);
+            if bytes_written_ptr != 0 {
+                unsafe { *(bytes_written_ptr as *mut usize) = length; }
+            }
+            return 0;
+        }
+    }
+
+    // Try to get fs handle
+    let fs_handle = match unsafe { get_fs_handle(handle) } {
+        Some(h) => h,
+        None => {
+            crate::serial_println!("[SYSCALL] NtWriteFile: invalid handle {}", handle);
+            return -1;
+        }
+    };
+
+    // Write to file system
+    let buf_slice = unsafe { core::slice::from_raw_parts(buffer as *const u8, length) };
+
+    match crate::fs::write(fs_handle, buf_slice) {
+        Ok(bytes_written) => {
+            if bytes_written_ptr != 0 {
+                unsafe { *(bytes_written_ptr as *mut usize) = bytes_written; }
+            }
+            crate::serial_println!("[SYSCALL] NtWriteFile(handle={}) -> {} bytes", handle, bytes_written);
+            0
+        }
+        Err(e) => {
+            crate::serial_println!("[SYSCALL] NtWriteFile(handle={}) -> error {:?}", handle, e);
+            if bytes_written_ptr != 0 {
+                unsafe { *(bytes_written_ptr as *mut usize) = 0; }
+            }
+            -1
+        }
+    }
+}
+
+// ============================================================================
+// File Operation Syscalls (NtCreateFile, NtOpenFile, etc.)
+// ============================================================================
+
+/// File handle table - maps syscall handles to fs handles
+/// Handles 0-99 reserved for special handles (stdin, stdout, etc.)
+/// Handles 100+ are file system handles
+const FILE_HANDLE_BASE: usize = 100;
+const MAX_FILE_HANDLES: usize = 256;
+
+/// File handle to fs handle mapping
+static mut FILE_HANDLE_MAP: [u16; MAX_FILE_HANDLES] = [0xFFFF; MAX_FILE_HANDLES];
+
+/// Allocate a syscall file handle
+unsafe fn alloc_file_handle(fs_handle: u16) -> Option<usize> {
+    for i in 0..MAX_FILE_HANDLES {
+        if FILE_HANDLE_MAP[i] == 0xFFFF {
+            FILE_HANDLE_MAP[i] = fs_handle;
+            return Some(i + FILE_HANDLE_BASE);
+        }
+    }
+    None
+}
+
+/// Get fs handle from syscall handle
+unsafe fn get_fs_handle(syscall_handle: usize) -> Option<u16> {
+    if syscall_handle < FILE_HANDLE_BASE {
+        return None; // Reserved handles
+    }
+    let idx = syscall_handle - FILE_HANDLE_BASE;
+    if idx >= MAX_FILE_HANDLES {
+        return None;
+    }
+    let fs_handle = FILE_HANDLE_MAP[idx];
+    if fs_handle == 0xFFFF {
+        None
+    } else {
+        Some(fs_handle)
+    }
+}
+
+/// Free a syscall file handle
+unsafe fn free_file_handle(syscall_handle: usize) {
+    if syscall_handle >= FILE_HANDLE_BASE {
+        let idx = syscall_handle - FILE_HANDLE_BASE;
+        if idx < MAX_FILE_HANDLES {
+            FILE_HANDLE_MAP[idx] = 0xFFFF;
+        }
+    }
+}
+
+/// NT file creation disposition values
+pub mod file_disposition {
+    pub const FILE_SUPERSEDE: u32 = 0;
+    pub const FILE_OPEN: u32 = 1;
+    pub const FILE_CREATE: u32 = 2;
+    pub const FILE_OPEN_IF: u32 = 3;
+    pub const FILE_OVERWRITE: u32 = 4;
+    pub const FILE_OVERWRITE_IF: u32 = 5;
+}
+
+/// NT file create options
+pub mod file_options {
+    pub const FILE_DIRECTORY_FILE: u32 = 0x00000001;
+    pub const FILE_WRITE_THROUGH: u32 = 0x00000002;
+    pub const FILE_SEQUENTIAL_ONLY: u32 = 0x00000004;
+    pub const FILE_NO_INTERMEDIATE_BUFFERING: u32 = 0x00000008;
+    pub const FILE_SYNCHRONOUS_IO_ALERT: u32 = 0x00000010;
+    pub const FILE_SYNCHRONOUS_IO_NONALERT: u32 = 0x00000020;
+    pub const FILE_NON_DIRECTORY_FILE: u32 = 0x00000040;
+    pub const FILE_DELETE_ON_CLOSE: u32 = 0x00001000;
+}
+
+/// Read a path string from user memory
+unsafe fn read_user_path(path_ptr: usize, max_len: usize) -> Option<([u8; 260], usize)> {
+    if path_ptr == 0 {
+        return None;
+    }
+
+    let mut path_buf = [0u8; 260];
+    let src = path_ptr as *const u8;
+    let mut len = 0;
+
+    while len < max_len && len < 260 {
+        let byte = *src.add(len);
+        if byte == 0 {
+            break;
+        }
+        path_buf[len] = byte;
+        len += 1;
+    }
+
+    if len == 0 {
+        None
+    } else {
+        Some((path_buf, len))
+    }
+}
+
+/// NtCreateFile - Create or open a file
+///
+/// Arguments:
+/// - file_handle: Pointer to receive handle
+/// - desired_access: Access mask
+/// - object_attributes: Pointer to OBJECT_ATTRIBUTES (contains file name)
+/// - io_status_block: Pointer to IO_STATUS_BLOCK
+/// - allocation_size: Initial size for new files
+/// - file_attributes: File attributes for new files
+fn sys_create_file(
+    file_handle_ptr: usize,
+    desired_access: usize,
+    object_attributes: usize,
+    io_status_block: usize,
+    _allocation_size: usize,
+    file_attributes: usize,
+) -> isize {
+    if file_handle_ptr == 0 || object_attributes == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    // OBJECT_ATTRIBUTES layout (simplified):
+    // offset 0: length (u32)
+    // offset 8: root_directory (handle)
+    // offset 16: object_name (pointer to UNICODE_STRING)
+    // For now, we read object_name as a simple pointer to path string
+
+    // Read the path from object_attributes
+    // Simplified: assume object_attributes points to path string directly
+    let path_result = unsafe { read_user_path(object_attributes, 260) };
+
+    let (path_buf, path_len) = match path_result {
+        Some((buf, len)) => (buf, len),
+        None => return -1, // STATUS_INVALID_PARAMETER
+    };
+
+    let path_str = match core::str::from_utf8(&path_buf[..path_len]) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtCreateFile(path='{}', access={:#x})", path_str, desired_access);
+
+    // Try to create the file
+    let result = crate::fs::create(path_str, file_attributes as u32);
+
+    match result {
+        Ok(fs_handle) => {
+            // Allocate syscall handle
+            let syscall_handle = unsafe { alloc_file_handle(fs_handle) };
+            match syscall_handle {
+                Some(h) => {
+                    unsafe {
+                        *(file_handle_ptr as *mut usize) = h;
+                        if io_status_block != 0 {
+                            // IO_STATUS_BLOCK: status at offset 0, information at offset 8
+                            *(io_status_block as *mut i32) = 0; // STATUS_SUCCESS
+                            *((io_status_block + 8) as *mut usize) = 1; // FILE_CREATED
+                        }
+                    }
+                    0 // STATUS_SUCCESS
+                }
+                None => {
+                    let _ = crate::fs::close(fs_handle);
+                    -1 // STATUS_INSUFFICIENT_RESOURCES
+                }
+            }
+        }
+        Err(_e) => {
+            // Try to open existing file instead
+            match crate::fs::open(path_str, desired_access as u32) {
+                Ok(fs_handle) => {
+                    let syscall_handle = unsafe { alloc_file_handle(fs_handle) };
+                    match syscall_handle {
+                        Some(h) => {
+                            unsafe {
+                                *(file_handle_ptr as *mut usize) = h;
+                                if io_status_block != 0 {
+                                    *(io_status_block as *mut i32) = 0;
+                                    *((io_status_block + 8) as *mut usize) = 2; // FILE_OPENED
+                                }
+                            }
+                            0
+                        }
+                        None => {
+                            let _ = crate::fs::close(fs_handle);
+                            -1
+                        }
+                    }
+                }
+                Err(_) => -1, // STATUS_OBJECT_NAME_NOT_FOUND
+            }
+        }
+    }
+}
+
+/// NtOpenFile - Open an existing file
+fn sys_open_file(
+    file_handle_ptr: usize,
+    desired_access: usize,
+    object_attributes: usize,
+    io_status_block: usize,
+    share_access: usize,
+    open_options: usize,
+) -> isize {
+    if file_handle_ptr == 0 || object_attributes == 0 {
+        return -1;
+    }
+
+    let _ = share_access;
+    let _ = open_options;
+
+    let path_result = unsafe { read_user_path(object_attributes, 260) };
+
+    let (path_buf, path_len) = match path_result {
+        Some((buf, len)) => (buf, len),
+        None => return -1,
+    };
+
+    let path_str = match core::str::from_utf8(&path_buf[..path_len]) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtOpenFile(path='{}', access={:#x})", path_str, desired_access);
+
+    match crate::fs::open(path_str, desired_access as u32) {
+        Ok(fs_handle) => {
+            let syscall_handle = unsafe { alloc_file_handle(fs_handle) };
+            match syscall_handle {
+                Some(h) => {
+                    unsafe {
+                        *(file_handle_ptr as *mut usize) = h;
+                        if io_status_block != 0 {
+                            *(io_status_block as *mut i32) = 0;
+                            *((io_status_block + 8) as *mut usize) = 2; // FILE_OPENED
+                        }
+                    }
+                    0
+                }
+                None => {
+                    let _ = crate::fs::close(fs_handle);
+                    -1
+                }
+            }
+        }
+        Err(_) => -1, // STATUS_OBJECT_NAME_NOT_FOUND
+    }
+}
+
+/// NtQueryInformationFile - Query file information
+fn sys_query_information_file(
+    file_handle: usize,
+    io_status_block: usize,
+    file_information: usize,
+    length: usize,
+    file_information_class: usize,
+    _: usize,
+) -> isize {
+    if file_handle == 0 || file_information == 0 || length == 0 {
+        return -1;
+    }
+
+    let fs_handle = match unsafe { get_fs_handle(file_handle) } {
+        Some(h) => h,
+        None => return -1, // STATUS_INVALID_HANDLE
+    };
+
+    crate::serial_println!(
+        "[SYSCALL] NtQueryInformationFile(handle={}, class={})",
+        file_handle, file_information_class
+    );
+
+    // Get file info via fs::fstat
+    match crate::fs::fstat(fs_handle) {
+        Ok(info) => {
+            // File information class 5 = FileStandardInformation
+            // File information class 18 = FileAllInformation
+            // For now, return basic info for all classes
+            unsafe {
+                if length >= 24 {
+                    // FileStandardInformation layout:
+                    // AllocationSize: i64
+                    // EndOfFile: i64
+                    // NumberOfLinks: u32
+                    // DeletePending: u8
+                    // Directory: u8
+                    *(file_information as *mut i64) = info.size as i64; // AllocationSize
+                    *((file_information + 8) as *mut i64) = info.size as i64; // EndOfFile
+                    *((file_information + 16) as *mut u32) = 1; // NumberOfLinks
+                    *((file_information + 20) as *mut u8) = 0; // DeletePending
+                    *((file_information + 21) as *mut u8) = if matches!(info.file_type, crate::fs::FileType::Directory) { 1 } else { 0 }; // Directory
+                }
+
+                if io_status_block != 0 {
+                    *(io_status_block as *mut i32) = 0;
+                    *((io_status_block + 8) as *mut usize) = 24;
+                }
+            }
+            0
+        }
+        Err(_) => -1,
+    }
+}
+
+/// NtSetInformationFile - Set file information
+fn sys_set_information_file(
+    file_handle: usize,
+    io_status_block: usize,
+    file_information: usize,
+    length: usize,
+    file_information_class: usize,
+    _: usize,
+) -> isize {
+    if file_handle == 0 || file_information == 0 {
+        return -1;
+    }
+
+    let fs_handle = match unsafe { get_fs_handle(file_handle) } {
+        Some(h) => h,
+        None => return -1,
+    };
+
+    crate::serial_println!(
+        "[SYSCALL] NtSetInformationFile(handle={}, class={}, len={})",
+        file_handle, file_information_class, length
+    );
+
+    // FilePositionInformation = 14 - set file position
+    if file_information_class == 14 && length >= 8 {
+        let new_position = unsafe { *(file_information as *const i64) };
+        if new_position >= 0 {
+            // Use seek to set position
+            let _ = crate::fs::seek(fs_handle, new_position, crate::fs::SeekWhence::Set);
+        }
+    }
+
+    // FileEndOfFileInformation = 20 - truncate/extend file
+    if file_information_class == 20 && length >= 8 {
+        let new_size = unsafe { *(file_information as *const u64) };
+        let _ = crate::fs::truncate(fs_handle, new_size);
+    }
+
+    unsafe {
+        if io_status_block != 0 {
+            *(io_status_block as *mut i32) = 0;
+            *((io_status_block + 8) as *mut usize) = 0;
+        }
+    }
+
+    0
+}
+
+/// NtDeleteFile - Delete a file
+fn sys_delete_file(
+    object_attributes: usize,
+    _: usize, _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    if object_attributes == 0 {
+        return -1;
+    }
+
+    let path_result = unsafe { read_user_path(object_attributes, 260) };
+
+    let (path_buf, path_len) = match path_result {
+        Some((buf, len)) => (buf, len),
+        None => return -1,
+    };
+
+    let path_str = match core::str::from_utf8(&path_buf[..path_len]) {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+
+    crate::serial_println!("[SYSCALL] NtDeleteFile(path='{}')", path_str);
+
+    match crate::fs::delete(path_str) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    }
 }
 
 /// Get the syscall stack pointer for per-CPU initialization
@@ -1001,6 +1470,25 @@ fn sys_set_event(
     previous_state: usize,
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    // Try sync object pool first
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
+        if obj_type != SyncObjectType::Event {
+            return -1;
+        }
+
+        let was_signaled = unsafe {
+            let event = &mut *core::ptr::addr_of_mut!((*entry).data.event);
+            event.set()
+        };
+
+        if previous_state != 0 {
+            unsafe { *(previous_state as *mut i32) = was_signaled as i32; }
+        }
+
+        return 0;
+    }
+
+    // Fall back to object manager handles
     let object = unsafe {
         let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
         if obj.is_null() {
@@ -1014,11 +1502,8 @@ fn sys_set_event(
         (*event).set()
     };
 
-    // Write previous state if requested
     if previous_state != 0 {
-        unsafe {
-            *(previous_state as *mut i32) = was_signaled as i32;
-        }
+        unsafe { *(previous_state as *mut i32) = was_signaled as i32; }
     }
 
     unsafe { crate::ob::ob_dereference_object(object); }
@@ -1032,6 +1517,25 @@ fn sys_reset_event(
     previous_state: usize,
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    // Try sync object pool first
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
+        if obj_type != SyncObjectType::Event {
+            return -1;
+        }
+
+        let was_signaled = unsafe {
+            let event = &mut *core::ptr::addr_of_mut!((*entry).data.event);
+            event.reset()
+        };
+
+        if previous_state != 0 {
+            unsafe { *(previous_state as *mut i32) = was_signaled as i32; }
+        }
+
+        return 0;
+    }
+
+    // Fall back to object manager handles
     let object = unsafe {
         let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
         if obj.is_null() {
@@ -1046,9 +1550,7 @@ fn sys_reset_event(
     };
 
     if previous_state != 0 {
-        unsafe {
-            *(previous_state as *mut i32) = was_signaled as i32;
-        }
+        unsafe { *(previous_state as *mut i32) = was_signaled as i32; }
     }
 
     unsafe { crate::ob::ob_dereference_object(object); }
@@ -1056,26 +1558,150 @@ fn sys_reset_event(
     0
 }
 
+// ============================================================================
+// Synchronization Object Pool
+// ============================================================================
+
+/// Maximum number of sync objects
+const MAX_SYNC_OBJECTS: usize = 128;
+
+/// Sync object pool entry
+#[repr(C)]
+union SyncObjectUnion {
+    event: core::mem::ManuallyDrop<crate::ke::KEvent>,
+    semaphore: core::mem::ManuallyDrop<crate::ke::KSemaphore>,
+    mutex: core::mem::ManuallyDrop<crate::ke::KMutex>,
+}
+
+/// Type of sync object
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SyncObjectType {
+    None = 0,
+    Event = 1,
+    Semaphore = 2,
+    Mutex = 3,
+}
+
+/// Sync object pool entry wrapper
+struct SyncObjectEntry {
+    obj_type: SyncObjectType,
+    data: SyncObjectUnion,
+}
+
+impl SyncObjectEntry {
+    const fn new() -> Self {
+        Self {
+            obj_type: SyncObjectType::None,
+            data: SyncObjectUnion {
+                event: core::mem::ManuallyDrop::new(crate::ke::KEvent::new()),
+            },
+        }
+    }
+}
+
+/// Pool of synchronization objects
+static mut SYNC_OBJECT_POOL: [SyncObjectEntry; MAX_SYNC_OBJECTS] = {
+    const INIT: SyncObjectEntry = SyncObjectEntry::new();
+    [INIT; MAX_SYNC_OBJECTS]
+};
+
+/// Bitmap for sync object allocation
+static mut SYNC_OBJECT_BITMAP: [u64; 2] = [0; 2]; // 128 bits
+
+/// Sync object handle base (0x1000+)
+const SYNC_HANDLE_BASE: usize = 0x1000;
+
+/// Allocate a sync object from the pool
+unsafe fn alloc_sync_object(obj_type: SyncObjectType) -> Option<usize> {
+    for word_idx in 0..2 {
+        if SYNC_OBJECT_BITMAP[word_idx] != u64::MAX {
+            for bit_idx in 0..64 {
+                let global_idx = word_idx * 64 + bit_idx;
+                if global_idx >= MAX_SYNC_OBJECTS {
+                    return None;
+                }
+                if SYNC_OBJECT_BITMAP[word_idx] & (1 << bit_idx) == 0 {
+                    SYNC_OBJECT_BITMAP[word_idx] |= 1 << bit_idx;
+                    SYNC_OBJECT_POOL[global_idx].obj_type = obj_type;
+                    return Some(global_idx + SYNC_HANDLE_BASE);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Get sync object from handle
+unsafe fn get_sync_object(handle: usize) -> Option<(*mut SyncObjectEntry, SyncObjectType)> {
+    if handle < SYNC_HANDLE_BASE {
+        return None;
+    }
+    let idx = handle - SYNC_HANDLE_BASE;
+    if idx >= MAX_SYNC_OBJECTS {
+        return None;
+    }
+    let word_idx = idx / 64;
+    let bit_idx = idx % 64;
+    if SYNC_OBJECT_BITMAP[word_idx] & (1 << bit_idx) == 0 {
+        return None;
+    }
+    let entry = &mut SYNC_OBJECT_POOL[idx];
+    Some((entry as *mut SyncObjectEntry, entry.obj_type))
+}
+
+/// Free a sync object
+unsafe fn free_sync_object(handle: usize) {
+    if handle >= SYNC_HANDLE_BASE {
+        let idx = handle - SYNC_HANDLE_BASE;
+        if idx < MAX_SYNC_OBJECTS {
+            let word_idx = idx / 64;
+            let bit_idx = idx % 64;
+            SYNC_OBJECT_BITMAP[word_idx] &= !(1 << bit_idx);
+            SYNC_OBJECT_POOL[idx].obj_type = SyncObjectType::None;
+        }
+    }
+}
+
 /// NtCreateEvent - Create a new event object
 fn sys_create_event(
     event_handle: usize,
     _desired_access: usize,
     _object_attributes: usize,
-    _event_type: usize,
-    _initial_state: usize,
+    event_type: usize,
+    initial_state: usize,
     _: usize,
 ) -> isize {
     if event_handle == 0 {
         return -1; // STATUS_INVALID_PARAMETER
     }
 
-    // For now, return a stub handle value
-    // TODO: Implement proper event object creation
-    crate::serial_println!("[SYSCALL] NtCreateEvent - stub implementation");
+    // Allocate event from pool
+    let handle = match unsafe { alloc_sync_object(SyncObjectType::Event) } {
+        Some(h) => h,
+        None => return -1, // STATUS_INSUFFICIENT_RESOURCES
+    };
 
+    // Initialize the event
     unsafe {
-        *(event_handle as *mut usize) = 0x100; // Stub handle
+        let (entry, _) = get_sync_object(handle).unwrap();
+        let event = &mut *core::ptr::addr_of_mut!((*entry).data.event);
+
+        // event_type: 0 = NotificationEvent, 1 = SynchronizationEvent
+        let ke_event_type = if event_type == 0 {
+            crate::ke::EventType::Notification
+        } else {
+            crate::ke::EventType::Synchronization
+        };
+
+        event.init(ke_event_type, initial_state != 0);
+
+        *(event_handle as *mut usize) = handle;
     }
+
+    crate::serial_println!("[SYSCALL] NtCreateEvent(type={}, init={}) -> handle {:#x}",
+        event_type, initial_state, handle);
+
     0 // STATUS_SUCCESS
 }
 
@@ -1086,6 +1712,25 @@ fn sys_release_semaphore(
     previous_count: usize,
     _: usize, _: usize, _: usize,
 ) -> isize {
+    // Try sync object pool first
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
+        if obj_type != SyncObjectType::Semaphore {
+            return -1; // Wrong object type
+        }
+
+        let prev = unsafe {
+            let sem = &mut *core::ptr::addr_of_mut!((*entry).data.semaphore);
+            sem.release(release_count as i32)
+        };
+
+        if previous_count != 0 {
+            unsafe { *(previous_count as *mut i32) = prev; }
+        }
+
+        return 0;
+    }
+
+    // Fall back to object manager handles
     let object = unsafe {
         let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
         if obj.is_null() {
@@ -1100,9 +1745,7 @@ fn sys_release_semaphore(
     };
 
     if previous_count != 0 {
-        unsafe {
-            *(previous_count as *mut i32) = prev;
-        }
+        unsafe { *(previous_count as *mut i32) = prev; }
     }
 
     unsafe { crate::ob::ob_dereference_object(object); }
@@ -1115,21 +1758,34 @@ fn sys_create_semaphore(
     semaphore_handle: usize,
     _desired_access: usize,
     _object_attributes: usize,
-    _initial_count: usize,
-    _maximum_count: usize,
+    initial_count: usize,
+    maximum_count: usize,
     _: usize,
 ) -> isize {
     if semaphore_handle == 0 {
         return -1;
     }
 
-    // For now, return a stub handle value
-    // TODO: Implement proper semaphore object creation
-    crate::serial_println!("[SYSCALL] NtCreateSemaphore - stub implementation");
+    // Allocate semaphore from pool
+    let handle = match unsafe { alloc_sync_object(SyncObjectType::Semaphore) } {
+        Some(h) => h,
+        None => return -1,
+    };
 
+    // Initialize the semaphore
     unsafe {
-        *(semaphore_handle as *mut usize) = 0x101; // Stub handle
+        let (entry, _) = get_sync_object(handle).unwrap();
+        let sem = &mut *core::ptr::addr_of_mut!((*entry).data.semaphore);
+
+        *sem = core::mem::ManuallyDrop::new(crate::ke::KSemaphore::new());
+        sem.init(initial_count as i32, maximum_count as i32);
+
+        *(semaphore_handle as *mut usize) = handle;
     }
+
+    crate::serial_println!("[SYSCALL] NtCreateSemaphore(init={}, max={}) -> handle {:#x}",
+        initial_count, maximum_count, handle);
+
     0
 }
 
@@ -1139,6 +1795,27 @@ fn sys_release_mutant(
     previous_count: usize,
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    // Try sync object pool first
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
+        if obj_type != SyncObjectType::Mutex {
+            return -1;
+        }
+
+        let prev = unsafe {
+            let mutex = &mut *core::ptr::addr_of_mut!((*entry).data.mutex);
+            let was_owned = mutex.is_owned();
+            mutex.release();
+            was_owned as i32
+        };
+
+        if previous_count != 0 {
+            unsafe { *(previous_count as *mut i32) = prev; }
+        }
+
+        return 0;
+    }
+
+    // Fall back to object manager handles
     let object = unsafe {
         let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
         if obj.is_null() {
@@ -1155,9 +1832,7 @@ fn sys_release_mutant(
     };
 
     if previous_count != 0 {
-        unsafe {
-            *(previous_count as *mut i32) = prev;
-        }
+        unsafe { *(previous_count as *mut i32) = prev; }
     }
 
     unsafe { crate::ob::ob_dereference_object(object); }
@@ -1170,20 +1845,38 @@ fn sys_create_mutant(
     mutant_handle: usize,
     _desired_access: usize,
     _object_attributes: usize,
-    _initial_owner: usize,
+    initial_owner: usize,
     _: usize, _: usize,
 ) -> isize {
     if mutant_handle == 0 {
         return -1;
     }
 
-    // For now, return a stub handle value
-    // TODO: Implement proper mutant object creation
-    crate::serial_println!("[SYSCALL] NtCreateMutant - stub implementation");
+    // Allocate mutex from pool
+    let handle = match unsafe { alloc_sync_object(SyncObjectType::Mutex) } {
+        Some(h) => h,
+        None => return -1,
+    };
 
+    // Initialize the mutex
     unsafe {
-        *(mutant_handle as *mut usize) = 0x102; // Stub handle
+        let (entry, _) = get_sync_object(handle).unwrap();
+        let mutex = &mut *core::ptr::addr_of_mut!((*entry).data.mutex);
+
+        *mutex = core::mem::ManuallyDrop::new(crate::ke::KMutex::new());
+        mutex.init();
+
+        // If initial_owner is true, acquire the mutex
+        if initial_owner != 0 {
+            mutex.acquire();
+        }
+
+        *(mutant_handle as *mut usize) = handle;
     }
+
+    crate::serial_println!("[SYSCALL] NtCreateMutant(initial_owner={}) -> handle {:#x}",
+        initial_owner, handle);
+
     0
 }
 
