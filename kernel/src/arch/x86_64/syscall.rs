@@ -4534,58 +4534,261 @@ fn get_handle_type(handle: usize) -> HandleType {
 }
 
 /// Duplicate handle options
+#[allow(non_snake_case, non_upper_case_globals)]
 pub mod duplicate_options {
+    /// Close the source handle after duplication
     pub const DUPLICATE_CLOSE_SOURCE: u32 = 0x00000001;
+    /// Use the same access rights as the source handle
     pub const DUPLICATE_SAME_ACCESS: u32 = 0x00000002;
+    /// Use the same attributes as the source handle
     pub const DUPLICATE_SAME_ATTRIBUTES: u32 = 0x00000004;
 }
 
-/// NtDuplicateHandle - Duplicate a handle
+/// Handle attributes for NtDuplicateHandle
+#[allow(non_snake_case, non_upper_case_globals)]
+pub mod handle_attributes {
+    /// Handle is inheritable by child processes
+    pub const OBJ_INHERIT: u32 = 0x00000002;
+    /// Handle is protected from close
+    pub const OBJ_PROTECT_CLOSE: u32 = 0x00000001;
+}
+
+/// NtDuplicateHandle - Duplicate a handle from one process to another
+///
+/// # Arguments
+/// * `source_process_handle` - Handle to source process (or NtCurrentProcess)
+/// * `source_handle` - Handle to duplicate from source process
+/// * `target_process_handle` - Handle to target process (or NtCurrentProcess)
+/// * `target_handle_ptr` - Pointer to receive duplicated handle (NULL if DUPLICATE_CLOSE_SOURCE only)
+/// * `desired_access` - Access rights for new handle (ignored if DUPLICATE_SAME_ACCESS)
+/// * `handle_attributes` - Attributes for new handle (OBJ_INHERIT, OBJ_PROTECT_CLOSE)
+///
+/// # Options (passed via extra parameter in full syscall, here we use desired_access high bits)
+/// * DUPLICATE_CLOSE_SOURCE - Close source handle after duplication
+/// * DUPLICATE_SAME_ACCESS - Copy access rights from source handle
+/// * DUPLICATE_SAME_ATTRIBUTES - Copy attributes from source handle
+///
+/// # Returns
+/// * STATUS_SUCCESS - Handle was successfully duplicated
+/// * STATUS_INVALID_HANDLE - Source or process handle is invalid
+/// * STATUS_INVALID_PARAMETER - Invalid parameter combination
+/// * STATUS_ACCESS_DENIED - Insufficient access rights
+/// * STATUS_INSUFFICIENT_RESOURCES - No resources to create new handle
 fn sys_duplicate_handle(
     source_process_handle: usize,
     source_handle: usize,
     target_process_handle: usize,
     target_handle_ptr: usize,
     desired_access: usize,
-    _handle_attributes: usize,
+    handle_attributes_and_options: usize,
 ) -> isize {
-    // For now, only support current process to current process
-    let _ = source_process_handle;
-    let _ = target_process_handle;
+    // NT status codes
+    const STATUS_SUCCESS: isize = 0;
+    const STATUS_INVALID_HANDLE: isize = 0xC0000008u32 as isize;
+    const STATUS_INVALID_PARAMETER: isize = 0xC000000Du32 as isize;
+    const STATUS_ACCESS_DENIED: isize = 0xC0000022u32 as isize;
+    const STATUS_INSUFFICIENT_RESOURCES: isize = 0xC000009Au32 as isize;
+    const STATUS_PROCESS_IS_TERMINATING: isize = 0xC000010Au32 as isize;
 
-    if target_handle_ptr == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+    // Pseudo-handles for current process/thread
+    const CURRENT_PROCESS: usize = 0xFFFFFFFFFFFFFFFF; // -1
+    const CURRENT_THREAD: usize = 0xFFFFFFFFFFFFFFFE;  // -2
+
+    // Extract options from handle_attributes_and_options
+    // Lower 16 bits = attributes, upper 16 bits = options (or passed separately)
+    let options = (handle_attributes_and_options >> 16) as u32;
+    let new_attributes = (handle_attributes_and_options & 0xFFFF) as u32;
+
+    crate::serial_println!(
+        "[SYSCALL] NtDuplicateHandle(source_proc=0x{:X}, source=0x{:X}, target_proc=0x{:X}, access=0x{:X}, options=0x{:X})",
+        source_process_handle, source_handle, target_process_handle, desired_access, options
+    );
+
+    // Validate source handle is not NULL
+    if source_handle == 0 {
+        crate::serial_println!("[SYSCALL] NtDuplicateHandle: NULL source handle");
+        return STATUS_INVALID_HANDLE;
     }
 
-    crate::serial_println!("[SYSCALL] NtDuplicateHandle(source={:#x})", source_handle);
+    // Check if this is a close-only operation (DUPLICATE_CLOSE_SOURCE with NULL target)
+    let close_source = (options & duplicate_options::DUPLICATE_CLOSE_SOURCE) != 0;
+    let same_access = (options & duplicate_options::DUPLICATE_SAME_ACCESS) != 0;
+    let same_attributes = (options & duplicate_options::DUPLICATE_SAME_ATTRIBUTES) != 0;
 
+    // If target_handle_ptr is NULL, only valid if DUPLICATE_CLOSE_SOURCE is set
+    if target_handle_ptr == 0 {
+        if close_source {
+            // Close-only operation - just close the source handle
+            crate::serial_println!("[SYSCALL] NtDuplicateHandle: close-only operation");
+
+            // Verify source process is current process for now
+            if source_process_handle != CURRENT_PROCESS && source_process_handle != 0xFFFFFFFF {
+                // TODO: Cross-process handle close
+                crate::serial_println!("[SYSCALL] NtDuplicateHandle: cross-process close not supported");
+                return STATUS_ACCESS_DENIED;
+            }
+
+            // Close the source handle using sys_close logic
+            return close_handle_internal(source_handle);
+        } else {
+            crate::serial_println!("[SYSCALL] NtDuplicateHandle: NULL target without DUPLICATE_CLOSE_SOURCE");
+            return STATUS_INVALID_PARAMETER;
+        }
+    }
+
+    // For now, only support current process to current process
+    // Check source process
+    let source_is_current = source_process_handle == CURRENT_PROCESS
+        || source_process_handle == 0xFFFFFFFF
+        || source_process_handle == 0;
+
+    let target_is_current = target_process_handle == CURRENT_PROCESS
+        || target_process_handle == 0xFFFFFFFF
+        || target_process_handle == 0;
+
+    if !source_is_current || !target_is_current {
+        // TODO: Implement cross-process handle duplication
+        crate::serial_println!("[SYSCALL] NtDuplicateHandle: cross-process duplication not yet supported");
+        return STATUS_ACCESS_DENIED;
+    }
+
+    // Handle pseudo-handles specially
+    // Duplicating NtCurrentProcess or NtCurrentThread creates a real handle
+    if source_handle == CURRENT_PROCESS || source_handle == 0xFFFFFFFF {
+        // Duplicate current process pseudo-handle
+        // Get current process ID and create a real handle
+        let current_pid = unsafe {
+            let prcb = crate::ke::prcb::get_current_prcb();
+            let current_thread = prcb.current_thread;
+            if !current_thread.is_null() {
+                let process = (*current_thread).process;
+                if !process.is_null() {
+                    (*process).process_id
+                } else {
+                    0
+                }
+            } else {
+                0 // System process
+            }
+        };
+
+        if let Some(h) = unsafe { alloc_process_handle(current_pid) } {
+            unsafe { *(target_handle_ptr as *mut usize) = h; }
+            crate::serial_println!("[SYSCALL] NtDuplicateHandle: duplicated current process -> 0x{:X}", h);
+            return STATUS_SUCCESS;
+        } else {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+    }
+
+    if source_handle == CURRENT_THREAD || source_handle == 0xFFFFFFFE {
+        // Duplicate current thread pseudo-handle
+        let current_tid = unsafe {
+            let prcb = crate::ke::prcb::get_current_prcb();
+            let current_thread = prcb.current_thread;
+            if !current_thread.is_null() {
+                (*current_thread).thread_id
+            } else {
+                0
+            }
+        };
+
+        if let Some(h) = unsafe { alloc_thread_handle(current_tid) } {
+            unsafe { *(target_handle_ptr as *mut usize) = h; }
+            crate::serial_println!("[SYSCALL] NtDuplicateHandle: duplicated current thread -> 0x{:X}", h);
+            return STATUS_SUCCESS;
+        } else {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+    }
+
+    // Get the handle type
     let handle_type = get_handle_type(source_handle);
+
+    if handle_type == HandleType::None {
+        // Try object manager for kernel handles
+        let ob_handle = source_handle as u32;
+        let object = unsafe {
+            crate::ob::ob_reference_object_by_handle(ob_handle, 0)
+        };
+
+        if !object.is_null() {
+            // Found in object manager - duplicate via OB
+            let access = if same_access {
+                // Get access from source handle (not implemented, use full access)
+                0x1F0FFF // PROCESS_ALL_ACCESS as default
+            } else {
+                desired_access as u32
+            };
+
+            let attrs = if same_attributes {
+                0 // Get from source (not implemented)
+            } else {
+                new_attributes
+            };
+
+            let new_handle = unsafe {
+                crate::ob::ob_create_handle(object, access, attrs)
+            };
+
+            // Dereference since ob_create_handle adds its own reference
+            unsafe { crate::ob::ob_dereference_object(object); }
+
+            if new_handle != crate::ob::INVALID_HANDLE_VALUE {
+                unsafe { *(target_handle_ptr as *mut usize) = new_handle as usize; }
+
+                // Close source if requested
+                if close_source {
+                    let _ = unsafe { crate::ob::ob_close_handle(ob_handle) };
+                }
+
+                crate::serial_println!("[SYSCALL] NtDuplicateHandle: via OB -> 0x{:X}", new_handle);
+                return STATUS_SUCCESS;
+            } else {
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+        }
+
+        crate::serial_println!("[SYSCALL] NtDuplicateHandle: unknown handle type");
+        return STATUS_INVALID_HANDLE;
+    }
 
     // Duplicate based on handle type
     let new_handle = match handle_type {
         HandleType::File => unsafe {
             if let Some(fs_handle) = get_fs_handle(source_handle) {
+                // For files, we create a new handle pointing to the same fs_handle
+                // The fs layer should handle reference counting
                 alloc_file_handle(fs_handle)
             } else {
                 None
             }
         },
         HandleType::Event | HandleType::Semaphore | HandleType::Mutex => unsafe {
-            // For sync objects, just create a new reference to the same object
+            // For sync objects, create a new handle to the same object
             let idx = source_handle - SYNC_HANDLE_BASE;
             if idx < MAX_SYNC_OBJECTS && SYNC_OBJECT_POOL[idx].obj_type != SyncObjectType::None {
-                // Find a new slot and copy the reference
+                // Find a new slot
                 for i in 0..MAX_SYNC_OBJECTS {
                     if SYNC_OBJECT_POOL[i].obj_type == SyncObjectType::None {
+                        // Copy the object (sharing the underlying kernel object)
                         SYNC_OBJECT_POOL[i].obj_type = SYNC_OBJECT_POOL[idx].obj_type;
-                        // Note: We're not actually duplicating the object, just the handle
-                        // A real implementation would increment a reference count
-                        return {
-                            let h = i + SYNC_HANDLE_BASE;
-                            *(target_handle_ptr as *mut usize) = h;
-                            crate::serial_println!("[SYSCALL] NtDuplicateHandle -> {:#x}", h);
-                            0
-                        };
+                        // Copy data union based on type
+                        core::ptr::copy_nonoverlapping(
+                            &SYNC_OBJECT_POOL[idx].data as *const _,
+                            &mut SYNC_OBJECT_POOL[i].data as *mut _,
+                            1
+                        );
+                        let h = i + SYNC_HANDLE_BASE;
+
+                        // Close source if requested
+                        if close_source {
+                            SYNC_OBJECT_POOL[idx].obj_type = SyncObjectType::None;
+                        }
+
+                        *(target_handle_ptr as *mut usize) = h;
+                        crate::serial_println!("[SYSCALL] NtDuplicateHandle: sync object -> 0x{:X}", h);
+                        return STATUS_SUCCESS;
                     }
                 }
                 None
@@ -4595,55 +4798,115 @@ fn sys_duplicate_handle(
         },
         HandleType::Key => unsafe {
             if let Some(cm_handle) = get_cm_key_handle(source_handle) {
-                alloc_key_handle(cm_handle)
+                let result = alloc_key_handle(cm_handle);
+                if result.is_some() && close_source {
+                    free_key_handle(source_handle);
+                }
+                result
             } else {
                 None
             }
         },
         HandleType::Port => unsafe {
             if let Some(port_idx) = get_lpc_port(source_handle) {
-                alloc_lpc_handle(port_idx)
+                let result = alloc_lpc_handle(port_idx);
+                if result.is_some() && close_source {
+                    free_lpc_handle(source_handle);
+                }
+                result
             } else {
                 None
             }
         },
         HandleType::Thread => unsafe {
             if let Some(tid) = get_thread_id(source_handle) {
-                alloc_thread_handle(tid)
+                let result = alloc_thread_handle(tid);
+                if result.is_some() && close_source {
+                    free_thread_handle(source_handle);
+                }
+                result
             } else {
                 None
             }
         },
         HandleType::Process => unsafe {
             if let Some(pid) = get_process_id(source_handle) {
-                alloc_process_handle(pid)
+                let result = alloc_process_handle(pid);
+                if result.is_some() && close_source {
+                    free_process_handle(source_handle);
+                }
+                result
             } else {
                 None
             }
         },
         HandleType::Token => unsafe {
             if let Some(tok_id) = get_token_id(source_handle) {
-                alloc_token_handle(tok_id)
+                let result = alloc_token_handle(tok_id);
+                if result.is_some() && close_source {
+                    // Clear the source token handle slot
+                    let idx = source_handle - TOKEN_HANDLE_BASE;
+                    if idx < MAX_TOKEN_HANDLES {
+                        TOKEN_HANDLE_MAP[idx] = u32::MAX;
+                    }
+                }
+                result
             } else {
                 None
             }
         },
+        HandleType::Section => {
+            // Section handles not yet implemented in handle table
+            // TODO: Implement section handle duplication
+            None
+        },
         _ => None,
     };
 
+    // Ignore desired_access for now (would need to store per-handle access rights)
     let _ = desired_access;
+    let _ = same_access;
+    let _ = same_attributes;
 
     match new_handle {
         Some(h) => {
             unsafe { *(target_handle_ptr as *mut usize) = h; }
-            crate::serial_println!("[SYSCALL] NtDuplicateHandle -> {:#x}", h);
-            0
+            crate::serial_println!("[SYSCALL] NtDuplicateHandle: -> 0x{:X}", h);
+            STATUS_SUCCESS
         }
         None => {
-            crate::serial_println!("[SYSCALL] NtDuplicateHandle failed");
-            -1
+            crate::serial_println!("[SYSCALL] NtDuplicateHandle: failed - no resources");
+            STATUS_INSUFFICIENT_RESOURCES
         }
     }
+}
+
+/// Internal helper to close a handle (used by NtDuplicateHandle with DUPLICATE_CLOSE_SOURCE)
+fn close_handle_internal(handle: usize) -> isize {
+    const STATUS_SUCCESS: isize = 0;
+    const STATUS_INVALID_HANDLE: isize = 0xC0000008u32 as isize;
+
+    if handle == 0 {
+        return STATUS_INVALID_HANDLE;
+    }
+
+    // Check file handles
+    if handle >= FILE_HANDLE_BASE {
+        if let Some(fs_handle) = unsafe { get_fs_handle(handle) } {
+            let _ = crate::fs::close(fs_handle);
+            unsafe { free_file_handle(handle); }
+            return STATUS_SUCCESS;
+        }
+        return STATUS_INVALID_HANDLE;
+    }
+
+    // Try object manager
+    let ob_handle = handle as u32;
+    if unsafe { crate::ob::ob_close_handle(ob_handle) } {
+        return STATUS_SUCCESS;
+    }
+
+    STATUS_INVALID_HANDLE
 }
 
 /// Object information class
