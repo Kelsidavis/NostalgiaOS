@@ -48,7 +48,7 @@ impl<T> SpinLock<T> {
     /// This disables interrupts while the lock is held to prevent
     /// deadlock from interrupt handlers trying to acquire the same lock.
     #[inline]
-    pub fn lock(&self) -> SpinLockGuard<T> {
+    pub fn lock(&self) -> SpinLockGuard<'_, T> {
         // Disable interrupts and save previous state
         let interrupts_enabled = Self::disable_interrupts();
 
@@ -75,7 +75,7 @@ impl<T> SpinLock<T> {
     ///
     /// Returns Some(guard) if successful, None if lock is held
     #[inline]
-    pub fn try_lock(&self) -> Option<SpinLockGuard<T>> {
+    pub fn try_lock(&self) -> Option<SpinLockGuard<'_, T>> {
         let interrupts_enabled = Self::disable_interrupts();
 
         if self.locked.compare_exchange(

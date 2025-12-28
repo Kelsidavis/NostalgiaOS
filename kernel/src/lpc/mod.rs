@@ -43,8 +43,6 @@
 pub mod port;
 pub mod message;
 
-use port::*;
-use message::*;
 
 // Re-export types
 pub use port::{

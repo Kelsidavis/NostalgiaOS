@@ -465,7 +465,7 @@ pub unsafe fn mm_allocate_virtual_memory(
         aspace_ref.process,
     );
 
-    if let Some(addr) = result {
+    if result.is_some() {
         aspace_ref.add_virtual_size(size);
     }
 

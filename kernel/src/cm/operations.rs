@@ -216,7 +216,7 @@ unsafe fn resolve_hklm_path(subpath: &str) -> Option<(u16, u32, &str)> {
 
 /// Open a registry key by path
 pub unsafe fn cm_open_key(path: &str) -> Result<CmKeyHandle, CmStatus> {
-    let (hive_idx, start_key, subpath) = resolve_root_path(path)
+    let (_hive_idx, start_key, subpath) = resolve_root_path(path)
         .ok_or(CmStatus::KeyNotFound)?;
 
     // Walk the path

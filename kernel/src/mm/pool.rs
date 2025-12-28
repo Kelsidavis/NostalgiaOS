@@ -415,8 +415,9 @@ pub fn mm_get_pool_free_count(class_idx: usize) -> usize {
 // Global Allocator (optional)
 // ============================================================================
 
-/// Global allocator implementation for Rust's alloc crate
-#[cfg(feature = "alloc")]
+// Global allocator - disabled unless "alloc" feature is enabled
+// The feature doesn't exist yet but code is ready for future use
+#[cfg(any())]  // Effectively disabled - use #[cfg(feature = "alloc")] when ready
 mod global_allocator {
     use super::*;
     use core::alloc::{GlobalAlloc, Layout};

@@ -312,8 +312,11 @@ impl PagedLookasideList {
 }
 
 // NT API compatibility
+#[allow(non_camel_case_types)]
 pub type NPAGED_LOOKASIDE_LIST = NPagedLookasideList;
+#[allow(non_camel_case_types)]
 pub type PAGED_LOOKASIDE_LIST = PagedLookasideList;
+#[allow(non_camel_case_types)]
 pub type LOOKASIDE_LIST_EX = LookasideList;
 
 /// Initialize a non-paged lookaside list (NT API)

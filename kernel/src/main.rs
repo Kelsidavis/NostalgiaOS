@@ -179,9 +179,7 @@ pub extern "C" fn kernel_main(boot_info_ptr: *const BootInfo) -> ! {
     serial_println!("Kernel entry point reached!");
 
     // Store boot info pointer (pointing to our copy)
-    unsafe {
-        BOOT_INFO.store(&raw mut BOOT_INFO_COPY, Ordering::SeqCst);
-    }
+    BOOT_INFO.store(&raw mut BOOT_INFO_COPY, Ordering::SeqCst);
 
     // Validate boot info
     let boot_info = unsafe { &BOOT_INFO_COPY };

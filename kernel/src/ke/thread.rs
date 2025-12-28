@@ -295,7 +295,7 @@ impl KThread {
         self.kernel_stack = initial_sp;
 
         // Set up context so first "return" from context switch enters start routine
-        self.context.rip = thread_entry_trampoline as u64;
+        self.context.rip = thread_entry_trampoline as *const () as u64;
         self.context.rflags = 0x202; // Interrupts enabled
     }
 

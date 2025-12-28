@@ -976,7 +976,7 @@ pub fn cmd_suspend(args: &[&str]) {
 
         // We need a process handle - use the pseudo-handle for current process
         // In NT, -1 (0xFFFFFFFF) is NtCurrentProcess()
-        let current_process_handle = 0x5000usize; // First process handle slot
+        let _current_process_handle = 0x5000usize; // First process handle slot
 
         outln!("");
         outln!("Calling NtSuspendProcess on current process...");
@@ -1155,7 +1155,7 @@ pub fn resolve_path(path: &str) -> &'static str {
         let mut path_len = 0usize;
 
         // Helper to append to path buffer
-        let mut append = |s: &str, buf: &mut [u8; 128], len: &mut usize| {
+        let append = |s: &str, buf: &mut [u8; 128], len: &mut usize| {
             for &b in s.as_bytes() {
                 if *len < buf.len() {
                     // Convert forward slash to backslash

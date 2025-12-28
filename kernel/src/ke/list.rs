@@ -147,6 +147,9 @@ macro_rules! offset_of {
     ($type:ty, $field:ident) => {{
         let dummy = core::mem::MaybeUninit::<$type>::uninit();
         let base = dummy.as_ptr();
+        // SAFETY: We're computing an offset from a valid MaybeUninit pointer,
+        // not actually dereferencing it. addr_of! on raw pointers is safe.
+        #[allow(unused_unsafe)]
         let field = unsafe { core::ptr::addr_of!((*base).$field) };
         (field as usize) - (base as usize)
     }};

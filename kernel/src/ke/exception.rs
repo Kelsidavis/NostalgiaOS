@@ -12,6 +12,7 @@
 use core::ptr;
 
 /// Context flags indicating which parts of CONTEXT are valid
+#[allow(non_snake_case)]
 pub mod ContextFlags {
     /// i386 context
     pub const CONTEXT_I386: u32 = 0x00010000;
@@ -38,6 +39,7 @@ pub mod ContextFlags {
 }
 
 /// Exception codes
+#[allow(non_snake_case)]
 pub mod ExceptionCode {
     /// Access violation
     pub const EXCEPTION_ACCESS_VIOLATION: u32 = 0xC0000005;
@@ -82,6 +84,7 @@ pub mod ExceptionCode {
 }
 
 /// Exception flags
+#[allow(non_snake_case)]
 pub mod ExceptionFlags {
     /// Exception is continuable
     pub const EXCEPTION_CONTINUABLE: u32 = 0;

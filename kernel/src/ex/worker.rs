@@ -28,7 +28,7 @@ use core::ptr;
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use crate::ke::list::ListEntry;
 use crate::ke::spinlock::SpinLock;
-use crate::ke::event::{KEvent, EventType};
+// KEvent and EventType reserved for future use with work queue signaling
 
 /// Work queue types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

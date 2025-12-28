@@ -6,7 +6,7 @@
 //! - **Client Port**: Created when client connects to server
 //! - **Communication Port**: Bidirectional communication channel
 
-use super::message::{LpcMessage, MAX_MESSAGE_SIZE};
+use super::message::MAX_MESSAGE_SIZE;
 
 /// Maximum number of ports
 pub const MAX_PORTS: usize = 64;
@@ -61,6 +61,7 @@ impl Default for LpcConnectionState {
 }
 
 /// Port flags
+#[allow(non_snake_case)]
 pub mod PortFlags {
     /// Port is in use
     pub const IN_USE: u16 = 0x0001;

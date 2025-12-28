@@ -184,6 +184,7 @@ impl<'a> Drop for FastMutexGuard<'a> {
 }
 
 // Re-export NT-compatible names
+#[allow(non_camel_case_types)]
 pub type FAST_MUTEX = FastMutex;
 
 /// Initialize a fast mutex (NT API compatibility)

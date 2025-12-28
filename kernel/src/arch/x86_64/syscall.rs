@@ -262,7 +262,8 @@ pub unsafe fn init() {
     wrmsr(msr::STAR, star);
 
     // Set syscall entry point
-    wrmsr(msr::LSTAR, syscall_entry as u64);
+    let syscall_entry_addr = syscall_entry as *const () as u64;
+    wrmsr(msr::LSTAR, syscall_entry_addr);
 
     // Set compatibility mode entry (not used, but set anyway)
     wrmsr(msr::CSTAR, 0);
@@ -275,7 +276,7 @@ pub unsafe fn init() {
 
     crate::serial_println!("[SYSCALL] Initialized syscall support");
     crate::serial_println!("[SYSCALL] STAR={:#x}, LSTAR={:#x}, SFMASK={:#x}",
-        star, syscall_entry as u64, SFMASK_VALUE);
+        star, syscall_entry_addr, SFMASK_VALUE);
 }
 
 /// Initialize the syscall dispatch table
@@ -3370,7 +3371,7 @@ pub struct KeyValuePartialInformation {
 fn sys_query_value_key(
     key_handle: usize,
     value_name_ptr: usize,
-    key_value_info_class: usize,
+    _key_value_info_class: usize,
     key_value_info: usize,
     length: usize,
     result_length: usize,
@@ -6447,7 +6448,7 @@ fn sys_get_context_thread(
     context: usize,
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
-    use crate::ke::exception::{Context, ContextFlags, ke_get_context};
+    use crate::ke::exception::{Context, ke_get_context};
 
     if context == 0 {
         return -1; // STATUS_INVALID_PARAMETER

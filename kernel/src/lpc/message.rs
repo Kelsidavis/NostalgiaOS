@@ -44,6 +44,7 @@ impl Default for LpcMessageType {
 }
 
 /// Message flags
+#[allow(non_snake_case)]
 pub mod LpcMessageFlags {
     /// Message expects a reply
     pub const REPLY_EXPECTED: u16 = 0x0001;

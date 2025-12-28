@@ -490,7 +490,6 @@ impl<T> AvlTable<T> {
                     } else {
                         self.rotate_left_right(node);
                     }
-                    node = if parent.is_null() { self.root } else if is_left { (*parent).left } else { (*parent).right };
                 } else if balance == 2 {
                     // Right subtree too heavy
                     let right = (*node).right;
@@ -502,7 +501,6 @@ impl<T> AvlTable<T> {
                     } else {
                         self.rotate_right_left(node);
                     }
-                    node = if parent.is_null() { self.root } else if is_left { (*parent).left } else { (*parent).right };
                 }
 
                 if parent.is_null() {

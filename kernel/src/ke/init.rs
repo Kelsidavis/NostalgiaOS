@@ -469,9 +469,7 @@ fn apc_test_thread() {
     crate::serial_println!("[APC-Test] Thread {} started - APC test", thread_id);
 
     // Get pointer to current thread
-    let current_thread = unsafe {
-        super::prcb::get_current_prcb().current_thread
-    };
+    let current_thread = super::prcb::get_current_prcb().current_thread;
 
     // Initialize and zero the APCs
     unsafe {

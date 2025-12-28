@@ -19,7 +19,7 @@
 
 use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
-use crate::ke::{SpinLock, list::ListEntry};
+use crate::ke::SpinLock;
 use super::eprocess::EProcess;
 
 /// Maximum processes per job

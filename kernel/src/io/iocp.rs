@@ -22,7 +22,7 @@ use core::ptr;
 use crate::ke::list::ListEntry;
 use crate::ke::dispatcher::{DispatcherHeader, DispatcherType};
 use crate::ke::spinlock::SpinLock;
-use crate::ke::event::KEvent;
+// KEvent reserved for future wait-on-completion-port implementation
 
 /// Maximum number of completion ports in the system
 pub const MAX_COMPLETION_PORTS: usize = 64;

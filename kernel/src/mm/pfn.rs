@@ -407,7 +407,6 @@ pub unsafe fn mm_init_pfn_database(
         attribute: u64,
     }
 
-    let mut total_usable = 0usize;
     let mut pages_added = 0usize;
 
     // Process memory map
@@ -423,8 +422,6 @@ pub unsafe fn mm_init_pfn_database(
         if usable {
             let start_page = (entry.physical_start as usize) / PAGE_SIZE;
             let num_pages = entry.number_of_pages as usize;
-
-            total_usable += num_pages * PAGE_SIZE;
 
             // Add pages to PFN database (skip first 1MB for safety)
             for page in start_page..(start_page + num_pages) {

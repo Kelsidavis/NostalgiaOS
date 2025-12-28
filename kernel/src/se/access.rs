@@ -168,7 +168,10 @@ pub fn se_access_check(
         remaining = 0;
     } else if sd.dacl.is_empty() {
         // Empty DACL denies all access
-        denied = remaining;
+        if !maximum_allowed {
+            return Err(AccessCheckResult::Denied);
+        }
+        // For maximum_allowed with empty DACL, nothing is granted
     } else {
         // Process ACEs in order
         for i in 0..sd.dacl.ace_count as usize {
