@@ -1289,10 +1289,99 @@ fn test_syscall() {
     };
     serial_println!("[SYSCALL-TEST] Invalid syscall 999 returned: {}", invalid);
 
+    // Test suspend/resume syscalls
+    test_suspend_resume_syscalls();
+
     serial_println!("[SYSCALL-TEST] All syscall tests passed!");
 
     // Test user mode page tables and execution
     test_user_mode();
+}
+
+/// Test suspend/resume syscalls
+fn test_suspend_resume_syscalls() {
+    serial_println!("[SUSPEND-TEST] Testing suspend/resume syscalls...");
+
+    // Syscall numbers
+    const NT_SUSPEND_THREAD: usize = 98;
+    const NT_RESUME_THREAD: usize = 99;
+    const NT_SUSPEND_PROCESS: usize = 93;
+    const NT_RESUME_PROCESS: usize = 94;
+
+    // Test NtSuspendThread with invalid handle
+    let result = unsafe {
+        extern "C" {
+            fn syscall_dispatcher(
+                num: usize, a1: usize, a2: usize, a3: usize,
+                a4: usize, a5: usize, a6: usize,
+            ) -> isize;
+        }
+        syscall_dispatcher(NT_SUSPEND_THREAD, 0xFFFF, 0, 0, 0, 0, 0)
+    };
+    serial_println!("[SUSPEND-TEST] NtSuspendThread(invalid) = {:#x}", result as u32);
+
+    // Test NtResumeThread with invalid handle
+    let result = unsafe {
+        extern "C" {
+            fn syscall_dispatcher(
+                num: usize, a1: usize, a2: usize, a3: usize,
+                a4: usize, a5: usize, a6: usize,
+            ) -> isize;
+        }
+        syscall_dispatcher(NT_RESUME_THREAD, 0xFFFF, 0, 0, 0, 0, 0)
+    };
+    serial_println!("[SUSPEND-TEST] NtResumeThread(invalid) = {:#x}", result as u32);
+
+    // Test NtSuspendProcess with invalid handle
+    let result = unsafe {
+        extern "C" {
+            fn syscall_dispatcher(
+                num: usize, a1: usize, a2: usize, a3: usize,
+                a4: usize, a5: usize, a6: usize,
+            ) -> isize;
+        }
+        syscall_dispatcher(NT_SUSPEND_PROCESS, 0xFFFF, 0, 0, 0, 0, 0)
+    };
+    serial_println!("[SUSPEND-TEST] NtSuspendProcess(invalid) = {:#x}", result as u32);
+
+    // Test NtResumeProcess with invalid handle
+    let result = unsafe {
+        extern "C" {
+            fn syscall_dispatcher(
+                num: usize, a1: usize, a2: usize, a3: usize,
+                a4: usize, a5: usize, a6: usize,
+            ) -> isize;
+        }
+        syscall_dispatcher(NT_RESUME_PROCESS, 0xFFFF, 0, 0, 0, 0, 0)
+    };
+    serial_println!("[SUSPEND-TEST] NtResumeProcess(invalid) = {:#x}", result as u32);
+
+    // Test with valid process handle (system process, PID 0)
+    // Process handle base is 0x5000, so handle for PID 0 = 0x5000
+    let result = unsafe {
+        extern "C" {
+            fn syscall_dispatcher(
+                num: usize, a1: usize, a2: usize, a3: usize,
+                a4: usize, a5: usize, a6: usize,
+            ) -> isize;
+        }
+        syscall_dispatcher(NT_SUSPEND_PROCESS, 0x5000, 0, 0, 0, 0, 0)
+    };
+    serial_println!("[SUSPEND-TEST] NtSuspendProcess(system) = {:#x}", result as u32);
+
+    // Resume it
+    let result = unsafe {
+        extern "C" {
+            fn syscall_dispatcher(
+                num: usize, a1: usize, a2: usize, a3: usize,
+                a4: usize, a5: usize, a6: usize,
+            ) -> isize;
+        }
+        syscall_dispatcher(NT_RESUME_PROCESS, 0x5000, 0, 0, 0, 0, 0)
+    };
+    serial_println!("[SUSPEND-TEST] NtResumeProcess(system) = {:#x}", result as u32);
+
+    serial_println!("[SUSPEND-TEST] Suspend/resume tests complete!");
 }
 
 /// Test user mode page tables and execution

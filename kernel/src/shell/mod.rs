@@ -154,6 +154,7 @@ const COMMANDS: &[&str] = &[
     "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "rm", "rmdir",
+    "suspend",
     "tasks", "time", "touch", "type",
     "ver", "version",
 ];
@@ -1032,6 +1033,8 @@ impl Shell {
             self.print_history();
         } else if eq_ignore_case(cmd, "reboot") {
             commands::cmd_reboot();
+        } else if eq_ignore_case(cmd, "suspend") {
+            commands::cmd_suspend(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

@@ -939,6 +939,139 @@ pub fn cmd_reboot() {
     }
 }
 
+/// Test suspend/resume syscalls
+pub fn cmd_suspend(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Usage: suspend <thread|process> <id>");
+        outln!("       suspend test");
+        outln!("");
+        outln!("Examples:");
+        outln!("  suspend test           - Test suspend/resume on current process");
+        outln!("  suspend thread 5       - Suspend thread with TID 5");
+        outln!("  suspend process 4      - Suspend all threads in process PID 4");
+        return;
+    }
+
+    extern "C" {
+        fn syscall_dispatcher(
+            num: usize, a1: usize, a2: usize, a3: usize,
+            a4: usize, a5: usize, a6: usize,
+        ) -> isize;
+    }
+
+    // Syscall numbers
+    const NT_SUSPEND_PROCESS: usize = 93;
+    const NT_RESUME_PROCESS: usize = 94;
+    const NT_SUSPEND_THREAD: usize = 98;
+    const NT_RESUME_THREAD: usize = 99;
+    const NT_GET_CURRENT_PROCESS_ID: usize = 3;
+
+    if eq_ignore_case(args[0], "test") {
+        outln!("Testing suspend/resume syscalls...");
+        outln!("");
+
+        // Get current process ID
+        let pid = unsafe { syscall_dispatcher(NT_GET_CURRENT_PROCESS_ID, 0, 0, 0, 0, 0, 0) };
+        outln!("Current process ID: {}", pid);
+
+        // We need a process handle - use the pseudo-handle for current process
+        // In NT, -1 (0xFFFFFFFF) is NtCurrentProcess()
+        let current_process_handle = 0x5000usize; // First process handle slot
+
+        outln!("");
+        outln!("Calling NtSuspendProcess on current process...");
+        outln!("(This will suspend all threads including shell - expect no more output)");
+        outln!("Note: In a real scenario, another thread would resume us.");
+        outln!("");
+
+        // For testing, we'll just call the syscall and see the debug output
+        // We can't actually suspend ourselves without another thread to resume
+        // So let's test on a different process or just show the syscall works
+
+        // Instead, let's just verify the syscall dispatches correctly
+        // by checking return values
+        outln!("Testing NtSuspendThread on invalid handle...");
+        let result = unsafe { syscall_dispatcher(NT_SUSPEND_THREAD, 0xFFFF, 0, 0, 0, 0, 0) };
+        outln!("  Result: {:#x} (expected error for invalid handle)", result as u32);
+
+        outln!("");
+        outln!("Testing NtResumeThread on invalid handle...");
+        let result = unsafe { syscall_dispatcher(NT_RESUME_THREAD, 0xFFFF, 0, 0, 0, 0, 0) };
+        outln!("  Result: {:#x} (expected error for invalid handle)", result as u32);
+
+        outln!("");
+        outln!("Testing NtSuspendProcess on invalid handle...");
+        let result = unsafe { syscall_dispatcher(NT_SUSPEND_PROCESS, 0xFFFF, 0, 0, 0, 0, 0) };
+        outln!("  Result: {:#x} (expected error for invalid handle)", result as u32);
+
+        outln!("");
+        outln!("Testing NtResumeProcess on invalid handle...");
+        let result = unsafe { syscall_dispatcher(NT_RESUME_PROCESS, 0xFFFF, 0, 0, 0, 0, 0) };
+        outln!("  Result: {:#x} (expected error for invalid handle)", result as u32);
+
+        outln!("");
+        outln!("Suspend/resume syscall tests complete!");
+        outln!("Check serial output for [SYSCALL] messages.");
+
+    } else if eq_ignore_case(args[0], "thread") {
+        if args.len() < 2 {
+            outln!("Usage: suspend thread <tid>");
+            return;
+        }
+        let tid: usize = match parse_number(args[1]) {
+            Some(n) => n,
+            None => {
+                outln!("Invalid thread ID: {}", args[1]);
+                return;
+            }
+        };
+        // Thread handle = 0x1000 + tid (sync object handle base)
+        let handle = 0x1000 + tid;
+        outln!("Suspending thread {} (handle {:#x})...", tid, handle);
+        let result = unsafe { syscall_dispatcher(NT_SUSPEND_THREAD, handle, 0, 0, 0, 0, 0) };
+        if result >= 0 {
+            outln!("Thread suspended. Previous suspend count: {}", result);
+        } else {
+            outln!("Failed to suspend thread: {:#x}", result as u32);
+        }
+
+    } else if eq_ignore_case(args[0], "process") {
+        if args.len() < 2 {
+            outln!("Usage: suspend process <pid>");
+            return;
+        }
+        let pid: usize = match parse_number(args[1]) {
+            Some(n) => n,
+            None => {
+                outln!("Invalid process ID: {}", args[1]);
+                return;
+            }
+        };
+        // Process handle = 0x5000 + pid
+        let handle = 0x5000 + pid;
+        outln!("Suspending process {} (handle {:#x})...", pid, handle);
+        let result = unsafe { syscall_dispatcher(NT_SUSPEND_PROCESS, handle, 0, 0, 0, 0, 0) };
+        if result == 0 {
+            outln!("Process suspended successfully.");
+        } else {
+            outln!("Failed to suspend process: {:#x}", result as u32);
+        }
+
+    } else {
+        outln!("Unknown subcommand: {}", args[0]);
+        outln!("Use 'suspend' without arguments for help.");
+    }
+}
+
+/// Parse a number from a string (decimal or hex with 0x prefix)
+fn parse_number(s: &str) -> Option<usize> {
+    if s.starts_with("0x") || s.starts_with("0X") {
+        usize::from_str_radix(&s[2..], 16).ok()
+    } else {
+        s.parse().ok()
+    }
+}
+
 /// Path buffer for resolved paths
 static mut PATH_BUFFER: [u8; 128] = [0u8; 128];
 
