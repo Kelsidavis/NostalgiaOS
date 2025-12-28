@@ -51,6 +51,9 @@ pub mod timer;
 // Wait support
 pub mod wait;
 
+// Exception handling
+pub mod exception;
+
 // Re-export key types
 pub use list::ListEntry;
 pub use thread::{KThread, ThreadState};
@@ -78,4 +81,11 @@ pub use wait::{
     ke_wait_for_single_object, ke_wait_for_multiple_objects,
     ki_signal_object, ki_unwait_thread, ki_check_wait_all,
     WaitReason, WaitMode, TIMEOUT_INFINITE,
+};
+
+// Re-export exception types
+pub use exception::{
+    Context, ExceptionRecord, M128A, LegacyFloatingSaveArea,
+    ke_raise_exception, ke_continue, ke_get_context, ke_set_context,
+    ContextFlags, ExceptionCode, ExceptionFlags, EXCEPTION_MAXIMUM_PARAMETERS,
 };

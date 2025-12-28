@@ -37,6 +37,7 @@ pub mod cid;
 pub mod create;
 pub mod eprocess;
 pub mod ethread;
+pub mod job;
 
 // Re-exports for convenience
 pub use cid::{
@@ -62,6 +63,14 @@ pub use create::{
     ps_create_process, ps_create_system_process,
     ps_create_thread, ps_create_system_thread,
     ps_start_thread, ps_create_and_start_system_thread,
+};
+
+pub use job::{
+    Job, JobBasicLimitInformation, JobExtendedLimitInformation,
+    JobBasicAccountingInformation, JobIoCounters,
+    job_limit_flags, job_security_flags, job_ui_flags,
+    ps_create_job, ps_lookup_job, allocate_job, free_job,
+    MAX_JOBS, MAX_PROCESSES_PER_JOB,
 };
 
 /// Initialize the Process Manager

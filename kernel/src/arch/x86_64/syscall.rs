@@ -165,6 +165,25 @@ pub enum SyscallNumber {
     NtRemoveProcessDebug = 122,
     NtWaitForDebugEvent = 123,
     NtDebugContinue = 124,
+
+    // Exception handling
+    NtRaiseException = 130,
+    NtContinue = 131,
+    NtGetContextThread = 132,
+    NtSetContextThread = 133,
+
+    // Process creation (extended)
+    NtCreateProcess = 140,
+    NtCreateProcessEx = 141,
+
+    // Job objects
+    NtCreateJobObject = 150,
+    NtOpenJobObject = 151,
+    NtAssignProcessToJobObject = 152,
+    NtQueryInformationJobObject = 153,
+    NtSetInformationJobObject = 154,
+    NtTerminateJobObject = 155,
+    NtIsProcessInJob = 156,
 }
 
 /// Syscall handler function type
@@ -377,6 +396,25 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtRemoveProcessDebug as usize, sys_remove_process_debug);
     register_syscall(SyscallNumber::NtWaitForDebugEvent as usize, sys_wait_for_debug_event);
     register_syscall(SyscallNumber::NtDebugContinue as usize, sys_debug_continue);
+
+    // Exception handling syscalls
+    register_syscall(SyscallNumber::NtRaiseException as usize, sys_raise_exception);
+    register_syscall(SyscallNumber::NtContinue as usize, sys_continue);
+    register_syscall(SyscallNumber::NtGetContextThread as usize, sys_get_context_thread);
+    register_syscall(SyscallNumber::NtSetContextThread as usize, sys_set_context_thread);
+
+    // Process creation syscalls
+    register_syscall(SyscallNumber::NtCreateProcess as usize, sys_create_process);
+    register_syscall(SyscallNumber::NtCreateProcessEx as usize, sys_create_process_ex);
+
+    // Job object syscalls
+    register_syscall(SyscallNumber::NtCreateJobObject as usize, sys_create_job_object);
+    register_syscall(SyscallNumber::NtOpenJobObject as usize, sys_open_job_object);
+    register_syscall(SyscallNumber::NtAssignProcessToJobObject as usize, sys_assign_process_to_job);
+    register_syscall(SyscallNumber::NtQueryInformationJobObject as usize, sys_query_information_job);
+    register_syscall(SyscallNumber::NtSetInformationJobObject as usize, sys_set_information_job);
+    register_syscall(SyscallNumber::NtTerminateJobObject as usize, sys_terminate_job_object);
+    register_syscall(SyscallNumber::NtIsProcessInJob as usize, sys_is_process_in_job);
 }
 
 /// Register a syscall handler
@@ -1662,7 +1700,7 @@ fn sys_delay_execution(
     // delay_interval is a pointer to a LARGE_INTEGER (i64)
     // Positive value = absolute time, negative = relative time
     // For now, we only support relative delays
-    let _ = alertable; // TODO: Handle alertable waits
+    let is_alertable = alertable != 0;
 
     if delay_interval == 0 {
         return -1; // STATUS_INVALID_PARAMETER
@@ -1679,12 +1717,15 @@ fn sys_delay_execution(
     // Convert to milliseconds (negative 100ns -> positive ms)
     let delay_ms = ((-delay_100ns) / 10_000) as u64;
 
-    // Use the scheduler's delay mechanism
+    // Use alertable delay mechanism
     unsafe {
-        crate::ke::scheduler::ki_delay_execution(delay_ms);
+        let completed = crate::ke::wait::ke_delay_execution_alertable(delay_ms, is_alertable);
+        if completed {
+            0 // STATUS_SUCCESS
+        } else {
+            0x101 // STATUS_ALERTED
+        }
     }
-
-    0 // STATUS_SUCCESS
 }
 
 // ============================================================================
@@ -1698,7 +1739,10 @@ fn sys_wait_for_single_object(
     timeout: usize,
     _: usize, _: usize, _: usize,
 ) -> isize {
-    let _ = alertable; // TODO: Handle alertable waits
+    use crate::ke::dispatcher::WaitStatus;
+    use crate::ke::wait::ke_wait_for_single_object_alertable;
+
+    let is_alertable = alertable != 0;
 
     // Get the object from handle
     let object = unsafe {
@@ -1721,18 +1765,16 @@ fn sys_wait_for_single_object(
         }
     };
 
-    // Wait on the event (assuming it's an event for now)
+    // Wait on the dispatcher object with alertable support
     let result = unsafe {
-        let event = object as *mut crate::ke::event::KEvent;
-        if let Some(ms) = timeout_ms {
-            if (*event).wait_timeout(ms) {
-                0 // STATUS_SUCCESS
-            } else {
-                0x102 // STATUS_TIMEOUT
-            }
-        } else {
-            (*event).wait();
-            0 // STATUS_SUCCESS
+        let header = object as *mut crate::ke::dispatcher::DispatcherHeader;
+        let status = ke_wait_for_single_object_alertable(header, timeout_ms, is_alertable);
+        match status {
+            WaitStatus::Object0 => 0, // STATUS_WAIT_0
+            WaitStatus::Timeout => 0x102, // STATUS_TIMEOUT
+            WaitStatus::Alerted => 0x101, // STATUS_ALERTED
+            WaitStatus::Abandoned => 0x80, // STATUS_ABANDONED_WAIT_0
+            WaitStatus::Invalid => -1,
         }
     };
 
@@ -1751,30 +1793,71 @@ fn sys_wait_for_multiple_objects(
     timeout: usize,
     _: usize,
 ) -> isize {
-    let _ = alertable; // TODO: Handle alertable waits
-    let _ = wait_type; // 0 = WaitAll, 1 = WaitAny
+    use crate::ke::dispatcher::{DispatcherHeader, WaitStatus, WaitType, MAXIMUM_WAIT_OBJECTS};
+    use crate::ke::wait::ke_wait_for_multiple_objects_alertable;
 
-    if count == 0 || count > 64 || handles == 0 {
+    let is_alertable = alertable != 0;
+    let nt_wait_type = if wait_type == 0 { WaitType::WaitAll } else { WaitType::WaitAny };
+
+    if count == 0 || count > MAXIMUM_WAIT_OBJECTS || handles == 0 {
         return -1; // STATUS_INVALID_PARAMETER
     }
 
-    // For now, just wait on each object sequentially (simplified)
+    // Get all object references
     let handle_array = unsafe {
         core::slice::from_raw_parts(handles as *const usize, count)
     };
 
+    // Build array of dispatcher headers
+    let mut objects: [*mut DispatcherHeader; 64] = [core::ptr::null_mut(); 64];
+    let mut valid_count = 0usize;
+
     for (i, &handle) in handle_array.iter().enumerate() {
-        let result = sys_wait_for_single_object(handle, 0, timeout, 0, 0, 0);
-        if result != 0 && result != 0x102 {
-            return result;
-        }
-        if wait_type == 1 && result == 0 {
-            // WaitAny - return which object was signaled
-            return i as isize;
+        unsafe {
+            let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
+            if obj.is_null() {
+                // Dereference already-referenced objects and return error
+                for j in 0..valid_count {
+                    crate::ob::ob_dereference_object(objects[j] as *mut u8);
+                }
+                return -1; // STATUS_INVALID_HANDLE
+            }
+            objects[i] = obj as *mut DispatcherHeader;
+            valid_count += 1;
         }
     }
 
-    0 // STATUS_SUCCESS (all objects signaled for WaitAll)
+    // Get timeout value (NULL = infinite wait)
+    let timeout_ms = if timeout == 0 {
+        None
+    } else {
+        let timeout_100ns = unsafe { *(timeout as *const i64) };
+        if timeout_100ns < 0 {
+            Some(((-timeout_100ns) / 10_000) as u64)
+        } else {
+            Some(0) // Absolute time treated as no-wait
+        }
+    };
+
+    // Wait on all objects with alertable support
+    let result = unsafe {
+        let objects_slice = &objects[..valid_count];
+        let status = ke_wait_for_multiple_objects_alertable(objects_slice, nt_wait_type, timeout_ms, is_alertable);
+        match status {
+            WaitStatus::Object0 => 0, // STATUS_WAIT_0
+            WaitStatus::Timeout => 0x102, // STATUS_TIMEOUT
+            WaitStatus::Alerted => 0x101, // STATUS_ALERTED
+            WaitStatus::Abandoned => 0x80, // STATUS_ABANDONED_WAIT_0
+            WaitStatus::Invalid => -1,
+        }
+    };
+
+    // Dereference all objects
+    for i in 0..valid_count {
+        unsafe { crate::ob::ob_dereference_object(objects[i] as *mut u8); }
+    }
+
+    result
 }
 
 /// NtSetEvent - Set (signal) an event
@@ -4482,17 +4565,59 @@ fn sys_suspend_process(
     process_handle: usize,
     _: usize, _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    use crate::ps::cid::ps_lookup_process_by_id;
+    use crate::ps::eprocess::EProcess;
+    use crate::ps::ethread::EThread;
+    use crate::containing_record;
+
     let pid = match unsafe { get_process_id(process_handle) } {
         Some(p) => p,
-        None => return -1,
+        None => return 0xC0000008u32 as isize, // STATUS_INVALID_HANDLE
     };
 
     crate::serial_println!("[SYSCALL] NtSuspendProcess(pid={})", pid);
 
-    // TODO: Actually suspend all threads in the process
-    // For now, just succeed
+    // Look up the process
+    let process = unsafe {
+        ps_lookup_process_by_id(pid) as *mut EProcess
+    };
 
-    0
+    if process.is_null() {
+        return 0xC0000008u32 as isize;
+    }
+
+    // Iterate through all threads in the process and suspend them
+    let mut suspended_count = 0u32;
+    unsafe {
+        let thread_list_head = &(*process).thread_list_head;
+
+        if thread_list_head.is_empty() {
+            crate::serial_println!("[SYSCALL] NtSuspendProcess: no threads to suspend");
+            return 0;
+        }
+
+        // Walk the thread list - flink is a field, not a method
+        let mut current = thread_list_head.flink;
+        let head_addr = thread_list_head as *const _ as usize;
+
+        while current as usize != head_addr {
+            // Get EThread from list entry
+            let thread = containing_record!(current, EThread, thread_list_entry);
+
+            // Suspend the thread's TCB
+            (*thread).tcb.suspend();
+            suspended_count += 1;
+
+            crate::serial_println!("[SYSCALL] NtSuspendProcess: suspended thread {}",
+                (*thread).cid.unique_thread);
+
+            // Move to next entry
+            current = (*current).flink;
+        }
+    }
+
+    crate::serial_println!("[SYSCALL] NtSuspendProcess: suspended {} threads", suspended_count);
+    0 // STATUS_SUCCESS
 }
 
 /// NtResumeProcess - Resume all threads in a process
@@ -4500,16 +4625,66 @@ fn sys_resume_process(
     process_handle: usize,
     _: usize, _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    use crate::ps::cid::ps_lookup_process_by_id;
+    use crate::ps::eprocess::EProcess;
+    use crate::ps::ethread::EThread;
+    use crate::containing_record;
+
     let pid = match unsafe { get_process_id(process_handle) } {
         Some(p) => p,
-        None => return -1,
+        None => return 0xC0000008u32 as isize,
     };
 
     crate::serial_println!("[SYSCALL] NtResumeProcess(pid={})", pid);
 
-    // TODO: Actually resume all threads in the process
+    // Look up the process
+    let process = unsafe {
+        ps_lookup_process_by_id(pid) as *mut EProcess
+    };
 
-    0
+    if process.is_null() {
+        return 0xC0000008u32 as isize;
+    }
+
+    // Iterate through all threads in the process and resume them
+    let mut resumed_count = 0u32;
+    unsafe {
+        let thread_list_head = &(*process).thread_list_head;
+
+        if thread_list_head.is_empty() {
+            crate::serial_println!("[SYSCALL] NtResumeProcess: no threads to resume");
+            return 0;
+        }
+
+        // Walk the thread list - flink is a field, not a method
+        let mut current = thread_list_head.flink;
+        let head_addr = thread_list_head as *const _ as usize;
+
+        while current as usize != head_addr {
+            // Get EThread from list entry
+            let thread = containing_record!(current, EThread, thread_list_entry);
+
+            // Resume the thread's TCB
+            let prev_count = (*thread).tcb.resume();
+
+            if prev_count > 0 {
+                resumed_count += 1;
+                crate::serial_println!("[SYSCALL] NtResumeProcess: resumed thread {}",
+                    (*thread).cid.unique_thread);
+
+                // If suspend count reached 0, make thread ready to run
+                if (*thread).tcb.suspend_count == 0 {
+                    crate::ke::scheduler::ki_ready_thread(&mut (*thread).tcb as *mut _);
+                }
+            }
+
+            // Move to next entry
+            current = (*current).flink;
+        }
+    }
+
+    crate::serial_println!("[SYSCALL] NtResumeProcess: resumed {} threads", resumed_count);
+    0 // STATUS_SUCCESS
 }
 
 // ============================================================================
@@ -5908,4 +6083,635 @@ fn sys_debug_continue(
     // TODO: Actually continue the debugged thread
 
     0
+}
+
+// ============================================================================
+// Exception Handling Syscalls
+// ============================================================================
+
+/// NtRaiseException - Raise an exception in the current thread
+fn sys_raise_exception(
+    exception_record: usize,
+    context_record: usize,
+    first_chance: usize,
+    _: usize, _: usize, _: usize,
+) -> isize {
+    use crate::ke::exception::{ExceptionRecord, Context, ke_raise_exception};
+
+    if exception_record == 0 || context_record == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    let is_first_chance = first_chance != 0;
+
+    crate::serial_println!("[SYSCALL] NtRaiseException(first_chance={})", is_first_chance);
+
+    unsafe {
+        let exception = exception_record as *const ExceptionRecord;
+        let context = context_record as *mut Context;
+
+        crate::serial_println!("[SYSCALL] NtRaiseException: code={:#x} addr={:p}",
+            (*exception).exception_code,
+            (*exception).exception_address);
+
+        ke_raise_exception(exception, context, is_first_chance) as isize
+    }
+}
+
+/// NtContinue - Continue execution from an exception handler
+fn sys_continue(
+    context_record: usize,
+    test_alert: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    use crate::ke::exception::{Context, ke_continue};
+
+    if context_record == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    let should_test_alert = test_alert != 0;
+
+    crate::serial_println!("[SYSCALL] NtContinue(test_alert={})", should_test_alert);
+
+    unsafe {
+        let context = context_record as *const Context;
+        ke_continue(context, should_test_alert) as isize
+    }
+}
+
+/// NtGetContextThread - Get a thread's context
+fn sys_get_context_thread(
+    thread_handle: usize,
+    context: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    use crate::ke::exception::{Context, ContextFlags, ke_get_context};
+
+    if context == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    crate::serial_println!("[SYSCALL] NtGetContextThread(handle={:#x})", thread_handle);
+
+    // For now, we only support getting the current thread's context
+    // Full implementation would look up the thread by handle
+    let prcb = unsafe { crate::ke::prcb::get_current_prcb_mut() };
+    let current_handle = if prcb.current_thread.is_null() {
+        0
+    } else {
+        // Get thread ID as pseudo-handle comparison
+        unsafe { (*prcb.current_thread).thread_id as usize }
+    };
+
+    // Handle value -2 (0xFFFFFFFE) means current thread
+    if thread_handle != 0xFFFFFFFE && thread_handle != current_handle {
+        // For non-current thread, we'd need to suspend and read its context
+        // For now, only support current thread
+        crate::serial_println!("[SYSCALL] NtGetContextThread: non-current thread not yet supported");
+        return 0xC0000001u32 as isize; // STATUS_UNSUCCESSFUL
+    }
+
+    unsafe {
+        let ctx = context as *mut Context;
+        let flags = (*ctx).context_flags;
+
+        crate::serial_println!("[SYSCALL] NtGetContextThread: flags={:#x}", flags);
+
+        ke_get_context(ctx, flags) as isize
+    }
+}
+
+/// NtSetContextThread - Set a thread's context
+fn sys_set_context_thread(
+    thread_handle: usize,
+    context: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    use crate::ke::exception::{Context, ke_set_context};
+
+    if context == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    crate::serial_println!("[SYSCALL] NtSetContextThread(handle={:#x})", thread_handle);
+
+    // For now, we only support setting the current thread's context
+    // Full implementation would look up the thread by handle
+    let prcb = unsafe { crate::ke::prcb::get_current_prcb_mut() };
+    let current_handle = if prcb.current_thread.is_null() {
+        0
+    } else {
+        unsafe { (*prcb.current_thread).thread_id as usize }
+    };
+
+    // Handle value -2 (0xFFFFFFFE) means current thread
+    if thread_handle != 0xFFFFFFFE && thread_handle != current_handle {
+        // For non-current thread, we'd need to suspend and modify its context
+        crate::serial_println!("[SYSCALL] NtSetContextThread: non-current thread not yet supported");
+        return 0xC0000001u32 as isize; // STATUS_UNSUCCESSFUL
+    }
+
+    unsafe {
+        let ctx = context as *const Context;
+
+        crate::serial_println!("[SYSCALL] NtSetContextThread: flags={:#x}", (*ctx).context_flags);
+
+        ke_set_context(ctx) as isize
+    }
+}
+
+// ============================================================================
+// Process Creation Syscalls
+// ============================================================================
+
+/// NtCreateProcess - Create a new process
+///
+/// This is the legacy process creation syscall. NtCreateProcessEx is preferred.
+fn sys_create_process(
+    process_handle: usize,
+    desired_access: usize,
+    object_attributes: usize,
+    parent_process: usize,
+    inherit_object_table: usize,
+    section_handle: usize,
+) -> isize {
+    // Call the extended version with no debug port or exception port
+    sys_create_process_internal(
+        process_handle,
+        desired_access,
+        object_attributes,
+        parent_process,
+        0, // flags (inherit handles = inherit_object_table)
+        section_handle,
+        0, // debug_port
+        0, // exception_port
+        inherit_object_table,
+    )
+}
+
+/// NtCreateProcessEx - Extended process creation
+fn sys_create_process_ex(
+    process_handle: usize,
+    desired_access: usize,
+    object_attributes: usize,
+    parent_process: usize,
+    flags: usize,
+    section_handle: usize,
+) -> isize {
+    // Additional parameters would come from the stack in real implementation
+    sys_create_process_internal(
+        process_handle,
+        desired_access,
+        object_attributes,
+        parent_process,
+        flags,
+        section_handle,
+        0, // debug_port
+        0, // exception_port
+        0, // unused
+    )
+}
+
+/// Internal process creation implementation
+fn sys_create_process_internal(
+    process_handle_ptr: usize,
+    _desired_access: usize,
+    object_attributes: usize,
+    parent_process_handle: usize,
+    flags: usize,
+    section_handle: usize,
+    _debug_port: usize,
+    _exception_port: usize,
+    _inherit_handles: usize,
+) -> isize {
+    use crate::ps::create::ps_create_process;
+    use crate::ps::eprocess::get_system_process;
+    use crate::ps::cid::ps_lookup_process_by_id;
+
+    if process_handle_ptr == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    crate::serial_println!(
+        "[SYSCALL] NtCreateProcess(parent={:#x}, flags={:#x}, section={:#x})",
+        parent_process_handle, flags, section_handle
+    );
+
+    // Get parent process
+    let parent = if parent_process_handle == 0 || parent_process_handle == 0xFFFFFFFF {
+        // Use system process as parent if no parent specified
+        get_system_process()
+    } else {
+        // Look up parent process by handle
+        unsafe {
+            if let Some(pid) = get_process_id(parent_process_handle) {
+                // Look up process by PID
+                let proc_ptr = ps_lookup_process_by_id(pid);
+                if !proc_ptr.is_null() {
+                    proc_ptr as *mut crate::ps::eprocess::EProcess
+                } else {
+                    return 0xC0000008u32 as isize; // STATUS_INVALID_HANDLE
+                }
+            } else {
+                return 0xC0000008u32 as isize; // STATUS_INVALID_HANDLE
+            }
+        }
+    };
+
+    // Extract process name from object attributes if available
+    let name = if object_attributes != 0 {
+        // OBJECT_ATTRIBUTES contains a UNICODE_STRING for object name
+        // For now, use a default name
+        b"process.exe"
+    } else {
+        b"process.exe"
+    };
+
+    // Create the process
+    let new_process = unsafe {
+        ps_create_process(parent, name, 8) // Default priority 8
+    };
+
+    if new_process.is_null() {
+        crate::serial_println!("[SYSCALL] NtCreateProcess: failed to create process");
+        return 0xC0000001u32 as isize; // STATUS_UNSUCCESSFUL
+    }
+
+    // If a section handle was provided, that would be the executable to map
+    // For now, we just note it
+    if section_handle != 0 {
+        crate::serial_println!("[SYSCALL] NtCreateProcess: section {:#x} (not yet mapped)", section_handle);
+    }
+
+    // Allocate a handle for the new process
+    unsafe {
+        let pid = (*new_process).unique_process_id;
+
+        if let Some(handle_value) = alloc_process_handle(pid) {
+            // Write handle to caller
+            *(process_handle_ptr as *mut usize) = handle_value;
+
+            crate::serial_println!(
+                "[SYSCALL] NtCreateProcess -> handle {:#x}, pid {}",
+                handle_value, pid
+            );
+            0 // STATUS_SUCCESS
+        } else {
+            crate::serial_println!("[SYSCALL] NtCreateProcess: no handle slots available");
+            0xC000001Du32 as isize // STATUS_NO_MEMORY
+        }
+    }
+}
+
+// ============================================================================
+// Job Object Syscalls
+// ============================================================================
+
+/// Job handle pool
+const JOB_HANDLE_BASE: usize = 0x8000;
+const MAX_JOB_HANDLES: usize = 64;
+static mut JOB_HANDLE_MAP: [u32; MAX_JOB_HANDLES] = [u32::MAX; MAX_JOB_HANDLES];
+
+unsafe fn alloc_job_handle(job_id: u32) -> Option<usize> {
+    for i in 0..MAX_JOB_HANDLES {
+        if JOB_HANDLE_MAP[i] == u32::MAX {
+            JOB_HANDLE_MAP[i] = job_id;
+            return Some(JOB_HANDLE_BASE + i);
+        }
+    }
+    None
+}
+
+unsafe fn get_job_id(handle: usize) -> Option<u32> {
+    if handle < JOB_HANDLE_BASE {
+        return None;
+    }
+    let idx = handle - JOB_HANDLE_BASE;
+    if idx >= MAX_JOB_HANDLES {
+        return None;
+    }
+    let id = JOB_HANDLE_MAP[idx];
+    if id == u32::MAX { None } else { Some(id) }
+}
+
+/// NtCreateJobObject - Create a job object
+fn sys_create_job_object(
+    job_handle_ptr: usize,
+    desired_access: usize,
+    object_attributes: usize,
+    _: usize, _: usize, _: usize,
+) -> isize {
+    use crate::ps::job::ps_create_job;
+
+    if job_handle_ptr == 0 {
+        return -1; // STATUS_INVALID_PARAMETER
+    }
+
+    crate::serial_println!("[SYSCALL] NtCreateJobObject(access={:#x})", desired_access);
+
+    // Extract job name if provided
+    let name = if object_attributes != 0 {
+        b"Job"
+    } else {
+        b"Job"
+    };
+
+    let job = unsafe { ps_create_job(name) };
+
+    if job.is_null() {
+        crate::serial_println!("[SYSCALL] NtCreateJobObject: failed to create job");
+        return 0xC0000001u32 as isize;
+    }
+
+    unsafe {
+        let job_id = (*job).job_id;
+
+        if let Some(handle_value) = alloc_job_handle(job_id) {
+            *(job_handle_ptr as *mut usize) = handle_value;
+
+            crate::serial_println!("[SYSCALL] NtCreateJobObject -> handle {:#x}, id {}",
+                handle_value, job_id);
+            0
+        } else {
+            crate::ps::job::free_job(job);
+            0xC000001Du32 as isize
+        }
+    }
+}
+
+/// NtOpenJobObject - Open existing job object
+fn sys_open_job_object(
+    job_handle_ptr: usize,
+    desired_access: usize,
+    object_attributes: usize,
+    _: usize, _: usize, _: usize,
+) -> isize {
+    if job_handle_ptr == 0 || object_attributes == 0 {
+        return -1;
+    }
+
+    crate::serial_println!("[SYSCALL] NtOpenJobObject(access={:#x})", desired_access);
+    0xC0000034u32 as isize // STATUS_OBJECT_NAME_NOT_FOUND
+}
+
+/// NtAssignProcessToJobObject - Assign a process to a job
+fn sys_assign_process_to_job(
+    job_handle: usize,
+    process_handle: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    use crate::ps::job::ps_lookup_job;
+    use crate::ps::cid::ps_lookup_process_by_id;
+
+    crate::serial_println!("[SYSCALL] NtAssignProcessToJobObject(job={:#x}, proc={:#x})",
+        job_handle, process_handle);
+
+    let job = unsafe {
+        if let Some(job_id) = get_job_id(job_handle) {
+            ps_lookup_job(job_id)
+        } else {
+            return 0xC0000008u32 as isize;
+        }
+    };
+
+    if job.is_null() {
+        return 0xC0000008u32 as isize;
+    }
+
+    let process = unsafe {
+        if let Some(pid) = get_process_id(process_handle) {
+            ps_lookup_process_by_id(pid) as *mut crate::ps::eprocess::EProcess
+        } else {
+            return 0xC0000008u32 as isize;
+        }
+    };
+
+    if process.is_null() {
+        return 0xC0000008u32 as isize;
+    }
+
+    unsafe {
+        if !(*process).job.is_null() {
+            return 0xC0000430u32 as isize;
+        }
+
+        if (*job).assign_process(process) {
+            crate::serial_println!("[SYSCALL] NtAssignProcessToJobObject: success");
+            0
+        } else {
+            0xC0000001u32 as isize
+        }
+    }
+}
+
+/// NtQueryInformationJobObject - Query job information
+fn sys_query_information_job(
+    job_handle: usize,
+    info_class: usize,
+    info_buffer: usize,
+    info_length: usize,
+    return_length: usize,
+    _: usize,
+) -> isize {
+    use crate::ps::job::ps_lookup_job;
+
+    crate::serial_println!("[SYSCALL] NtQueryInformationJobObject(handle={:#x}, class={})",
+        job_handle, info_class);
+
+    if info_buffer == 0 {
+        return -1;
+    }
+
+    let job = unsafe {
+        if let Some(job_id) = get_job_id(job_handle) {
+            ps_lookup_job(job_id)
+        } else {
+            return 0xC0000008u32 as isize;
+        }
+    };
+
+    if job.is_null() {
+        return 0xC0000008u32 as isize;
+    }
+
+    unsafe {
+        match info_class as u32 {
+            1 => { // BasicAccountingInformation
+                let size = core::mem::size_of::<crate::ps::job::JobBasicAccountingInformation>();
+                if info_length < size {
+                    if return_length != 0 {
+                        *(return_length as *mut usize) = size;
+                    }
+                    return 0xC0000023u32 as isize;
+                }
+                let dest = info_buffer as *mut crate::ps::job::JobBasicAccountingInformation;
+                *dest = (*job).accounting;
+                if return_length != 0 {
+                    *(return_length as *mut usize) = size;
+                }
+                0
+            }
+            2 => { // BasicLimitInformation
+                let size = core::mem::size_of::<crate::ps::job::JobBasicLimitInformation>();
+                if info_length < size {
+                    if return_length != 0 {
+                        *(return_length as *mut usize) = size;
+                    }
+                    return 0xC0000023u32 as isize;
+                }
+                let dest = info_buffer as *mut crate::ps::job::JobBasicLimitInformation;
+                *dest = (*job).limits.basic_limit_information;
+                if return_length != 0 {
+                    *(return_length as *mut usize) = size;
+                }
+                0
+            }
+            9 => { // ExtendedLimitInformation
+                let size = core::mem::size_of::<crate::ps::job::JobExtendedLimitInformation>();
+                if info_length < size {
+                    if return_length != 0 {
+                        *(return_length as *mut usize) = size;
+                    }
+                    return 0xC0000023u32 as isize;
+                }
+                let dest = info_buffer as *mut crate::ps::job::JobExtendedLimitInformation;
+                *dest = (*job).limits;
+                if return_length != 0 {
+                    *(return_length as *mut usize) = size;
+                }
+                0
+            }
+            _ => 0xC0000003u32 as isize
+        }
+    }
+}
+
+/// NtSetInformationJobObject - Set job limits
+fn sys_set_information_job(
+    job_handle: usize,
+    info_class: usize,
+    info_buffer: usize,
+    info_length: usize,
+    _: usize, _: usize,
+) -> isize {
+    use crate::ps::job::ps_lookup_job;
+
+    crate::serial_println!("[SYSCALL] NtSetInformationJobObject(handle={:#x}, class={})",
+        job_handle, info_class);
+
+    if info_buffer == 0 {
+        return -1;
+    }
+
+    let job = unsafe {
+        if let Some(job_id) = get_job_id(job_handle) {
+            ps_lookup_job(job_id)
+        } else {
+            return 0xC0000008u32 as isize;
+        }
+    };
+
+    if job.is_null() {
+        return 0xC0000008u32 as isize;
+    }
+
+    unsafe {
+        match info_class as u32 {
+            2 => { // BasicLimitInformation
+                let size = core::mem::size_of::<crate::ps::job::JobBasicLimitInformation>();
+                if info_length < size {
+                    return 0xC0000023u32 as isize;
+                }
+                let src = info_buffer as *const crate::ps::job::JobBasicLimitInformation;
+                (*job).limits.basic_limit_information = *src;
+                0
+            }
+            9 => { // ExtendedLimitInformation
+                let size = core::mem::size_of::<crate::ps::job::JobExtendedLimitInformation>();
+                if info_length < size {
+                    return 0xC0000023u32 as isize;
+                }
+                let src = info_buffer as *const crate::ps::job::JobExtendedLimitInformation;
+                (*job).limits = *src;
+                0
+            }
+            _ => 0xC0000003u32 as isize
+        }
+    }
+}
+
+/// NtTerminateJobObject - Terminate all processes in a job
+fn sys_terminate_job_object(
+    job_handle: usize,
+    exit_status: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    use crate::ps::job::ps_lookup_job;
+
+    crate::serial_println!("[SYSCALL] NtTerminateJobObject(handle={:#x}, exit={:#x})",
+        job_handle, exit_status);
+
+    let job = unsafe {
+        if let Some(job_id) = get_job_id(job_handle) {
+            ps_lookup_job(job_id)
+        } else {
+            return 0xC0000008u32 as isize;
+        }
+    };
+
+    if job.is_null() {
+        return 0xC0000008u32 as isize;
+    }
+
+    unsafe {
+        (*job).terminate(exit_status as i32);
+    }
+
+    0
+}
+
+/// NtIsProcessInJob - Check if a process is in a job
+fn sys_is_process_in_job(
+    process_handle: usize,
+    job_handle: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    use crate::ps::cid::ps_lookup_process_by_id;
+
+    crate::serial_println!("[SYSCALL] NtIsProcessInJob(proc={:#x}, job={:#x})",
+        process_handle, job_handle);
+
+    let process = unsafe {
+        if let Some(pid) = get_process_id(process_handle) {
+            ps_lookup_process_by_id(pid) as *mut crate::ps::eprocess::EProcess
+        } else {
+            return 0xC0000008u32 as isize;
+        }
+    };
+
+    if process.is_null() {
+        return 0xC0000008u32 as isize;
+    }
+
+    unsafe {
+        if job_handle == 0 {
+            if (*process).job.is_null() {
+                0xC0000001u32 as isize // Not in any job
+            } else {
+                0 // In some job
+            }
+        } else {
+            if let Some(job_id) = get_job_id(job_handle) {
+                let job = crate::ps::job::ps_lookup_job(job_id);
+                if (*process).job == job as *mut u8 {
+                    0 // In this job
+                } else {
+                    0xC0000001u32 as isize
+                }
+            } else {
+                0xC0000008u32 as isize
+            }
+        }
+    }
 }

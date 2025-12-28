@@ -195,6 +195,8 @@ pub enum WaitStatus {
     Object0 = 0,
     /// Wait was abandoned (mutex owner terminated)
     Abandoned = 0x80,
+    /// Wait was interrupted by user APC (alertable wait only)
+    Alerted = 0x101,
     /// Wait timed out
     Timeout = 0x102,
     /// Invalid wait (internal error)

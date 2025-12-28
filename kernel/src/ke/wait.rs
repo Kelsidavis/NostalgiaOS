@@ -582,3 +582,260 @@ pub unsafe fn ki_check_wait_all(thread: *mut KThread) -> bool {
 
     true
 }
+
+// ============================================================================
+// Alertable Wait Support
+// ============================================================================
+
+/// Wait for a single dispatcher object with alertable support
+///
+/// If alertable is true and user APCs are pending, they will be delivered
+/// and the wait will return with WaitStatus::Alerted.
+///
+/// # Arguments
+/// * `object` - Pointer to the dispatcher object header
+/// * `timeout_ms` - Optional timeout in milliseconds (None = infinite wait)
+/// * `alertable` - If true, user APCs can interrupt the wait
+///
+/// # Returns
+/// * `WaitStatus::Object0` - Object was signaled
+/// * `WaitStatus::Timeout` - Wait timed out
+/// * `WaitStatus::Alerted` - Wait was interrupted by user APC (alertable only)
+/// * `WaitStatus::Abandoned` - Mutex was abandoned
+pub unsafe fn ke_wait_for_single_object_alertable(
+    object: *mut DispatcherHeader,
+    timeout_ms: Option<u64>,
+    alertable: bool,
+) -> WaitStatus {
+    let objects = [object];
+    ke_wait_for_multiple_objects_alertable(&objects, WaitType::WaitAny, timeout_ms, alertable)
+}
+
+/// Wait for multiple dispatcher objects with alertable support
+///
+/// If alertable is true and user APCs are pending, they will be delivered
+/// and the wait will return with WaitStatus::Alerted.
+///
+/// # Arguments
+/// * `objects` - Slice of pointers to dispatcher object headers
+/// * `wait_type` - WaitAny (any object) or WaitAll (all objects)
+/// * `timeout_ms` - Optional timeout in milliseconds (None = infinite wait)
+/// * `alertable` - If true, user APCs can interrupt the wait
+///
+/// # Returns
+/// * `WaitStatus::Object0` + index - For WaitAny, indicates which object was signaled
+/// * `WaitStatus::Object0` - For WaitAll, all objects were signaled
+/// * `WaitStatus::Timeout` - Wait timed out
+/// * `WaitStatus::Alerted` - Wait was interrupted by user APC (alertable only)
+pub unsafe fn ke_wait_for_multiple_objects_alertable(
+    objects: &[*mut DispatcherHeader],
+    wait_type: WaitType,
+    timeout_ms: Option<u64>,
+    alertable: bool,
+) -> WaitStatus {
+    let count = objects.len();
+
+    // Validate count
+    if count == 0 {
+        return WaitStatus::Invalid;
+    }
+    if count > MAXIMUM_WAIT_OBJECTS {
+        return WaitStatus::Invalid;
+    }
+
+    let prcb = get_current_prcb_mut();
+    let thread = prcb.current_thread;
+
+    if thread.is_null() {
+        return WaitStatus::Invalid;
+    }
+
+    // Check for pending user APCs before waiting (if alertable)
+    if alertable {
+        let apc_state = &(*thread).apc_state;
+        if apc_state.user_apc_pending {
+            // Set alertable flag and deliver APCs
+            (*thread).alertable = true;
+            super::apc::ki_deliver_apc(super::apc::ApcMode::UserMode);
+            (*thread).alertable = false;
+            return WaitStatus::Alerted;
+        }
+    }
+
+    // Fast path: check if wait can be satisfied immediately
+    if let Some(status) = try_satisfy_wait_immediate(objects, wait_type, thread) {
+        return status;
+    }
+
+    // Slow path: must block and wait
+    // Set alertable flag on thread during the wait
+    let old_alertable = (*thread).alertable;
+    (*thread).alertable = alertable;
+
+    let status = wait_for_objects_blocking_alertable(thread, objects, wait_type, timeout_ms, alertable);
+
+    // Restore alertable flag
+    (*thread).alertable = old_alertable;
+
+    status
+}
+
+/// Blocking wait with alertable support
+unsafe fn wait_for_objects_blocking_alertable(
+    thread: *mut KThread,
+    objects: &[*mut DispatcherHeader],
+    wait_type: WaitType,
+    timeout_ms: Option<u64>,
+    alertable: bool,
+) -> WaitStatus {
+    // Static wait blocks for this wait (max 64 objects + 1 timer)
+    let mut wait_blocks: [KWaitBlock; MAXIMUM_WAIT_OBJECTS + 1] = core::array::from_fn(|_| KWaitBlock::new());
+    let count = objects.len();
+
+    // Set up thread wait state
+    (*thread).wait_type = wait_type;
+    (*thread).wait_count = count as u8;
+    (*thread).wait_block_list = wait_blocks.as_mut_ptr();
+    (*thread).wait_status = WaitStatus::Object0; // Will be updated
+
+    // Initialize wait blocks and add to object wait lists
+    for (i, &object) in objects.iter().enumerate() {
+        let block = &mut wait_blocks[i];
+        block.object = object;
+        block.thread = thread;
+        block.wait_type = wait_type;
+
+        // Add to object's wait list
+        (*object).wait_list().insert_tail(&mut block.wait_list_entry);
+    }
+
+    // Set up timeout if specified
+    let timer = KTimer::new();
+    timer.init();
+    let has_timeout = timeout_ms.is_some() && timeout_ms != Some(TIMEOUT_INFINITE);
+
+    if has_timeout {
+        let ms = timeout_ms.unwrap();
+        // Set up timer wait block
+        let timer_block = &mut wait_blocks[count];
+        timer_block.object = &timer.header as *const _ as *mut DispatcherHeader;
+        timer_block.thread = thread;
+        timer_block.wait_type = wait_type;
+
+        // Start the timer (ms as u32 is fine for reasonable timeouts)
+        timer.set(ms as u32, 0, None);
+    }
+
+    // Put thread in waiting state
+    (*thread).state = ThreadState::Waiting;
+
+    // Yield to scheduler - it will pick another thread
+    scheduler::ki_yield();
+
+    // When we return, check why we woke up
+
+    // First check for alertable interrupt
+    if alertable {
+        let apc_state = &(*thread).apc_state;
+        if apc_state.user_apc_pending {
+            // Clean up wait blocks
+            for i in 0..count {
+                wait_blocks[i].wait_list_entry.remove_entry();
+            }
+
+            // Cancel timer if active
+            if has_timeout {
+                timer.cancel();
+            }
+
+            // Deliver the APCs
+            (*thread).alertable = true;
+            super::apc::ki_deliver_apc(super::apc::ApcMode::UserMode);
+            (*thread).alertable = false;
+
+            return WaitStatus::Alerted;
+        }
+    }
+
+    // Check for timeout
+    if has_timeout && timer.is_signaled() {
+        // Clean up wait blocks
+        for i in 0..count {
+            wait_blocks[i].wait_list_entry.remove_entry();
+        }
+        return WaitStatus::Timeout;
+    }
+
+    // Get status from thread (set by signal code)
+    let status = (*thread).wait_status;
+
+    // Clean up wait blocks
+    for i in 0..count {
+        wait_blocks[i].wait_list_entry.remove_entry();
+    }
+
+    // Cancel timer if we didn't timeout
+    if has_timeout {
+        timer.cancel();
+    }
+
+    status
+}
+
+/// Simple delay with alertable support
+///
+/// # Arguments
+/// * `milliseconds` - Time to delay in milliseconds
+/// * `alertable` - If true, APCs can interrupt the delay
+///
+/// # Returns
+/// * `true` - Delay completed normally
+/// * `false` - Delay was interrupted by APC (alertable only)
+pub unsafe fn ke_delay_execution_alertable(milliseconds: u64, alertable: bool) -> bool {
+    let prcb = get_current_prcb_mut();
+    let thread = prcb.current_thread;
+
+    if thread.is_null() {
+        return true;
+    }
+
+    // Check for pending user APCs before delaying (if alertable)
+    if alertable {
+        let apc_state = &(*thread).apc_state;
+        if apc_state.user_apc_pending {
+            (*thread).alertable = true;
+            super::apc::ki_deliver_apc(super::apc::ApcMode::UserMode);
+            (*thread).alertable = false;
+            return false; // Interrupted
+        }
+    }
+
+    // Set up a timer for the delay
+    let timer = KTimer::new();
+    timer.init();
+    timer.set(milliseconds as u32, 0, None);
+
+    // Set alertable flag during wait
+    let old_alertable = (*thread).alertable;
+    (*thread).alertable = alertable;
+    (*thread).state = ThreadState::Waiting;
+
+    // Yield until timer fires or we're alerted
+    scheduler::ki_yield();
+
+    // Restore alertable flag
+    (*thread).alertable = old_alertable;
+
+    // Check if we were alerted
+    if alertable {
+        let apc_state = &(*thread).apc_state;
+        if apc_state.user_apc_pending {
+            timer.cancel();
+            super::apc::ki_deliver_apc(super::apc::ApcMode::UserMode);
+            return false; // Interrupted
+        }
+    }
+
+    timer.cancel();
+    true // Completed normally
+}
