@@ -86,8 +86,10 @@ impl FsStatus {
 /// File type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum FileType {
     /// Regular file
+    #[default]
     Regular = 0,
     /// Directory
     Directory = 1,
@@ -103,11 +105,6 @@ pub enum FileType {
     Socket = 6,
 }
 
-impl Default for FileType {
-    fn default() -> Self {
-        Self::Regular
-    }
-}
 
 /// File attributes
 pub mod file_attrs {
@@ -374,7 +371,9 @@ impl Default for FileHandle {
 /// File system type identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum FsType {
+    #[default]
     Unknown = 0,
     Fat12 = 1,
     Fat16 = 2,
@@ -386,11 +385,6 @@ pub enum FsType {
     Iso9660 = 8,
 }
 
-impl Default for FsType {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
 
 /// File system operations trait (vtable)
 #[repr(C)]

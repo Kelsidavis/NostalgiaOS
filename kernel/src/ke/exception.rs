@@ -461,12 +461,11 @@ pub unsafe fn ke_continue(context: *const Context, test_alert: bool) -> i32 {
     }
 
     // If test_alert is set and we're alertable, check for APCs
-    if test_alert && (*thread).alertable {
-        if (*thread).apc_state.user_apc_pending {
+    if test_alert && (*thread).alertable
+        && (*thread).apc_state.user_apc_pending {
             super::apc::ki_deliver_apc(super::apc::ApcMode::UserMode);
             return 0x101; // STATUS_ALERTED
         }
-    }
 
     // Restore the thread context
     // This would normally update the trap frame on the stack

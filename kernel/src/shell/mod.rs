@@ -532,16 +532,14 @@ impl Shell {
         let mut match_count = 0;
 
         for &cmd in COMMANDS.iter() {
-            if cmd.len() >= prefix_len && starts_with_ignore_case(cmd, &self.cmd_buf[..prefix_len]) {
-                if match_count < 16 {
+            if cmd.len() >= prefix_len && starts_with_ignore_case(cmd, &self.cmd_buf[..prefix_len])
+                && match_count < 16 {
                     matches[match_count] = cmd;
                     match_count += 1;
                 }
-            }
         }
 
         if match_count == 0 {
-            return;
         } else if match_count == 1 {
             // Exactly one match - complete it
             let completion = matches[0];
@@ -675,14 +673,13 @@ impl Shell {
                     }
 
                     // Check if name starts with prefix (case-insensitive)
-                    if prefix_len == 0 || starts_with_ignore_case(name, prefix) {
-                        if match_count < MAX_FILE_MATCHES && name_bytes.len() < 64 {
+                    if (prefix_len == 0 || starts_with_ignore_case(name, prefix))
+                        && match_count < MAX_FILE_MATCHES && name_bytes.len() < 64 {
                             file_matches[match_count][..name_bytes.len()].copy_from_slice(name_bytes);
                             file_lens[match_count] = name_bytes.len();
                             is_dir[match_count] = entry.file_type == fs::FileType::Directory;
                             match_count += 1;
                         }
-                    }
 
                     offset = entry.next_offset;
                     if offset == 0 {
@@ -694,7 +691,6 @@ impl Shell {
         }
 
         if match_count == 0 {
-            return;
         } else if match_count == 1 {
             // Single match - complete it
             let name_len = file_lens[0];
@@ -1071,17 +1067,7 @@ fn parse_redirect(cmd: &str) -> (&str, Option<&str>, bool) {
 
 /// Case-insensitive string comparison
 fn eq_ignore_case(a: &str, b: &str) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    for (ca, cb) in a.bytes().zip(b.bytes()) {
-        let ca_lower = if ca >= b'A' && ca <= b'Z' { ca + 32 } else { ca };
-        let cb_lower = if cb >= b'A' && cb <= b'Z' { cb + 32 } else { cb };
-        if ca_lower != cb_lower {
-            return false;
-        }
-    }
-    true
+    a.as_bytes().eq_ignore_ascii_case(b.as_bytes())
 }
 
 /// Check if string starts with prefix (case-insensitive)
@@ -1090,16 +1076,7 @@ fn starts_with_ignore_case(s: &str, prefix: &[u8]) -> bool {
     if s_bytes.len() < prefix.len() {
         return false;
     }
-    for i in 0..prefix.len() {
-        let ca = s_bytes[i];
-        let cb = prefix[i];
-        let ca_lower = if ca >= b'A' && ca <= b'Z' { ca + 32 } else { ca };
-        let cb_lower = if cb >= b'A' && cb <= b'Z' { cb + 32 } else { cb };
-        if ca_lower != cb_lower {
-            return false;
-        }
-    }
-    true
+    s_bytes[..prefix.len()].eq_ignore_ascii_case(prefix)
 }
 
 /// Find common prefix length among matching commands
@@ -1118,11 +1095,7 @@ fn find_common_prefix(matches: &[&str]) -> usize {
         let m_bytes = m.as_bytes();
         let mut i = 0;
         while i < common_len && i < m_bytes.len() {
-            let ca = first[i];
-            let cb = m_bytes[i];
-            let ca_lower = if ca >= b'A' && ca <= b'Z' { ca + 32 } else { ca };
-            let cb_lower = if cb >= b'A' && cb <= b'Z' { cb + 32 } else { cb };
-            if ca_lower != cb_lower {
+            if first[i].to_ascii_lowercase() != m_bytes[i].to_ascii_lowercase() {
                 break;
             }
             i += 1;
@@ -1150,11 +1123,7 @@ fn find_common_prefix_bytes(matches: &[[u8; 64]; 16], lens: &[usize; 16], count:
         let m_len = lens[i];
         let mut j = 0;
         while j < common_len && j < m_len {
-            let ca = first[j];
-            let cb = m[j];
-            let ca_lower = if ca >= b'A' && ca <= b'Z' { ca + 32 } else { ca };
-            let cb_lower = if cb >= b'A' && cb <= b'Z' { cb + 32 } else { cb };
-            if ca_lower != cb_lower {
+            if first[j].to_ascii_lowercase() != m[j].to_ascii_lowercase() {
                 break;
             }
             j += 1;

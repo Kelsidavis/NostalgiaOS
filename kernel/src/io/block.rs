@@ -63,8 +63,10 @@ pub enum BlockStatus {
 /// Block device type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum BlockDeviceType {
     /// Unknown device
+    #[default]
     Unknown = 0,
     /// Hard disk drive
     HardDisk = 1,
@@ -82,11 +84,6 @@ pub enum BlockDeviceType {
     Network = 7,
 }
 
-impl Default for BlockDeviceType {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
 
 /// Block device flags
 pub mod block_flags {

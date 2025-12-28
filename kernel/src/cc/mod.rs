@@ -88,6 +88,12 @@ pub struct Vacb {
     pub shared_cache_map: *mut SharedCacheMap,
 }
 
+impl Default for Vacb {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Vacb {
     pub const fn new() -> Self {
         Self {
@@ -183,6 +189,12 @@ pub struct SharedCacheMap {
     pub write_behind_enabled: bool,
     /// Lock for synchronization
     lock: SpinLock<()>,
+}
+
+impl Default for SharedCacheMap {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SharedCacheMap {
@@ -359,6 +371,12 @@ pub struct PrivateCacheMap {
     pub is_sequential: bool,
 }
 
+impl Default for PrivateCacheMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PrivateCacheMap {
     pub const fn new() -> Self {
         Self {
@@ -440,6 +458,12 @@ pub struct CacheStats {
     pub total_writes: u64,
     pub dirty_pages: u64,
     pub active_cache_maps: u32,
+}
+
+impl Default for CacheStats {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CacheStats {
@@ -669,7 +693,6 @@ pub unsafe fn cc_map_data(
 /// Unpin (release) mapped data
 pub unsafe fn cc_unpin_data(cache_map: *mut SharedCacheMap, _bcb: *mut u8) {
     if cache_map.is_null() {
-        return;
     }
 
     // In a full implementation, this would dereference the VACB

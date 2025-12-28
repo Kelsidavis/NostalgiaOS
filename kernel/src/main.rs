@@ -32,6 +32,34 @@
 #![feature(alloc_error_handler)]
 #![allow(static_mut_refs)]
 #![allow(dead_code)]
+// Kernel-specific lint configurations:
+// - missing_safety_doc: In a kernel, virtually everything is unsafe by nature
+// - declare_interior_mutable_const: Common pattern for static initialization in no_std
+// - type_complexity: Function pointer types for driver/syscall interfaces are necessarily complex
+// - too_many_arguments: Some kernel APIs require many parameters
+// - needless_range_loop: Sometimes index access is clearer in kernel code
+// - while_let_loop: Pattern matching style preference
+// - manual_find: Sometimes explicit loops are clearer
+// - result_unit_err: Some kernel APIs don't need error details
+// - new_without_default: Kernel structs often have specific initialization requirements
+// - if_same_then_else: Sometimes used for clarity in symmetric patterns
+#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::declare_interior_mutable_const)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::while_let_loop)]
+#![allow(clippy::manual_find)]
+#![allow(clippy::result_unit_err)]
+#![allow(clippy::new_without_default)]
+#![allow(clippy::if_same_then_else)]
+#![allow(clippy::manual_is_ascii_check)]
+#![allow(clippy::manual_ignore_case_cmp)]
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::collapsible_if)]
+// Kernel-specific: raw pointer operations are ubiquitous and often intentionally unsafe
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+#![allow(clippy::mut_from_ref)]
 
 // Subsystem modules
 pub mod arch;

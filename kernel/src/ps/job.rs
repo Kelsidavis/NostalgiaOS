@@ -148,6 +148,12 @@ pub struct JobExtendedLimitInformation {
     pub peak_job_memory_used: usize,
 }
 
+impl Default for JobExtendedLimitInformation {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JobExtendedLimitInformation {
     pub const fn new() -> Self {
         Self {
@@ -171,6 +177,12 @@ pub struct JobIoCounters {
     pub read_transfer_count: u64,
     pub write_transfer_count: u64,
     pub other_transfer_count: u64,
+}
+
+impl Default for JobIoCounters {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl JobIoCounters {
@@ -198,6 +210,12 @@ pub struct JobBasicAccountingInformation {
     pub total_processes: u32,
     pub active_processes: u32,
     pub total_terminated_processes: u32,
+}
+
+impl Default for JobBasicAccountingInformation {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl JobBasicAccountingInformation {
@@ -447,11 +465,10 @@ pub unsafe fn ps_create_job(name: &[u8]) -> *mut Job {
 /// Look up a job by ID
 pub unsafe fn ps_lookup_job(job_id: u32) -> *mut Job {
     for i in 0..MAX_JOBS {
-        if JOB_POOL_BITMAP & (1 << i) != 0 {
-            if JOB_POOL[i].job_id == job_id {
+        if JOB_POOL_BITMAP & (1 << i) != 0
+            && JOB_POOL[i].job_id == job_id {
                 return &mut JOB_POOL[i] as *mut Job;
             }
-        }
     }
     ptr::null_mut()
 }

@@ -347,6 +347,12 @@ pub struct CompletionContext {
     pub key: *mut u8,
 }
 
+impl Default for CompletionContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CompletionContext {
     pub const fn new() -> Self {
         Self {

@@ -32,44 +32,40 @@ pub const TOKEN_MAX_GROUPS: usize = 32;
 /// Token type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
+#[derive(Default)]
 pub enum TokenType {
     /// Primary token (for processes)
+    #[default]
     Primary = 1,
     /// Impersonation token (for threads)
     Impersonation = 2,
 }
 
-impl Default for TokenType {
-    fn default() -> Self {
-        Self::Primary
-    }
-}
 
 /// Impersonation level
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u32)]
+#[derive(Default)]
 pub enum SecurityImpersonationLevel {
     /// Cannot obtain identification or impersonation
     Anonymous = 0,
     /// Can obtain identity but not impersonate
     Identification = 1,
     /// Can impersonate on local system
+    #[default]
     Impersonation = 2,
     /// Can impersonate on remote systems
     Delegation = 3,
 }
 
-impl Default for SecurityImpersonationLevel {
-    fn default() -> Self {
-        Self::Impersonation
-    }
-}
 
 /// Token elevation type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
+#[derive(Default)]
 pub enum TokenElevationType {
     /// Default
+    #[default]
     Default = 1,
     /// Full (elevated)
     Full = 2,
@@ -77,11 +73,6 @@ pub enum TokenElevationType {
     Limited = 3,
 }
 
-impl Default for TokenElevationType {
-    fn default() -> Self {
-        Self::Default
-    }
-}
 
 /// Token source (identifies creator)
 #[repr(C)]

@@ -67,7 +67,7 @@ impl RtlBitmap {
     /// Get the number of u32 words needed
     #[inline]
     pub fn word_count(&self) -> usize {
-        ((self.size_of_bit_map + 31) / 32) as usize
+        self.size_of_bit_map.div_ceil(32) as usize
     }
 
     /// Test if a bit is set

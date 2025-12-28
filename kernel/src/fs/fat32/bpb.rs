@@ -237,9 +237,7 @@ impl Fat32BootSector {
         }
 
         // Calculate data sectors and clusters
-        let root_dir_sectors = ((self.bpb.root_entry_count as u32 * 32) +
-            (self.bpb.bytes_per_sector as u32 - 1)) /
-            self.bpb.bytes_per_sector as u32;
+        let root_dir_sectors = (self.bpb.root_entry_count as u32 * 32).div_ceil(self.bpb.bytes_per_sector as u32);
 
         let fat_size = if self.bpb.sectors_per_fat_16 != 0 {
             self.bpb.sectors_per_fat_16 as u32
@@ -274,9 +272,7 @@ impl Fat32BootSector {
 
     /// Get the first data sector
     pub fn first_data_sector(&self) -> u32 {
-        let root_dir_sectors = ((self.bpb.root_entry_count as u32 * 32) +
-            (self.bpb.bytes_per_sector as u32 - 1)) /
-            self.bpb.bytes_per_sector as u32;
+        let root_dir_sectors = (self.bpb.root_entry_count as u32 * 32).div_ceil(self.bpb.bytes_per_sector as u32);
 
         self.bpb.reserved_sectors as u32 +
             (self.bpb.num_fats as u32 * self.sectors_per_fat()) +
@@ -381,7 +377,7 @@ pub mod cluster_values {
     /// Check if cluster is valid data cluster
     pub fn is_valid(cluster: u32) -> bool {
         let val = cluster & CLUSTER_MASK;
-        val >= 2 && val < BAD
+        (2..BAD).contains(&val)
     }
 }
 

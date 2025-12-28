@@ -39,6 +39,25 @@ const SFMASK_VALUE: u64 = 0x4700; // IF | TF | DF | AC | NT
 /// Maximum number of syscalls
 pub const MAX_SYSCALLS: usize = 256;
 
+/// NTSTATUS codes for syscall returns
+pub mod status {
+    pub const STATUS_SUCCESS: isize = 0;
+    pub const STATUS_INVALID_PARAMETER: isize = 0xC000000Du32 as isize;
+    pub const STATUS_ACCESS_VIOLATION: isize = 0xC0000005u32 as isize;
+    pub const STATUS_INVALID_HANDLE: isize = 0xC0000008u32 as isize;
+    pub const STATUS_NOT_IMPLEMENTED: isize = 0xC0000002u32 as isize;
+    pub const STATUS_ACCESS_DENIED: isize = 0xC0000022u32 as isize;
+    pub const STATUS_INSUFFICIENT_RESOURCES: isize = 0xC000009Au32 as isize;
+    pub const STATUS_OBJECT_TYPE_MISMATCH: isize = 0xC0000024u32 as isize;
+    pub const STATUS_HANDLE_NOT_CLOSABLE: isize = 0xC0000235u32 as isize;
+    pub const STATUS_TIMEOUT: isize = 0x00000102;
+    pub const STATUS_PENDING: isize = 0x00000103;
+    pub const STATUS_WAIT_0: isize = 0x00000000;
+    pub const STATUS_ABANDONED_WAIT_0: isize = 0x00000080;
+}
+
+use status::*;
+
 /// System call numbers (NT-compatible naming)
 #[repr(usize)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -888,15 +907,15 @@ fn sys_get_current_process_id(
 fn sys_get_current_thread_id(
     _: usize, _: usize, _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
-    let thread_id = unsafe {
+    
+    unsafe {
         let prcb = crate::ke::prcb::get_current_prcb();
         if !prcb.current_thread.is_null() {
             (*prcb.current_thread).thread_id as isize
         } else {
             0
         }
-    };
-    thread_id
+    }
 }
 
 /// NtYieldExecution - Yield the current thread's time slice
@@ -915,13 +934,23 @@ fn sys_debug_print(
     length: usize,
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    use crate::mm::address::{probe_for_read, is_valid_user_range};
+
     // Validate buffer pointer and length
     if buffer == 0 || length == 0 || length > 1024 {
         return -1;
     }
 
-    // Read string from user memory
-    // TODO: Proper user memory validation
+    // Validate user memory access
+    if !is_valid_user_range(buffer as u64, length) {
+        return STATUS_ACCESS_VIOLATION;
+    }
+
+    if !probe_for_read(buffer as u64, length) {
+        return STATUS_ACCESS_VIOLATION;
+    }
+
+    // Read string from user memory (now validated)
     let slice = unsafe {
         core::slice::from_raw_parts(buffer as *const u8, length)
     };
@@ -929,9 +958,9 @@ fn sys_debug_print(
     // Convert to string and print
     if let Ok(s) = core::str::from_utf8(slice) {
         crate::serial_print!("{}", s);
-        0 // STATUS_SUCCESS
+        STATUS_SUCCESS
     } else {
-        -1 // STATUS_INVALID_PARAMETER
+        STATUS_INVALID_PARAMETER
     }
 }
 
@@ -2267,11 +2296,11 @@ fn sys_wait_for_multiple_objects(
         // The WaitStatus value for signaled objects encodes the index (0-63)
         let status_val = status as i32;
 
-        if status_val >= 0 && status_val < 64 {
+        if (0..64).contains(&status_val) {
             // Object at index was signaled - STATUS_WAIT_0 + index
             crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: wait satisfied (object {})", status_val);
             wait_status::STATUS_WAIT_0 + status_val as isize
-        } else if status_val >= 0x80 && status_val < 0x80 + 64 {
+        } else if (0x80..0x80 + 64).contains(&status_val) {
             // Abandoned mutex at index - STATUS_ABANDONED_WAIT_0 + index
             let index = status_val - 0x80;
             crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: abandoned mutex at index {}", index);
@@ -2312,7 +2341,7 @@ fn wait_status_to_index(status: crate::ke::dispatcher::WaitStatus) -> usize {
         // For higher indices, the status value IS the index (0-63)
         _ => {
             let val = status as i32;
-            if val >= 0 && val < 64 {
+            if (0..64).contains(&val) {
                 val as usize
             } else {
                 0
@@ -3099,11 +3128,10 @@ unsafe fn register_named_timer(name: &[u8], handle: usize) -> bool {
 /// Find a named timer by name
 unsafe fn find_named_timer(name: &[u8]) -> Option<usize> {
     for entry in NAMED_TIMER_TABLE.iter() {
-        if entry.in_use && entry.name_len == name.len() {
-            if &entry.name[..entry.name_len] == name {
+        if entry.in_use && entry.name_len == name.len()
+            && &entry.name[..entry.name_len] == name {
                 return Some(entry.handle);
             }
-        }
     }
     None
 }
@@ -3599,11 +3627,7 @@ fn sys_query_timer(
             // Calculate remaining time
             let current_time = crate::hal::apic::get_tick_count();
             let due_time = timer.due_time();
-            let remaining_ticks = if due_time > current_time {
-                due_time - current_time
-            } else {
-                0
-            };
+            let remaining_ticks = due_time.saturating_sub(current_time);
             // Convert ticks to 100ns units (assuming 1ms per tick)
             (*info).remaining_time = -((remaining_ticks * 10_000) as i64);
             (*info).timer_state = timer.is_signaled() as u32;
@@ -3629,11 +3653,7 @@ fn sys_query_timer(
 
         let current_time = crate::hal::apic::get_tick_count();
         let due_time = timer.due_time();
-        let remaining_ticks = if due_time > current_time {
-            due_time - current_time
-        } else {
-            0
-        };
+        let remaining_ticks = due_time.saturating_sub(current_time);
         (*info).remaining_time = -((remaining_ticks * 10_000) as i64);
         (*info).timer_state = timer.is_signaled() as u32;
 
@@ -5796,17 +5816,17 @@ unsafe fn get_token_id(handle: usize) -> Option<u32> {
 
 /// Determine handle type from handle value
 fn get_handle_type(handle: usize) -> HandleType {
-    if handle >= TOKEN_HANDLE_BASE && handle < TOKEN_HANDLE_BASE + MAX_TOKEN_HANDLES {
+    if (TOKEN_HANDLE_BASE..TOKEN_HANDLE_BASE + MAX_TOKEN_HANDLES).contains(&handle) {
         HandleType::Token
-    } else if handle >= PROCESS_HANDLE_BASE && handle < PROCESS_HANDLE_BASE + MAX_PROCESS_HANDLES {
+    } else if (PROCESS_HANDLE_BASE..PROCESS_HANDLE_BASE + MAX_PROCESS_HANDLES).contains(&handle) {
         HandleType::Process
-    } else if handle >= THREAD_HANDLE_BASE && handle < THREAD_HANDLE_BASE + MAX_THREAD_HANDLES {
+    } else if (THREAD_HANDLE_BASE..THREAD_HANDLE_BASE + MAX_THREAD_HANDLES).contains(&handle) {
         HandleType::Thread
-    } else if handle >= LPC_HANDLE_BASE && handle < LPC_HANDLE_BASE + MAX_LPC_HANDLES {
+    } else if (LPC_HANDLE_BASE..LPC_HANDLE_BASE + MAX_LPC_HANDLES).contains(&handle) {
         HandleType::Port
-    } else if handle >= KEY_HANDLE_BASE && handle < KEY_HANDLE_BASE + MAX_KEY_HANDLES {
+    } else if (KEY_HANDLE_BASE..KEY_HANDLE_BASE + MAX_KEY_HANDLES).contains(&handle) {
         HandleType::Key
-    } else if handle >= SYNC_HANDLE_BASE && handle < SYNC_HANDLE_BASE + MAX_SYNC_OBJECTS {
+    } else if (SYNC_HANDLE_BASE..SYNC_HANDLE_BASE + MAX_SYNC_OBJECTS).contains(&handle) {
         // Check sync object type
         let idx = handle - SYNC_HANDLE_BASE;
         unsafe {
@@ -5817,7 +5837,7 @@ fn get_handle_type(handle: usize) -> HandleType {
                 _ => HandleType::None,
             }
         }
-    } else if handle >= FILE_HANDLE_BASE && handle < FILE_HANDLE_BASE + MAX_FILE_HANDLES {
+    } else if (FILE_HANDLE_BASE..FILE_HANDLE_BASE + MAX_FILE_HANDLES).contains(&handle) {
         HandleType::File
     } else {
         HandleType::None
@@ -6399,12 +6419,11 @@ fn sys_query_object(
     let info_class = object_information_class as u32;
 
     // Validate handle for classes that require it
-    if info_class != object_info_class::ObjectTypesInformation {
-        if handle == 0 {
+    if info_class != object_info_class::ObjectTypesInformation
+        && handle == 0 {
             crate::serial_println!("[SYSCALL] NtQueryObject: NULL handle");
             return STATUS_INVALID_HANDLE;
         }
-    }
 
     // Get handle type
     let handle_type = get_handle_type(handle);
@@ -9669,7 +9688,7 @@ fn sys_set_information_process(
             let base_priority = unsafe { *(process_information as *const i8) };
 
             // Validate priority range (-15 to 15, or 16-31 for realtime)
-            if base_priority < -15 || base_priority > 31 {
+            if !(-15..=31).contains(&base_priority) {
                 return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
             }
 
@@ -10038,7 +10057,7 @@ fn sys_set_information_thread(
             let priority = unsafe { *(thread_information as *const i32) };
 
             // Validate priority range (-15 to +15 for relative priority)
-            if priority < -15 || priority > 15 {
+            if !(-15..=15).contains(&priority) {
                 return STATUS_INVALID_PARAMETER;
             }
 
@@ -10066,7 +10085,7 @@ fn sys_set_information_thread(
             let base_priority = unsafe { *(thread_information as *const i32) };
 
             // Validate base priority range (0-31)
-            if base_priority < 0 || base_priority > 31 {
+            if !(0..=31).contains(&base_priority) {
                 return STATUS_INVALID_PARAMETER;
             }
 
@@ -10338,7 +10357,7 @@ fn sys_set_information_thread(
             let actual_base = unsafe { *(thread_information as *const i32) };
 
             // Validate priority (0-31)
-            if actual_base < 0 || actual_base > 31 {
+            if !(0..=31).contains(&actual_base) {
                 return STATUS_INVALID_PARAMETER;
             }
 
@@ -10615,7 +10634,7 @@ fn sys_set_information_object(
         }
 
         // These are query-only classes
-        0 | 1 | 2 | 3 => {
+        0..=3 => {
             crate::serial_println!(
                 "[SYSCALL] NtSetInformationObject: class {} is query-only",
                 info_class
@@ -11030,31 +11049,68 @@ fn sys_read_virtual_memory(
     number_of_bytes_read: usize,
     _: usize,
 ) -> isize {
-    let pid = if process_handle == 0xFFFFFFFF || process_handle == usize::MAX {
-        // Current process (System = 4)
+    use crate::mm::address::{probe_for_read, probe_for_write, is_valid_user_range};
+
+    // Get target process ID
+    let target_pid = if process_handle == 0xFFFFFFFF || process_handle == usize::MAX {
+        // Current process
         4u32
     } else {
         match unsafe { get_process_id(process_handle) } {
             Some(p) => p,
-            None => return -1,
+            None => return STATUS_INVALID_HANDLE,
         }
     };
 
-    crate::serial_println!("[SYSCALL] NtReadVirtualMemory(pid={}, addr={:#x}, size={})",
-        pid, base_address, buffer_size);
+    let current_pid = 4u32;
 
+    crate::serial_println!("[SYSCALL] NtReadVirtualMemory(target={}, addr={:#x}, size={})",
+        target_pid, base_address, buffer_size);
+
+    // Validate parameters
     if buffer == 0 || buffer_size == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
-    // TODO: Implement cross-process memory read
-    // Would need to:
-    // 1. Attach to target process address space
-    // 2. Validate source address is readable
-    // 3. Copy memory
-    // 4. Detach
+    // Validate output buffer is writable in caller's address space
+    if !is_valid_user_range(buffer as u64, buffer_size) {
+        return STATUS_ACCESS_VIOLATION;
+    }
 
-    // For now, if reading from current process, just memcpy
+    if !probe_for_write(buffer as u64, buffer_size) {
+        return STATUS_ACCESS_VIOLATION;
+    }
+
+    // Validate optional output parameter
+    if number_of_bytes_read != 0 {
+        if !probe_for_write(number_of_bytes_read as u64, core::mem::size_of::<usize>()) {
+            return STATUS_ACCESS_VIOLATION;
+        }
+    }
+
+    // Cross-process memory read
+    if target_pid != current_pid {
+        // Cross-process read requires:
+        // 1. Attach to target process address space (KeAttachProcess)
+        // 2. Validate and copy memory
+        // 3. Detach (KeDetachProcess)
+
+        // For now, cross-process read is not fully implemented
+        // Would need CR3 switching and proper address space management
+        crate::serial_println!("  Cross-process read not yet implemented");
+        return STATUS_NOT_IMPLEMENTED;
+    }
+
+    // Same-process read - validate source address
+    if !is_valid_user_range(base_address as u64, buffer_size) {
+        return STATUS_ACCESS_VIOLATION;
+    }
+
+    if !probe_for_read(base_address as u64, buffer_size) {
+        return STATUS_ACCESS_VIOLATION;
+    }
+
+    // Perform the copy
     unsafe {
         core::ptr::copy_nonoverlapping(
             base_address as *const u8,
@@ -11063,11 +11119,12 @@ fn sys_read_virtual_memory(
         );
     }
 
+    // Store bytes read
     if number_of_bytes_read != 0 {
         unsafe { *(number_of_bytes_read as *mut usize) = buffer_size; }
     }
 
-    0
+    STATUS_SUCCESS
 }
 
 /// NtWriteVirtualMemory - Write memory to another process
@@ -11079,27 +11136,62 @@ fn sys_write_virtual_memory(
     number_of_bytes_written: usize,
     _: usize,
 ) -> isize {
-    let pid = if process_handle == 0xFFFFFFFF || process_handle == usize::MAX {
-        // Current process (System = 4)
+    use crate::mm::address::{probe_for_read, probe_for_write, is_valid_user_range};
+
+    // Get target process ID
+    let target_pid = if process_handle == 0xFFFFFFFF || process_handle == usize::MAX {
+        // Current process
         4u32
     } else {
         match unsafe { get_process_id(process_handle) } {
             Some(p) => p,
-            None => return -1,
+            None => return STATUS_INVALID_HANDLE,
         }
     };
 
-    crate::serial_println!("[SYSCALL] NtWriteVirtualMemory(pid={}, addr={:#x}, size={})",
-        pid, base_address, buffer_size);
+    let current_pid = 4u32;
 
+    crate::serial_println!("[SYSCALL] NtWriteVirtualMemory(target={}, addr={:#x}, size={})",
+        target_pid, base_address, buffer_size);
+
+    // Validate parameters
     if buffer == 0 || buffer_size == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
-    // TODO: Implement cross-process memory write
-    // Similar to read, but validates write access
+    // Validate source buffer is readable in caller's address space
+    if !is_valid_user_range(buffer as u64, buffer_size) {
+        return STATUS_ACCESS_VIOLATION;
+    }
 
-    // For now, if writing to current process, just memcpy
+    if !probe_for_read(buffer as u64, buffer_size) {
+        return STATUS_ACCESS_VIOLATION;
+    }
+
+    // Validate optional output parameter
+    if number_of_bytes_written != 0 {
+        if !probe_for_write(number_of_bytes_written as u64, core::mem::size_of::<usize>()) {
+            return STATUS_ACCESS_VIOLATION;
+        }
+    }
+
+    // Cross-process memory write
+    if target_pid != current_pid {
+        // Cross-process write requires CR3 switching
+        crate::serial_println!("  Cross-process write not yet implemented");
+        return STATUS_NOT_IMPLEMENTED;
+    }
+
+    // Same-process write - validate destination address
+    if !is_valid_user_range(base_address as u64, buffer_size) {
+        return STATUS_ACCESS_VIOLATION;
+    }
+
+    if !probe_for_write(base_address as u64, buffer_size) {
+        return STATUS_ACCESS_VIOLATION;
+    }
+
+    // Perform the copy
     unsafe {
         core::ptr::copy_nonoverlapping(
             buffer as *const u8,
@@ -11108,11 +11200,12 @@ fn sys_write_virtual_memory(
         );
     }
 
+    // Store bytes written
     if number_of_bytes_written != 0 {
         unsafe { *(number_of_bytes_written as *mut usize) = buffer_size; }
     }
 
-    0
+    STATUS_SUCCESS
 }
 
 // ============================================================================
@@ -11139,7 +11232,7 @@ unsafe fn alloc_debug_handle(debugged_pid: u32) -> Option<usize> {
 
 /// Get debugged process from debug handle
 unsafe fn get_debug_object(handle: usize) -> Option<u32> {
-    if handle >= DEBUG_HANDLE_BASE && handle < DEBUG_HANDLE_BASE + MAX_DEBUG_HANDLES {
+    if (DEBUG_HANDLE_BASE..DEBUG_HANDLE_BASE + MAX_DEBUG_HANDLES).contains(&handle) {
         let idx = handle - DEBUG_HANDLE_BASE;
         if DEBUG_OBJECTS[idx] != 0 {
             return Some(DEBUG_OBJECTS[idx]);
@@ -11150,7 +11243,7 @@ unsafe fn get_debug_object(handle: usize) -> Option<u32> {
 
 /// Free a debug handle
 unsafe fn free_debug_handle(handle: usize) {
-    if handle >= DEBUG_HANDLE_BASE && handle < DEBUG_HANDLE_BASE + MAX_DEBUG_HANDLES {
+    if (DEBUG_HANDLE_BASE..DEBUG_HANDLE_BASE + MAX_DEBUG_HANDLES).contains(&handle) {
         let idx = handle - DEBUG_HANDLE_BASE;
         DEBUG_OBJECTS[idx] = 0;
     }
@@ -11197,7 +11290,7 @@ fn sys_debug_active_process(
         None => return -1,
     };
 
-    let _ = match unsafe { get_debug_object(debug_object_handle) } {
+    match unsafe { get_debug_object(debug_object_handle) } {
         Some(_) => (),
         None => return -1,
     };

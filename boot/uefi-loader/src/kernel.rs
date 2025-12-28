@@ -80,7 +80,7 @@ pub fn load_kernel() -> Result<LoadedKernel, &'static str> {
     const PAGE_SIZE: usize = 4096;
     const LARGE_PAGE_SIZE: usize = 2 * 1024 * 1024; // 2MB
 
-    let pages_needed = (kernel_size + PAGE_SIZE - 1) / PAGE_SIZE;
+    let pages_needed = kernel_size.div_ceil(PAGE_SIZE);
     // Allocate extra for 2MB alignment (512 pages = 2MB)
     let pages_for_alignment = LARGE_PAGE_SIZE / PAGE_SIZE;
     let total_pages = pages_needed + pages_for_alignment;

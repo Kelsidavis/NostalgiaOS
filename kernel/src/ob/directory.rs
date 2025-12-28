@@ -127,30 +127,15 @@ impl ObjectDirectory {
     fn hash_name(name: &[u8]) -> u32 {
         let mut hash: u32 = 0;
         for &byte in name {
-            // Case-insensitive hash
-            let c = if byte >= b'a' && byte <= b'z' {
-                byte - 32 // Convert to uppercase
-            } else {
-                byte
-            };
-            hash = hash.wrapping_mul(31).wrapping_add(c as u32);
+            // Case-insensitive hash (convert to uppercase)
+            hash = hash.wrapping_mul(31).wrapping_add(byte.to_ascii_uppercase() as u32);
         }
         hash
     }
 
     /// Case-insensitive name comparison
     fn names_equal(a: &[u8], b: &[u8]) -> bool {
-        if a.len() != b.len() {
-            return false;
-        }
-        for (&ca, &cb) in a.iter().zip(b.iter()) {
-            let ua = if ca >= b'a' && ca <= b'z' { ca - 32 } else { ca };
-            let ub = if cb >= b'a' && cb <= b'z' { cb - 32 } else { cb };
-            if ua != ub {
-                return false;
-            }
-        }
-        true
+        a.eq_ignore_ascii_case(b)
     }
 
     /// Look up an object by name

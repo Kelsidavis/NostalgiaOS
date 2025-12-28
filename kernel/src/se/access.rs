@@ -139,12 +139,11 @@ pub fn se_access_check(
     }
 
     // Handle WRITE_OWNER - requires SeTakeOwnershipPrivilege
-    if (remaining & standard_rights::WRITE_OWNER) != 0 {
-        if token.is_privilege_enabled(privilege_luids::SE_TAKE_OWNERSHIP_LUID) {
+    if (remaining & standard_rights::WRITE_OWNER) != 0
+        && token.is_privilege_enabled(privilege_luids::SE_TAKE_OWNERSHIP_LUID) {
             granted |= standard_rights::WRITE_OWNER;
             remaining &= !standard_rights::WRITE_OWNER;
         }
-    }
 
     // Check backup/restore privileges
     if token.is_privilege_enabled(privilege_luids::SE_BACKUP_LUID) {

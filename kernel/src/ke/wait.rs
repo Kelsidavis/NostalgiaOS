@@ -416,7 +416,7 @@ fn wait_status_for_index(index: usize) -> WaitStatus {
         n => {
             // Create status with offset
             // This is a bit hacky - in real NT this would be STATUS_WAIT_0 + n
-            unsafe { core::mem::transmute((n as i32) & 0x3F) }
+            unsafe { core::mem::transmute::<i32, super::dispatcher::WaitStatus>((n as i32) & 0x3F) }
         }
     }
 }

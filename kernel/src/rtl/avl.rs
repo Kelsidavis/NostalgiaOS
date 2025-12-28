@@ -75,7 +75,7 @@ impl AvlLinks {
         if self.parent.is_null() {
             return false;
         }
-        unsafe { (*self.parent).left == self as *const _ as *mut _ }
+        unsafe { core::ptr::eq((*self.parent).left, self) }
     }
 
     /// Check if this node is the right child of its parent
@@ -84,7 +84,7 @@ impl AvlLinks {
         if self.parent.is_null() {
             return false;
         }
-        unsafe { (*self.parent).right == self as *const _ as *mut _ }
+        unsafe { core::ptr::eq((*self.parent).right, self) }
     }
 
     /// Get the minimum node in subtree rooted at this node

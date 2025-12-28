@@ -462,7 +462,7 @@ impl fmt::Debug for AnsiString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "AnsiString(\"")?;
         for &c in self.as_slice() {
-            if c >= 32 && c < 127 {
+            if (32..127).contains(&c) {
                 write!(f, "{}", c as char)?;
             } else {
                 write!(f, "\\x{:02x}", c)?;

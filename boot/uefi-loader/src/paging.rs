@@ -12,6 +12,8 @@
 //!
 //! We use 2MB huge pages where possible for efficiency.
 
+#![allow(dead_code)] // Utility functions and constants for future use
+
 use core::ptr;
 use uefi::boot;
 use uefi::mem::memory_map::MemoryType;

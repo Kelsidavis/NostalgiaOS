@@ -23,6 +23,7 @@ pub const MAX_MESSAGES_PER_PORT: usize = 32;
 /// Port type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum LpcPortType {
     /// Server connection port (accepts connections)
     ServerConnection = 0,
@@ -31,20 +32,18 @@ pub enum LpcPortType {
     /// Server communication port (created on accept)
     ServerCommunication = 2,
     /// Unconnected port (datagram only)
+    #[default]
     Unconnected = 3,
 }
 
-impl Default for LpcPortType {
-    fn default() -> Self {
-        Self::Unconnected
-    }
-}
 
 /// Connection state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum LpcConnectionState {
     /// Not connected
+    #[default]
     Disconnected = 0,
     /// Connection pending (waiting for accept)
     Pending = 1,
@@ -54,11 +53,6 @@ pub enum LpcConnectionState {
     Closed = 3,
 }
 
-impl Default for LpcConnectionState {
-    fn default() -> Self {
-        Self::Disconnected
-    }
-}
 
 /// Port flags
 #[allow(non_snake_case)]
@@ -92,7 +86,7 @@ impl LpcPortName {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn new_from(s: &str) -> Self {
         let mut name = Self::empty();
         let bytes = s.as_bytes();
         let len = bytes.len().min(MAX_PORT_NAME_LENGTH);
@@ -430,18 +424,17 @@ pub unsafe fn lpc_create_port(
             // Check for name conflict
             if !name.is_empty() {
                 for j in 0..MAX_PORTS {
-                    if (PORT_BITMAP[0] & (1 << j)) != 0 {
-                        if PORT_TABLE[j].name.equals(name) {
+                    if (PORT_BITMAP[0] & (1 << j)) != 0
+                        && PORT_TABLE[j].name.equals(name) {
                             return None; // Name already in use
                         }
-                    }
                 }
             }
 
             PORT_BITMAP[0] |= 1 << i;
             let port = &mut PORT_TABLE[i];
             port.clear();
-            port.name = LpcPortName::from_str(name);
+            port.name = LpcPortName::new_from(name);
             port.port_type = port_type;
             port.flags = PortFlags::IN_USE;
             port.max_message_size = max_message_size;
@@ -495,14 +488,13 @@ pub unsafe fn lpc_connect_port(server_name: &str, context: &[u8]) -> Option<u16>
     // Find the server port by name
     let mut server_idx = None;
     for i in 0..MAX_PORTS {
-        if (PORT_BITMAP[0] & (1 << i)) != 0 {
-            if PORT_TABLE[i].port_type == LpcPortType::ServerConnection
+        if (PORT_BITMAP[0] & (1 << i)) != 0
+            && PORT_TABLE[i].port_type == LpcPortType::ServerConnection
                 && PORT_TABLE[i].name.equals(server_name)
             {
                 server_idx = Some(i);
                 break;
             }
-        }
     }
 
     let server_idx = server_idx?;
@@ -596,7 +588,7 @@ pub unsafe fn lpc_accept_connection(
     let server_comm = &mut PORT_TABLE[comm_port as usize];
     server_comm.connection = LpcConnection {
         state: LpcConnectionState::Connected,
-        client_port: client_port,
+        client_port,
         server_port: comm_port,
         client_pid: client.owner_pid,
         server_pid: PORT_TABLE[server_idx].owner_pid,

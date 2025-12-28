@@ -53,8 +53,10 @@ pub mod allocation_type {
 /// VAD type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum MmVadType {
     /// Process-private memory (heap, stack)
+    #[default]
     Private = 0,
     /// Memory-mapped file
     Mapped = 1,
@@ -68,11 +70,6 @@ pub enum MmVadType {
     Rotate = 5,
 }
 
-impl Default for MmVadType {
-    fn default() -> Self {
-        Self::Private
-    }
-}
 
 /// VAD flags
 pub mod vad_flags {
@@ -249,7 +246,7 @@ static mut VAD_POOL: [MmVad; MAX_VADS] = {
 };
 
 /// VAD allocation bitmap
-static mut VAD_BITMAP: [u64; (MAX_VADS + 63) / 64] = [0; (MAX_VADS + 63) / 64];
+static mut VAD_BITMAP: [u64; MAX_VADS.div_ceil(64)] = [0; MAX_VADS.div_ceil(64)];
 
 /// VAD pool lock
 static VAD_POOL_LOCK: SpinLock<()> = SpinLock::new(());

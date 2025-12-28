@@ -20,8 +20,10 @@ use crate::ke::SpinLock;
 /// Pool types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum PoolType {
     /// Non-paged pool (always resident)
+    #[default]
     NonPagedPool = 0,
     /// Paged pool (can be paged out)
     PagedPool = 1,
@@ -35,11 +37,6 @@ pub enum PoolType {
     NonPagedPoolMustSucceed = 5,
 }
 
-impl Default for PoolType {
-    fn default() -> Self {
-        Self::NonPagedPool
-    }
-}
 
 /// Pool tag (4 characters)
 pub type PoolTag = u32;

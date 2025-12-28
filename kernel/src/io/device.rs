@@ -328,6 +328,12 @@ pub struct DeviceQueue {
     pub busy: bool,
 }
 
+impl Default for DeviceQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DeviceQueue {
     pub const fn new() -> Self {
         Self {
@@ -424,6 +430,12 @@ pub struct DeviceQueueEntry {
     pub sort_key: u32,
     /// Inserted flag
     pub inserted: bool,
+}
+
+impl Default for DeviceQueueEntry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DeviceQueueEntry {

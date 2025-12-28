@@ -31,8 +31,10 @@ pub const LARGE_PAGE_SHIFT: usize = 21;
 /// Page states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum MmPageState {
     /// Page is on the free list
+    #[default]
     Free = 0,
     /// Page is free and zero-filled
     Zeroed = 1,
@@ -50,11 +52,6 @@ pub enum MmPageState {
     Bad = 7,
 }
 
-impl Default for MmPageState {
-    fn default() -> Self {
-        Self::Free
-    }
-}
 
 /// Page Frame Number database entry
 ///

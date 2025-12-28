@@ -305,11 +305,11 @@ fn process_scancode(scancode: u8) {
 
         if ascii != 0 {
             // Handle Ctrl+key combinations
-            if CTRL_PRESSED && ascii >= b'a' && ascii <= b'z' {
+            if CTRL_PRESSED && ascii.is_ascii_lowercase() {
                 let ctrl_char = ascii - b'a' + 1; // Ctrl+A = 1, Ctrl+B = 2, etc.
                 let mut buf = KEYBOARD_BUFFER.lock();
                 buf.push(ctrl_char);
-            } else if CTRL_PRESSED && ascii >= b'A' && ascii <= b'Z' {
+            } else if CTRL_PRESSED && ascii.is_ascii_uppercase() {
                 let ctrl_char = ascii - b'A' + 1;
                 let mut buf = KEYBOARD_BUFFER.lock();
                 buf.push(ctrl_char);
@@ -382,7 +382,7 @@ pub fn read_line(buffer: &mut [u8]) -> usize {
                 buffer[0] = 0;
                 return 0;
             }
-            c if c >= 0x20 && c < 0x7F => {
+            c if (0x20..0x7F).contains(&c) => {
                 // Printable character
                 buffer[pos] = c;
                 pos += 1;

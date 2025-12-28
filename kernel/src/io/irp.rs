@@ -59,7 +59,9 @@ pub mod irp_flags {
 /// Major function codes (IRP types)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum IrpMajorFunction {
+    #[default]
     Create = 0,
     CreateNamedPipe = 1,
     Close = 2,
@@ -91,11 +93,6 @@ pub enum IrpMajorFunction {
     MaximumFunction = 28,
 }
 
-impl Default for IrpMajorFunction {
-    fn default() -> Self {
-        Self::Create
-    }
-}
 
 /// Minor function codes (for PnP, Power, etc.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

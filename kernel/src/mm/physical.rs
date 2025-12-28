@@ -242,13 +242,12 @@ pub fn mm_is_valid_physical_address(physical_address: u64) -> bool {
     unsafe {
         for i in 0..MEMORY_REGION_COUNT {
             let region = &MEMORY_REGIONS[i];
-            if region.memory_type.is_usable() {
-                if physical_address >= region.physical_start
+            if region.memory_type.is_usable()
+                && physical_address >= region.physical_start
                     && physical_address < region.physical_end()
                 {
                     return true;
                 }
-            }
         }
     }
     false

@@ -225,7 +225,7 @@ impl LookasideList {
 
     /// Set maximum cache depth
     pub fn set_depth(&self, depth: u32) {
-        let depth = depth.max(LOOKASIDE_MIN_DEPTH).min(LOOKASIDE_DEPTH);
+        let depth = depth.clamp(LOOKASIDE_MIN_DEPTH, LOOKASIDE_DEPTH);
         self.depth.store(depth, Ordering::Relaxed);
     }
 

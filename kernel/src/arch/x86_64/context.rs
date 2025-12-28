@@ -119,7 +119,7 @@ pub unsafe fn setup_initial_context(
 
     // Push return address (entry point)
     sp -= 8;
-    *(sp as *mut u64) = entry_point as u64;
+    *(sp as *mut u64) = entry_point as usize as u64;
 
     // Push callee-saved registers (all zero for new thread)
     sp -= 8;

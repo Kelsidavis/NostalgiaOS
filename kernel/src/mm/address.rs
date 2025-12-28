@@ -168,13 +168,7 @@ impl MmWorkingSet {
     pub fn find_page(&self, virtual_address: u64) -> Option<&WsleEntry> {
         let page_addr = virtual_address & !0xFFF;
 
-        for entry in self.entries.iter() {
-            if entry.is_valid() && entry.virtual_address == page_addr {
-                return Some(entry);
-            }
-        }
-
-        None
+        self.entries.iter().find(|&entry| entry.is_valid() && entry.virtual_address == page_addr).map(|v| v as _)
     }
 
     /// Age all entries (for page replacement)
@@ -193,12 +187,11 @@ impl MmWorkingSet {
         let mut oldest_addr = None;
 
         for entry in self.entries.iter() {
-            if entry.is_valid() && (entry.flags & wsle_flags::LOCKED) == 0 {
-                if entry.age > oldest_age {
+            if entry.is_valid() && (entry.flags & wsle_flags::LOCKED) == 0
+                && entry.age > oldest_age {
                     oldest_age = entry.age;
                     oldest_addr = Some(entry.virtual_address);
                 }
-            }
         }
 
         oldest_addr
@@ -700,4 +693,94 @@ pub unsafe fn mm_protect_virtual_memory(
     // TODO: Update page table entries to reflect new protection
 
     Ok(old_protect)
+}
+
+/// Check if an address is in user space
+#[inline]
+pub fn is_user_address(addr: u64) -> bool {
+    (USER_SPACE_START..=USER_SPACE_END).contains(&addr)
+}
+
+/// Check if an address range is valid user space
+pub fn is_valid_user_range(addr: u64, size: usize) -> bool {
+    if size == 0 {
+        return true;
+    }
+
+    // Check for overflow
+    let end = match addr.checked_add(size as u64) {
+        Some(e) => e,
+        None => return false,
+    };
+
+    // Check bounds
+    addr >= USER_SPACE_START && end <= USER_SPACE_END + 1
+}
+
+/// Probe user memory for read access
+/// Returns true if the memory range is accessible for reading
+pub fn probe_for_read(addr: u64, size: usize) -> bool {
+    if !is_valid_user_range(addr, size) {
+        return false;
+    }
+
+    // In a full implementation, this would:
+    // 1. Check if the pages are mapped
+    // 2. Check if the pages have read permission
+    // 3. Handle page faults if needed
+
+    // For now, basic validation passes
+    true
+}
+
+/// Probe user memory for write access
+/// Returns true if the memory range is accessible for writing
+pub fn probe_for_write(addr: u64, size: usize) -> bool {
+    if !is_valid_user_range(addr, size) {
+        return false;
+    }
+
+    // In a full implementation, this would:
+    // 1. Check if the pages are mapped
+    // 2. Check if the pages have write permission
+    // 3. Handle copy-on-write if needed
+
+    // For now, basic validation passes
+    true
+}
+
+/// Copy data from user space to kernel space
+/// Returns the number of bytes copied, or None if the address is invalid
+pub fn copy_from_user(dest: &mut [u8], src_addr: u64) -> Option<usize> {
+    let size = dest.len();
+
+    if !probe_for_read(src_addr, size) {
+        return None;
+    }
+
+    // Perform the copy
+    unsafe {
+        let src = src_addr as *const u8;
+        core::ptr::copy_nonoverlapping(src, dest.as_mut_ptr(), size);
+    }
+
+    Some(size)
+}
+
+/// Copy data from kernel space to user space
+/// Returns the number of bytes copied, or None if the address is invalid
+pub fn copy_to_user(dest_addr: u64, src: &[u8]) -> Option<usize> {
+    let size = src.len();
+
+    if !probe_for_write(dest_addr, size) {
+        return None;
+    }
+
+    // Perform the copy
+    unsafe {
+        let dest = dest_addr as *mut u8;
+        core::ptr::copy_nonoverlapping(src.as_ptr(), dest, size);
+    }
+
+    Some(size)
 }

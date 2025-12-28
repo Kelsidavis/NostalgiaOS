@@ -52,7 +52,7 @@ pub fn is_fat32_volume(volume_number: u8) -> bool {
 
         // Check bytes per sector (must be power of 2, 512-4096)
         let bps = bs.bpb.bytes_per_sector;
-        if bps < 512 || bps > 4096 || (bps & (bps - 1)) != 0 {
+        if !(512..=4096).contains(&bps) || (bps & (bps - 1)) != 0 {
             return false;
         }
 

@@ -152,7 +152,7 @@ pub fn mount(
     flags: u32,
 ) -> Result<(), FsStatus> {
     let drive = drive_letter.to_ascii_uppercase();
-    if drive < 'A' || drive > 'Z' {
+    if !drive.is_ascii_uppercase() {
         return Err(FsStatus::InvalidPath);
     }
 
@@ -182,7 +182,7 @@ pub fn mount(
 /// Unmount a file system
 pub fn unmount(drive_letter: char) -> Result<(), FsStatus> {
     let drive = drive_letter.to_ascii_uppercase();
-    if drive < 'A' || drive > 'Z' {
+    if !drive.is_ascii_uppercase() {
         return Err(FsStatus::InvalidPath);
     }
 
@@ -211,7 +211,7 @@ pub fn unmount(drive_letter: char) -> Result<(), FsStatus> {
 /// Get mount point by drive letter
 pub fn get_mount_point(drive_letter: char) -> Option<MountPoint> {
     let drive = drive_letter.to_ascii_uppercase();
-    if drive < 'A' || drive > 'Z' {
+    if !drive.is_ascii_uppercase() {
         return None;
     }
 
@@ -235,7 +235,7 @@ pub fn resolve_path_mount(path: &str) -> Option<(MountPoint, &str)> {
     // Check for drive letter path (C:\...)
     if bytes.len() >= 2 && bytes[1] == b':' {
         let drive = bytes[0].to_ascii_uppercase();
-        if drive >= b'A' && drive <= b'Z' {
+        if drive.is_ascii_uppercase() {
             if let Some(mp) = get_mount_point(drive as char) {
                 // Return mount point and remaining path
                 let remaining = if bytes.len() >= 3 && (bytes[2] == b'\\' || bytes[2] == b'/') {
@@ -321,7 +321,7 @@ pub fn mount_count() -> u32 {
 /// Set volume label
 pub fn set_volume_label(drive_letter: char, label: &str) -> Result<(), FsStatus> {
     let drive = drive_letter.to_ascii_uppercase();
-    if drive < 'A' || drive > 'Z' {
+    if !drive.is_ascii_uppercase() {
         return Err(FsStatus::InvalidPath);
     }
 
@@ -342,7 +342,7 @@ pub fn set_volume_label(drive_letter: char, label: &str) -> Result<(), FsStatus>
 /// Set volume serial number
 pub fn set_volume_serial(drive_letter: char, serial: u32) -> Result<(), FsStatus> {
     let drive = drive_letter.to_ascii_uppercase();
-    if drive < 'A' || drive > 'Z' {
+    if !drive.is_ascii_uppercase() {
         return Err(FsStatus::InvalidPath);
     }
 

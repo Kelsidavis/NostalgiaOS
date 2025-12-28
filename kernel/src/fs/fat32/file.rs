@@ -738,7 +738,7 @@ pub unsafe fn fat32_getattr(fs_index: u16, node_id: u64) -> Result<FileInfo, FsS
             let blocks = if file.file_size == 0 {
                 0
             } else {
-                ((file.file_size as u64 + cluster_size - 1) / cluster_size) * (cluster_size / 512)
+                (file.file_size as u64).div_ceil(cluster_size) * (cluster_size / 512)
             };
 
             return Ok(FileInfo {
@@ -896,11 +896,10 @@ pub unsafe fn fat32_write(
                 let sector = mount.cluster_to_sector(cluster) + sector_in_cluster as u32;
 
                 // For partial sector writes, read first
-                if offset_in_sector != 0 || (buf.len() - bytes_written) < mount.bytes_per_sector as usize {
-                    if !read_fn(mount.device, sector as u64, &mut SECTOR_BUFFER) {
+                if (offset_in_sector != 0 || (buf.len() - bytes_written) < mount.bytes_per_sector as usize)
+                    && !read_fn(mount.device, sector as u64, &mut SECTOR_BUFFER) {
                         return Err(FsStatus::IoError);
                     }
-                }
 
                 // Copy data to sector buffer
                 let bytes_in_sector = mount.bytes_per_sector as usize - offset_in_sector;
@@ -1469,11 +1468,11 @@ pub unsafe fn fat32_rename(
                 }
 
                 // Delete from old location (mark as free)
-                let mut deleted_entry = entry.clone();
+                let mut deleted_entry = entry;
                 deleted_entry.name[0] = entry_status::FREE;
                 if !write_dir_entry(mount, old_parent_cluster, old_entry_idx, &deleted_entry) {
                     // Rollback: delete from new location too
-                    let mut rollback = entry.clone();
+                    let mut rollback = entry;
                     rollback.name[0] = entry_status::FREE;
                     write_dir_entry(mount, new_parent_cluster, new_entry_idx, &rollback);
                     return FsStatus::IoError;
@@ -1555,7 +1554,7 @@ pub unsafe fn fat32_truncate(fs_index: u16, node_id: u64, new_size: u64) -> FsSt
                     );
                 } else {
                     // Calculate clusters needed for new size
-                    let clusters_needed = ((new_size + cluster_size - 1) / cluster_size) as u32;
+                    let clusters_needed = new_size.div_ceil(cluster_size) as u32;
 
                     // Walk to the last cluster we want to keep
                     let mut cluster = first_cluster;
@@ -1604,9 +1603,9 @@ pub unsafe fn fat32_truncate(fs_index: u16, node_id: u64, new_size: u64) -> FsSt
                 let current_clusters = if current_size == 0 {
                     0
                 } else {
-                    ((current_size + cluster_size - 1) / cluster_size) as u32
+                    current_size.div_ceil(cluster_size) as u32
                 };
-                let new_clusters = ((new_size + cluster_size - 1) / cluster_size) as u32;
+                let new_clusters = new_size.div_ceil(cluster_size) as u32;
                 let clusters_to_add = new_clusters - current_clusters;
 
                 if clusters_to_add > 0 {

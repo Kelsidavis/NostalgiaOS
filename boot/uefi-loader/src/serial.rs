@@ -42,7 +42,7 @@ pub fn init() {
         // Enable DLAB (set baud rate divisor)
         port_write(COM1 + 3, 0x80);
         // Set divisor to 1 (115200 baud)
-        port_write(COM1 + 0, 0x01);
+        port_write(COM1, 0x01);
         port_write(COM1 + 1, 0x00);
         // 8 bits, no parity, one stop bit
         port_write(COM1 + 3, 0x03);

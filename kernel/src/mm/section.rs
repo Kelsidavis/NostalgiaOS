@@ -114,6 +114,12 @@ pub struct SectionView {
     pub process: *mut u8,
 }
 
+impl Default for SectionView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SectionView {
     pub const fn new() -> Self {
         Self {
@@ -147,6 +153,12 @@ pub struct ControlArea {
     pub file_object: *mut u8,
     /// For file-backed: file offset
     pub file_offset: u64,
+}
+
+impl Default for ControlArea {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ControlArea {
@@ -185,6 +197,12 @@ pub struct Section {
     lock: SpinLock<()>,
     /// For named sections: name hash
     pub name_hash: u32,
+}
+
+impl Default for Section {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Section {
@@ -299,7 +317,7 @@ impl Section {
             // Find a free region in the address space
             // For now, return a pseudo-address based on section and view index
             // In full implementation, this would use the VAD tree
-            0x7FFE0000_0000u64 + (view_idx as u64 * SECTION_ALLOCATION_GRANULARITY * 16)
+            0x7FFE_0000_0000_u64 + (view_idx as u64 * SECTION_ALLOCATION_GRANULARITY * 16)
         };
 
         // Set up the view
@@ -338,12 +356,7 @@ impl Section {
 
     /// Find view containing an address
     pub fn find_view(&self, address: u64) -> Option<&SectionView> {
-        for view in self.views.iter() {
-            if view.contains(address) {
-                return Some(view);
-            }
-        }
-        None
+        self.views.iter().find(|&view| view.contains(address)).map(|v| v as _)
     }
 
     /// Extend section size

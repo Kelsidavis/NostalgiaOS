@@ -131,17 +131,7 @@ pub fn cmd_help(args: &[&str]) {
 
 /// Case-insensitive string comparison
 fn eq_ignore_case(a: &str, b: &str) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    for (ca, cb) in a.bytes().zip(b.bytes()) {
-        let ca_lower = if ca >= b'A' && ca <= b'Z' { ca + 32 } else { ca };
-        let cb_lower = if cb >= b'A' && cb <= b'Z' { cb + 32 } else { cb };
-        if ca_lower != cb_lower {
-            return false;
-        }
-    }
-    true
+    a.as_bytes().eq_ignore_ascii_case(b.as_bytes())
 }
 
 /// Check if a filename matches a wildcard pattern (case-insensitive)
@@ -179,9 +169,7 @@ fn wildcard_match_bytes(pattern: &[u8], text: &[u8]) -> bool {
                 continue;
             } else {
                 // Regular character: case-insensitive compare
-                let pc_lower = if pc >= b'A' && pc <= b'Z' { pc + 32 } else { pc };
-                let tc_lower = if tc >= b'A' && tc <= b'Z' { tc + 32 } else { tc };
-                if pc_lower == tc_lower {
+                if pc.to_ascii_lowercase() == tc.to_ascii_lowercase() {
                     p += 1;
                     t += 1;
                     continue;
@@ -237,12 +225,11 @@ fn build_path(dir: &str, filename: &str) -> &'static str {
         }
 
         // Add separator if needed
-        if len > 0 && buf[len - 1] != b'\\' {
-            if len < buf.len() - 1 {
+        if len > 0 && buf[len - 1] != b'\\'
+            && len < buf.len() - 1 {
                 buf[len] = b'\\';
                 len += 1;
             }
-        }
 
         // Copy filename
         for &b in filename.as_bytes() {
@@ -345,7 +332,7 @@ pub fn cmd_ls(args: &[&str]) {
     let mut shown_count = 0u32;
 
     loop {
-        match fs::readdir(&full_path, offset) {
+        match fs::readdir(full_path, offset) {
             Ok(entry) => {
                 let name = entry.name_str();
 
@@ -451,7 +438,7 @@ pub fn cmd_cd(args: &[&str]) {
     let full_path = resolve_path(path);
 
     // Verify it's a valid directory by trying to read it
-    match fs::readdir(&full_path, 0) {
+    match fs::readdir(full_path, 0) {
         Ok(_) => {
             // Valid directory
             let mut path_buf = [0u8; 64];
@@ -466,7 +453,7 @@ pub fn cmd_cd(args: &[&str]) {
                     set_current_dir(s);
                 }
             } else {
-                set_current_dir(&full_path);
+                set_current_dir(full_path);
             }
         }
         Err(fs::FsStatus::NotFound) => {
@@ -495,7 +482,7 @@ pub fn cmd_cat(args: &[&str]) {
 
     let full_path = resolve_path(args[0]);
 
-    match fs::open(&full_path, 0) {
+    match fs::open(full_path, 0) {
         Ok(handle) => {
             let mut buf = [0u8; 512];
             loop {
@@ -508,7 +495,7 @@ pub fn cmd_cat(args: &[&str]) {
                                 outln!("");
                             } else if byte == b'\r' {
                                 // Skip carriage return
-                            } else if byte >= 0x20 && byte < 0x7F {
+                            } else if (0x20..0x7F).contains(&byte) {
                                 out!("{}", byte as char);
                             } else if byte == b'\t' {
                                 out!("    ");
@@ -544,7 +531,7 @@ pub fn cmd_mkdir(args: &[&str]) {
 
     let full_path = resolve_path(args[0]);
 
-    match fs::mkdir(&full_path) {
+    match fs::mkdir(full_path) {
         Ok(()) => {
             // Success - no output
         }
@@ -566,7 +553,7 @@ pub fn cmd_rmdir(args: &[&str]) {
 
     let full_path = resolve_path(args[0]);
 
-    match fs::rmdir(&full_path) {
+    match fs::rmdir(full_path) {
         Ok(()) => {
             // Success - no output
         }
@@ -619,7 +606,7 @@ pub fn cmd_del(args: &[&str]) {
 
         let mut offset = 0u32;
         loop {
-            match fs::readdir(&full_dir, offset) {
+            match fs::readdir(full_dir, offset) {
                 Ok(entry) => {
                     let name = entry.name_str();
 
@@ -630,17 +617,15 @@ pub fn cmd_del(args: &[&str]) {
                     }
 
                     // Only delete files, not directories
-                    if entry.file_type == fs::FileType::Regular {
-                        if wildcard_match(pattern, name) {
-                            if file_count < 32 {
+                    if entry.file_type == fs::FileType::Regular
+                        && wildcard_match(pattern, name)
+                            && file_count < 32 {
                                 let name_bytes = name.as_bytes();
                                 let len = name_bytes.len().min(63);
                                 files_to_delete[file_count][..len].copy_from_slice(&name_bytes[..len]);
                                 file_lens[file_count] = len;
                                 file_count += 1;
                             }
-                        }
-                    }
 
                     offset = entry.next_offset;
                 }
@@ -658,9 +643,9 @@ pub fn cmd_del(args: &[&str]) {
             let name = core::str::from_utf8(&files_to_delete[i][..file_lens[i]]).unwrap_or("");
 
             // Build full path for this file
-            let file_path = build_path(&full_dir, name);
+            let file_path = build_path(full_dir, name);
 
-            match fs::delete(&file_path) {
+            match fs::delete(file_path) {
                 Ok(()) => {
                     deleted_count += 1;
                 }
@@ -678,7 +663,7 @@ pub fn cmd_del(args: &[&str]) {
         // No wildcards - single file delete
         let full_path = resolve_path(arg);
 
-        match fs::delete(&full_path) {
+        match fs::delete(full_path) {
             Ok(()) => {
                 // Success - no output (DOS behavior)
             }
@@ -729,7 +714,7 @@ pub fn cmd_copy(args: &[&str]) {
 
         let mut offset = 0u32;
         loop {
-            match fs::readdir(&full_src_dir, offset) {
+            match fs::readdir(full_src_dir, offset) {
                 Ok(entry) => {
                     let name = entry.name_str();
 
@@ -739,17 +724,15 @@ pub fn cmd_copy(args: &[&str]) {
                     }
 
                     // Only copy files, not directories
-                    if entry.file_type == fs::FileType::Regular {
-                        if wildcard_match(pattern, name) {
-                            if file_count < 32 {
+                    if entry.file_type == fs::FileType::Regular
+                        && wildcard_match(pattern, name)
+                            && file_count < 32 {
                                 let name_bytes = name.as_bytes();
                                 let len = name_bytes.len().min(63);
                                 files_to_copy[file_count][..len].copy_from_slice(&name_bytes[..len]);
                                 file_lens[file_count] = len;
                                 file_count += 1;
                             }
-                        }
-                    }
 
                     offset = entry.next_offset;
                 }
@@ -763,7 +746,7 @@ pub fn cmd_copy(args: &[&str]) {
         }
 
         // Check if destination is a directory
-        let dst_is_dir = match fs::stat(&dst_path) {
+        let dst_is_dir = match fs::stat(dst_path) {
             Ok(info) => info.file_type == fs::FileType::Directory,
             Err(_) => dst_arg.ends_with('\\') || dst_arg.ends_with('/'),
         };
@@ -773,14 +756,14 @@ pub fn cmd_copy(args: &[&str]) {
 
         for i in 0..file_count {
             let name = core::str::from_utf8(&files_to_copy[i][..file_lens[i]]).unwrap_or("");
-            let src_file = build_path(&full_src_dir, name);
+            let src_file = build_path(full_src_dir, name);
 
             // Determine destination path
             let dst_file = if dst_is_dir {
-                build_path(&dst_path, name)
+                build_path(dst_path, name)
             } else if file_count == 1 {
                 // Single file to non-directory destination
-                &dst_path
+                dst_path
             } else {
                 outln!("Cannot copy multiple files to a single file.");
                 return;
@@ -795,7 +778,7 @@ pub fn cmd_copy(args: &[&str]) {
             match fs::copy(src_str, dst_file) {
                 Ok(bytes) => {
                     copied_count += 1;
-                    total_bytes += bytes as u64;
+                    total_bytes += bytes;
                 }
                 Err(e) => {
                     outln!("Error copying {}: {:?}", name, e);
@@ -809,7 +792,7 @@ pub fn cmd_copy(args: &[&str]) {
         let src_path = resolve_path(src_arg);
         let dst_path = resolve_path(dst_arg);
 
-        match fs::copy(&src_path, &dst_path) {
+        match fs::copy(src_path, dst_path) {
             Ok(bytes) => {
                 outln!("        1 file(s) copied ({} bytes).", bytes);
             }
@@ -833,7 +816,7 @@ pub fn cmd_rename(args: &[&str]) {
     let old_path = resolve_path(args[0]);
     let new_path = resolve_path(args[1]);
 
-    match fs::rename(&old_path, &new_path) {
+    match fs::rename(old_path, new_path) {
         Ok(()) => {
             // Success - no output
         }
@@ -856,7 +839,7 @@ pub fn cmd_touch(args: &[&str]) {
     let full_path = resolve_path(args[0]);
 
     // Try to create the file
-    match fs::create(&full_path, 0) {
+    match fs::create(full_path, 0) {
         Ok(handle) => {
             let _ = fs::close(handle);
         }
@@ -1189,12 +1172,11 @@ pub fn resolve_path(path: &str) -> &'static str {
         append(current, buf, &mut path_len);
 
         // Ensure current dir ends with backslash
-        if path_len > 0 && buf[path_len - 1] != b'\\' {
-            if path_len < buf.len() {
+        if path_len > 0 && buf[path_len - 1] != b'\\'
+            && path_len < buf.len() {
                 buf[path_len] = b'\\';
                 path_len += 1;
             }
-        }
 
         append(path, buf, &mut path_len);
         core::str::from_utf8_unchecked(&buf[..path_len])

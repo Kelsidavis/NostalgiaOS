@@ -518,7 +518,7 @@ fn apc_test_thread() {
         }
 
         // Report APC stats every 5 seconds
-        if iteration % 500 == 0 {
+        if iteration.is_multiple_of(500) {
             let count = unsafe { APC_DELIVERY_COUNT };
             crate::serial_println!("[APC-Test] Stats: iteration={}, APCs delivered={}", iteration, count);
         }
@@ -618,7 +618,7 @@ fn wait_any_thread() {
             }
             s => {
                 let val = s as i32;
-                if val >= 0 && val < 64 {
+                if (0..64).contains(&val) {
                     unsafe { WAIT_ANY_COUNT += 1; }
                     crate::serial_println!("[WaitAny-{}] Object {} signaled! elapsed={}ms",
                         thread_id, val, elapsed);
@@ -697,7 +697,7 @@ fn signal_thread() {
         let ticks = apic::get_tick_count();
 
         // Signal Event1 every 1.5 seconds
-        if iteration % 150 == 0 {
+        if iteration.is_multiple_of(150) {
             unsafe {
                 WAIT_EVENT1.set();
             }
@@ -705,7 +705,7 @@ fn signal_thread() {
         }
 
         // Signal Event2 every 2.5 seconds
-        if iteration % 250 == 0 {
+        if iteration.is_multiple_of(250) {
             unsafe {
                 WAIT_EVENT2.set();
             }
@@ -713,7 +713,7 @@ fn signal_thread() {
         }
 
         // Signal Event3 (notification, stays signaled) every 3 seconds
-        if iteration % 300 == 0 {
+        if iteration.is_multiple_of(300) {
             unsafe {
                 WAIT_EVENT3.set();
             }
@@ -721,7 +721,7 @@ fn signal_thread() {
         }
 
         // Reset Event3 every 4 seconds
-        if iteration % 400 == 0 {
+        if iteration.is_multiple_of(400) {
             unsafe {
                 WAIT_EVENT3.reset();
             }
@@ -729,7 +729,7 @@ fn signal_thread() {
         }
 
         // Release semaphore every 2 seconds
-        if iteration % 200 == 0 {
+        if iteration.is_multiple_of(200) {
             unsafe {
                 WAIT_SEMAPHORE.release(1);
             }

@@ -70,9 +70,9 @@ pub unsafe fn io_complete_request(irp: *mut Irp, priority_boost: i8) {
     irp_ref.set_flag(irp_flags::IRP_COMPLETED);
 
     // Process completion routines from bottom to top of stack
-    let mut stack_location = irp_ref.current_location as i8;
+    let mut stack_location = irp_ref.current_location;
 
-    while stack_location < irp_ref.stack_count as i8 {
+    while stack_location < irp_ref.stack_count {
         let stack_idx = stack_location as usize;
 
         if stack_idx < irp_ref.stack.len() {
@@ -87,7 +87,7 @@ pub unsafe fn io_complete_request(irp: *mut Irp, priority_boost: i8) {
                 let status = irp_ref.io_status.status;
                 let should_invoke = match status {
                     s if s >= 0 => (control & sl_control::SL_INVOKE_ON_SUCCESS) != 0,
-                    s if s == -1073741790 => (control & sl_control::SL_INVOKE_ON_CANCEL) != 0, // STATUS_CANCELLED
+                    -1073741790 => (control & sl_control::SL_INVOKE_ON_CANCEL) != 0, // STATUS_CANCELLED
                     _ => (control & sl_control::SL_INVOKE_ON_ERROR) != 0,
                 };
 

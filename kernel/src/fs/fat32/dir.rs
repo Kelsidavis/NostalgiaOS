@@ -232,7 +232,7 @@ impl FatDirEntry {
             let entry_char = if b == entry_status::KANJI { 0xE5 } else { b };
             let cmp_char = name_bytes.get(i).copied().unwrap_or(b' ');
 
-            if entry_char.to_ascii_uppercase() != cmp_char.to_ascii_uppercase() {
+            if !entry_char.eq_ignore_ascii_case(&cmp_char) {
                 return false;
             }
         }
@@ -241,7 +241,7 @@ impl FatDirEntry {
         let ext_bytes = ext.as_bytes();
         for (i, &b) in self.ext.iter().enumerate() {
             let cmp_char = ext_bytes.get(i).copied().unwrap_or(b' ');
-            if b.to_ascii_uppercase() != cmp_char.to_ascii_uppercase() {
+            if !b.eq_ignore_ascii_case(&cmp_char) {
                 return false;
             }
         }
@@ -461,14 +461,14 @@ pub mod datetime {
     pub fn decode_date(date: u16) -> (u16, u8, u8) {
         let day = (date & 0x1F) as u8;
         let month = ((date >> 5) & 0x0F) as u8;
-        let year = 1980 + ((date >> 9) & 0x7F) as u16;
+        let year = 1980 + ((date >> 9) & 0x7F);
         (year, month, day)
     }
 
     /// Convert (year, month, day) to FAT date
     pub fn encode_date(year: u16, month: u8, day: u8) -> u16 {
         let year_offset = year.saturating_sub(1980).min(127);
-        ((year_offset as u16) << 9) |
+        (year_offset << 9) |
         ((month as u16 & 0x0F) << 5) |
         (day as u16 & 0x1F)
     }

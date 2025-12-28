@@ -33,8 +33,10 @@ pub const MAX_HIVE_NAME_LENGTH: usize = 32;
 /// Hive types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum CmHiveType {
     /// Primary hive (SYSTEM, SOFTWARE, etc.)
+    #[default]
     Primary = 0,
     /// Volatile hive (in-memory only)
     Volatile = 1,
@@ -44,11 +46,6 @@ pub enum CmHiveType {
     Alternate = 3,
 }
 
-impl Default for CmHiveType {
-    fn default() -> Self {
-        Self::Primary
-    }
-}
 
 /// Well-known hive indices
 pub mod hive_indices {
@@ -97,7 +94,7 @@ impl CmHiveName {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn new_from(s: &str) -> Self {
         let mut name = Self::empty();
         let bytes = s.as_bytes();
         let len = bytes.len().min(MAX_HIVE_NAME_LENGTH);
@@ -333,7 +330,7 @@ pub unsafe fn cm_init_hive(
     root.set_flag(key_flags::KEY_HIVE_ROOT);
 
     // Initialize hive
-    hive.name = CmHiveName::from_str(name);
+    hive.name = CmHiveName::new_from(name);
     hive.hive_type = hive_type;
     hive.root_key = root_key;
     hive.hive_index = hive_index;

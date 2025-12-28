@@ -54,7 +54,7 @@ impl ListEntry {
     /// Equivalent to IsListEmpty()
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.flink == self as *const ListEntry as *mut ListEntry
+        core::ptr::eq(self.flink, self)
     }
 
     /// Insert entry at the head of the list (after the list head)

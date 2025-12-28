@@ -23,8 +23,10 @@ pub const MAX_VALUE_DATA_SIZE: usize = 256;
 /// Registry value types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
+#[derive(Default)]
 pub enum RegType {
     /// No type
+    #[default]
     None = 0,
     /// Null-terminated string
     Sz = 1,
@@ -81,11 +83,6 @@ impl RegType {
     }
 }
 
-impl Default for RegType {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 /// Registry value name (fixed-size for static allocation)
 #[derive(Clone, Copy)]
@@ -106,7 +103,7 @@ impl CmValueName {
     }
 
     /// Create from a string slice
-    pub fn from_str(s: &str) -> Self {
+    pub fn new_from(s: &str) -> Self {
         let mut name = Self::empty();
         let bytes = s.as_bytes();
         let len = bytes.len().min(MAX_VALUE_NAME_LENGTH);
@@ -137,7 +134,7 @@ impl CmValueName {
             return false;
         }
         self_str.chars().zip(s.chars()).all(|(a, b)| {
-            a.to_ascii_lowercase() == b.to_ascii_lowercase()
+            a.eq_ignore_ascii_case(&b)
         })
     }
 }
@@ -289,7 +286,7 @@ impl CmKeyValue {
     /// Create a new value
     pub fn new(name: &str, value_type: RegType, data: CmValueData) -> Self {
         Self {
-            name: CmValueName::from_str(name),
+            name: CmValueName::new_from(name),
             value_type,
             data,
             flags: 0,

@@ -63,8 +63,8 @@ impl CmKeyName {
         }
     }
 
-    /// Create from string
-    pub fn from_str(s: &str) -> Self {
+    /// Create from string slice
+    pub fn new_from(s: &str) -> Self {
         let mut name = Self::empty();
         let bytes = s.as_bytes();
         let len = bytes.len().min(MAX_KEY_NAME_LENGTH);
@@ -90,7 +90,7 @@ impl CmKeyName {
             return false;
         }
         self_str.chars().zip(s.chars()).all(|(a, b)| {
-            a.to_ascii_lowercase() == b.to_ascii_lowercase()
+            a.eq_ignore_ascii_case(&b)
         })
     }
 }
@@ -163,7 +163,7 @@ impl CmKeyNode {
     /// Create a new key with name
     pub fn new(name: &str, parent: u32, hive_index: u16) -> Self {
         let mut key = Self::empty();
-        key.name = CmKeyName::from_str(name);
+        key.name = CmKeyName::new_from(name);
         key.parent = parent;
         key.hive_index = hive_index;
         key.flags.store(key_flags::KEY_IN_USE, Ordering::SeqCst);
@@ -354,7 +354,7 @@ static mut KEY_POOL: [CmKeyNode; MAX_KEYS] = {
 };
 
 /// Key allocation bitmap
-static mut KEY_BITMAP: [u64; (MAX_KEYS + 63) / 64] = [0; (MAX_KEYS + 63) / 64];
+static mut KEY_BITMAP: [u64; MAX_KEYS.div_ceil(64)] = [0; MAX_KEYS.div_ceil(64)];
 
 /// Key pool lock
 static KEY_POOL_LOCK: SpinLock<()> = SpinLock::new(());

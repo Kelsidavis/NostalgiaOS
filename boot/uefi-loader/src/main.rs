@@ -265,7 +265,9 @@ fn get_framebuffer_info() -> (u64, u32, u32, u32, u32) {
 fn find_rsdp() -> u64 {
     use uefi::table::cfg::{ACPI2_GUID, ACPI_GUID};
 
-    let config_tables = uefi::system::with_config_table(|tables| {
+    
+
+    uefi::system::with_config_table(|tables| {
         // Try ACPI 2.0 first
         for entry in tables {
             if entry.guid == ACPI2_GUID {
@@ -281,9 +283,7 @@ fn find_rsdp() -> u64 {
         }
 
         0
-    });
-
-    config_tables
+    })
 }
 
 /// Get memory map information

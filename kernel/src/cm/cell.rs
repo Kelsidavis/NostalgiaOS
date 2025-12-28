@@ -27,8 +27,10 @@ pub const MAX_CELLS_PER_HIVE: usize = 512;
 /// Cell types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum CmCellType {
     /// Free cell
+    #[default]
     Free = 0,
     /// Key node cell
     KeyNode = 1,
@@ -42,11 +44,6 @@ pub enum CmCellType {
     ValueList = 5,
 }
 
-impl Default for CmCellType {
-    fn default() -> Self {
-        Self::Free
-    }
-}
 
 /// Cell header
 #[derive(Clone, Copy)]
@@ -186,7 +183,7 @@ pub struct CmCellTable {
     /// Cells
     pub cells: [CmCell; MAX_CELLS_PER_HIVE],
     /// Free cell bitmap
-    pub free_bitmap: [u64; (MAX_CELLS_PER_HIVE + 63) / 64],
+    pub free_bitmap: [u64; MAX_CELLS_PER_HIVE.div_ceil(64)],
     /// Free cell count
     pub free_count: AtomicU32,
     /// Allocated cell count
@@ -198,7 +195,7 @@ impl CmCellTable {
     pub const fn new() -> Self {
         Self {
             cells: [CmCell::empty(); MAX_CELLS_PER_HIVE],
-            free_bitmap: [0; (MAX_CELLS_PER_HIVE + 63) / 64],
+            free_bitmap: [0; MAX_CELLS_PER_HIVE.div_ceil(64)],
             free_count: AtomicU32::new(MAX_CELLS_PER_HIVE as u32),
             allocated_count: AtomicU32::new(0),
         }

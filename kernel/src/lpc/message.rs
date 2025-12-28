@@ -14,8 +14,10 @@ pub const MAX_LPC_DATA_SIZE: usize = MAX_MESSAGE_SIZE - core::mem::size_of::<Lpc
 /// Message type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum LpcMessageType {
     /// Invalid/unused
+    #[default]
     Unused = 0,
     /// Request message
     Request = 1,
@@ -37,11 +39,6 @@ pub enum LpcMessageType {
     Debug = 9,
 }
 
-impl Default for LpcMessageType {
-    fn default() -> Self {
-        Self::Unused
-    }
-}
 
 /// Message flags
 #[allow(non_snake_case)]

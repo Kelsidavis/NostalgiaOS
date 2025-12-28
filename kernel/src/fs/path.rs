@@ -37,7 +37,7 @@ impl PathComponent {
     }
 
     /// Create from string slice
-    pub fn from_str(s: &str) -> Self {
+    pub fn new_from(s: &str) -> Self {
         let mut comp = Self::empty();
         let bytes = s.as_bytes();
         let len = bytes.len().min(MAX_COMPONENT);
@@ -63,7 +63,7 @@ impl PathComponent {
             return false;
         }
         self_str.chars().zip(s.chars()).all(|(a, b)| {
-            a.to_ascii_uppercase() == b.to_ascii_uppercase()
+            a.eq_ignore_ascii_case(&b)
         })
     }
 }
@@ -107,7 +107,7 @@ impl ParsedPath {
         let bytes = path.as_bytes();
         if bytes.len() >= 2 && bytes[1] == b':' {
             let drive = bytes[0].to_ascii_uppercase();
-            if drive >= b'A' && drive <= b'Z' {
+            if drive.is_ascii_uppercase() {
                 parsed.drive = drive;
                 remaining = &path[2..];
             }
@@ -116,14 +116,14 @@ impl ParsedPath {
         // Check if absolute
         if remaining.starts_with('\\') || remaining.starts_with('/') {
             parsed.is_absolute = true;
-            remaining = remaining.trim_start_matches(|c| c == '\\' || c == '/');
+            remaining = remaining.trim_start_matches(['\\', '/']);
         } else if parsed.drive != 0 {
             // Drive letter without leading slash is still absolute
             parsed.is_absolute = true;
         }
 
         // Split into components
-        for component in remaining.split(|c| c == '\\' || c == '/') {
+        for component in remaining.split(['\\', '/']) {
             if component.is_empty() {
                 continue;
             }
@@ -144,7 +144,7 @@ impl ParsedPath {
                 break;
             }
 
-            parsed.components[parsed.component_count as usize] = PathComponent::from_str(component);
+            parsed.components[parsed.component_count as usize] = PathComponent::new_from(component);
             parsed.component_count += 1;
         }
 
@@ -377,12 +377,11 @@ pub fn join_paths(base: &ParsedPath, relative: &str) -> ParsedPath {
             if result.component_count > 0 {
                 result.component_count -= 1;
             }
-        } else if comp.as_str() != "." {
-            if (result.component_count as usize) < 16 {
+        } else if comp.as_str() != "."
+            && (result.component_count as usize) < 16 {
                 result.components[result.component_count as usize] = *comp;
                 result.component_count += 1;
             }
-        }
     }
 
     result

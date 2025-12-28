@@ -173,8 +173,8 @@ unsafe fn ki_swap_context_internal() {
     prcb.next_thread = ptr::null_mut();
 
     // Update states - but don't put idle thread back on ready queue
-    if !old_thread.is_null() {
-        if (*old_thread).state == ThreadState::Running {
+    if !old_thread.is_null()
+        && (*old_thread).state == ThreadState::Running {
             // Only put non-idle threads back on the ready queue
             // Idle thread (priority 0) stays off the queue - it runs when nothing else can
             if old_thread != prcb.idle_thread {
@@ -182,7 +182,6 @@ unsafe fn ki_swap_context_internal() {
                 ki_ready_thread(old_thread);
             }
         }
-    }
 
     (*new_thread).state = ThreadState::Running;
     prcb.current_thread = new_thread;
@@ -268,18 +267,17 @@ pub unsafe fn ke_set_priority(thread: *mut KThread, priority: i8) {
     (*thread).priority = priority;
 
     // If thread is ready and priority changed, may need to requeue
-    if (*thread).state == ThreadState::Ready && priority != old_priority as i8 {
+    if (*thread).state == ThreadState::Ready && priority != old_priority {
         ki_unready_thread(thread);
         ki_ready_thread(thread);
 
         // If new priority is higher than current thread, preempt
         let prcb = get_current_prcb_mut();
-        if !prcb.current_thread.is_null() {
-            if priority > (*prcb.current_thread).priority {
+        if !prcb.current_thread.is_null()
+            && priority > (*prcb.current_thread).priority {
                 prcb.next_thread = thread;
                 ki_dispatch_interrupt();
             }
-        }
     }
 }
 
