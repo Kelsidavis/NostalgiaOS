@@ -2078,6 +2078,24 @@ fn wait_on_thread(tid: u32, timeout_ms: Option<u64>, _is_alertable: bool) -> isi
 }
 
 /// NtWaitForMultipleObjects - Wait for multiple objects
+///
+/// Waits until one or all of the specified objects are in the signaled state
+/// or the time-out interval elapses.
+///
+/// # Arguments
+/// * `count` - Number of handles in the array (max 64)
+/// * `handles` - Pointer to array of handles to wait on
+/// * `wait_type` - WaitAll (0) or WaitAny (1)
+/// * `alertable` - If TRUE, the wait is alertable (APCs can be delivered)
+/// * `timeout` - Pointer to timeout value (NULL = infinite, negative = relative)
+///
+/// # Returns
+/// * STATUS_WAIT_0 to STATUS_WAIT_63 - Object at index was signaled (WaitAny)
+/// * STATUS_WAIT_0 - All objects signaled (WaitAll)
+/// * STATUS_TIMEOUT - Wait timed out
+/// * STATUS_ABANDONED_WAIT_0 to +63 - Mutex at index was abandoned
+/// * STATUS_ALERTED - Wait was interrupted by an alert
+/// * STATUS_USER_APC - User APC was delivered
 fn sys_wait_for_multiple_objects(
     count: usize,
     handles: usize,
@@ -2089,68 +2107,198 @@ fn sys_wait_for_multiple_objects(
     use crate::ke::dispatcher::{DispatcherHeader, WaitStatus, WaitType, MAXIMUM_WAIT_OBJECTS};
     use crate::ke::wait::ke_wait_for_multiple_objects_alertable;
 
+    crate::serial_println!(
+        "[SYSCALL] NtWaitForMultipleObjects(count={}, handles=0x{:X}, wait_type={}, alertable={}, timeout=0x{:X})",
+        count, handles, wait_type, alertable, timeout
+    );
+
     let is_alertable = alertable != 0;
+    // NT uses WaitAll=0, WaitAny=1
     let nt_wait_type = if wait_type == 0 { WaitType::WaitAll } else { WaitType::WaitAny };
 
-    if count == 0 || count > MAXIMUM_WAIT_OBJECTS || handles == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+    // Validate parameters
+    if count == 0 {
+        crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: count is 0");
+        return wait_status::STATUS_INVALID_PARAMETER;
     }
 
-    // Get all object references
+    if count > MAXIMUM_WAIT_OBJECTS {
+        crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: count {} exceeds max {}", count, MAXIMUM_WAIT_OBJECTS);
+        return wait_status::STATUS_MAXIMUM_WAIT_OBJECTS_EXCEEDED;
+    }
+
+    if handles == 0 {
+        crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: NULL handles array");
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Parse timeout value
+    // NULL (0) = infinite wait
+    // Negative value = relative time in 100ns units
+    // Positive value = absolute time
+    let timeout_ms = if timeout == 0 {
+        crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: infinite wait");
+        None
+    } else {
+        let timeout_100ns = unsafe { *(timeout as *const i64) };
+        if timeout_100ns == 0 {
+            // Zero timeout = poll (don't block)
+            crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: poll (no wait)");
+            Some(0u64)
+        } else if timeout_100ns < 0 {
+            // Negative = relative time
+            let ms = ((-timeout_100ns) / 10_000) as u64;
+            crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: relative timeout {} ms", ms);
+            Some(ms)
+        } else {
+            // Positive = absolute time (convert to relative based on current time)
+            // For now, treat as immediate
+            crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: absolute timeout (treating as immediate)");
+            Some(0u64)
+        }
+    };
+
+    // Get handle array from user space
     let handle_array = unsafe {
         core::slice::from_raw_parts(handles as *const usize, count)
     };
 
     // Build array of dispatcher headers
+    // Track which handles came from where for proper cleanup
     let mut objects: [*mut DispatcherHeader; 64] = [core::ptr::null_mut(); 64];
+    let mut from_ob: [bool; 64] = [false; 64]; // Track if handle came from OB (needs deref)
     let mut valid_count = 0usize;
 
     for (i, &handle) in handle_array.iter().enumerate() {
-        unsafe {
-            let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
-            if obj.is_null() {
-                // Dereference already-referenced objects and return error
-                for j in 0..valid_count {
-                    crate::ob::ob_dereference_object(objects[j] as *mut u8);
-                }
-                return -1; // STATUS_INVALID_HANDLE
-            }
-            objects[i] = obj as *mut DispatcherHeader;
-            valid_count += 1;
+        if handle == 0 {
+            crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: NULL handle at index {}", i);
+            // Clean up already-acquired objects
+            cleanup_wait_objects(&mut objects, &from_ob, valid_count);
+            return wait_status::STATUS_INVALID_HANDLE;
         }
+
+        // First, try our internal sync object pool
+        if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
+            let header = match obj_type {
+                SyncObjectType::Event => unsafe {
+                    let event_ptr = core::ptr::addr_of_mut!((*entry).data.event);
+                    &mut **event_ptr as *mut crate::ke::KEvent as *mut DispatcherHeader
+                },
+                SyncObjectType::Semaphore => unsafe {
+                    let sem_ptr = core::ptr::addr_of_mut!((*entry).data.semaphore);
+                    &mut **sem_ptr as *mut crate::ke::KSemaphore as *mut DispatcherHeader
+                },
+                SyncObjectType::Mutex => unsafe {
+                    let mutex_ptr = core::ptr::addr_of_mut!((*entry).data.mutex);
+                    &mut **mutex_ptr as *mut crate::ke::KMutex as *mut DispatcherHeader
+                },
+                SyncObjectType::None => {
+                    crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: invalid sync object at index {}", i);
+                    cleanup_wait_objects(&mut objects, &from_ob, valid_count);
+                    return wait_status::STATUS_INVALID_HANDLE;
+                }
+            };
+            objects[i] = header;
+            from_ob[i] = false; // From sync pool, no deref needed
+            valid_count += 1;
+            continue;
+        }
+
+        // Try object manager for kernel objects
+        let obj = unsafe { crate::ob::ob_reference_object_by_handle(handle as u32, 0) };
+        if !obj.is_null() {
+            objects[i] = obj as *mut DispatcherHeader;
+            from_ob[i] = true; // From OB, needs deref
+            valid_count += 1;
+            continue;
+        }
+
+        // Handle not found in any pool
+        crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: handle 0x{:X} not found at index {}", handle, i);
+        cleanup_wait_objects(&mut objects, &from_ob, valid_count);
+        return wait_status::STATUS_INVALID_HANDLE;
     }
 
-    // Get timeout value (NULL = infinite wait)
-    let timeout_ms = if timeout == 0 {
-        None
-    } else {
-        let timeout_100ns = unsafe { *(timeout as *const i64) };
-        if timeout_100ns < 0 {
-            Some(((-timeout_100ns) / 10_000) as u64)
-        } else {
-            Some(0) // Absolute time treated as no-wait
-        }
-    };
+    crate::serial_println!(
+        "[SYSCALL] NtWaitForMultipleObjects: waiting on {} objects, type={:?}",
+        valid_count,
+        if wait_type == 0 { "WaitAll" } else { "WaitAny" }
+    );
 
     // Wait on all objects with alertable support
     let result = unsafe {
         let objects_slice = &objects[..valid_count];
         let status = ke_wait_for_multiple_objects_alertable(objects_slice, nt_wait_type, timeout_ms, is_alertable);
-        match status {
-            WaitStatus::Object0 => 0, // STATUS_WAIT_0
-            WaitStatus::Timeout => 0x102, // STATUS_TIMEOUT
-            WaitStatus::Alerted => 0x101, // STATUS_ALERTED
-            WaitStatus::Abandoned => 0x80, // STATUS_ABANDONED_WAIT_0
-            WaitStatus::Invalid => -1,
+
+        // Convert WaitStatus to NT status code
+        // The WaitStatus value for signaled objects encodes the index (0-63)
+        let status_val = status as i32;
+
+        if status_val >= 0 && status_val < 64 {
+            // Object at index was signaled - STATUS_WAIT_0 + index
+            crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: wait satisfied (object {})", status_val);
+            wait_status::STATUS_WAIT_0 + status_val as isize
+        } else if status_val >= 0x80 && status_val < 0x80 + 64 {
+            // Abandoned mutex at index - STATUS_ABANDONED_WAIT_0 + index
+            let index = status_val - 0x80;
+            crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: abandoned mutex at index {}", index);
+            wait_status::STATUS_ABANDONED_WAIT_0 + index as isize
+        } else {
+            match status {
+                WaitStatus::Timeout => {
+                    crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: timeout");
+                    wait_status::STATUS_TIMEOUT
+                }
+                WaitStatus::Alerted => {
+                    crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: alerted");
+                    wait_status::STATUS_ALERTED
+                }
+                WaitStatus::Invalid => {
+                    crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: invalid wait");
+                    wait_status::STATUS_INVALID_HANDLE
+                }
+                _ => {
+                    crate::serial_println!("[SYSCALL] NtWaitForMultipleObjects: unexpected status {}", status_val);
+                    wait_status::STATUS_INVALID_HANDLE
+                }
+            }
         }
     };
 
-    // Dereference all objects
-    for i in 0..valid_count {
-        unsafe { crate::ob::ob_dereference_object(objects[i] as *mut u8); }
-    }
+    // Dereference OB objects (sync pool objects don't need deref)
+    cleanup_wait_objects(&mut objects, &from_ob, valid_count);
 
     result
+}
+
+/// Helper to get object index from WaitStatus for multiple object waits
+fn wait_status_to_index(status: crate::ke::dispatcher::WaitStatus) -> usize {
+    use crate::ke::dispatcher::WaitStatus;
+    match status {
+        WaitStatus::Object0 => 0,
+        // For higher indices, the status value IS the index (0-63)
+        _ => {
+            let val = status as i32;
+            if val >= 0 && val < 64 {
+                val as usize
+            } else {
+                0
+            }
+        }
+    }
+}
+
+/// Clean up objects acquired during NtWaitForMultipleObjects setup
+fn cleanup_wait_objects(
+    objects: &mut [*mut crate::ke::dispatcher::DispatcherHeader; 64],
+    from_ob: &[bool; 64],
+    count: usize,
+) {
+    for i in 0..count {
+        if from_ob[i] && !objects[i].is_null() {
+            unsafe { crate::ob::ob_dereference_object(objects[i] as *mut u8); }
+        }
+    }
 }
 
 /// NtSetEvent - Set (signal) an event
