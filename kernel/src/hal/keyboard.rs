@@ -321,19 +321,11 @@ fn process_scancode(scancode: u8) {
     }
 }
 
-/// Poll the keyboard for available data (non-interrupt based)
-/// Returns true if data is available
-fn poll_keyboard() -> bool {
-    unsafe {
-        (inb(ps2_ports::STATUS) & ps2_status::OUTPUT_FULL) != 0
-    }
-}
-
 /// Read a character from the keyboard buffer (blocking)
-/// Uses polling as fallback if interrupt-driven input isn't working
+/// Waits for interrupt-driven input to fill the buffer
 pub fn read_char() -> u8 {
     loop {
-        // First check buffer (from interrupt-driven input)
+        // Check buffer (filled by interrupt handler)
         {
             let mut buf = KEYBOARD_BUFFER.lock();
             if let Some(c) = buf.pop() {
@@ -341,19 +333,7 @@ pub fn read_char() -> u8 {
             }
         }
 
-        // Poll the keyboard directly as fallback
-        if poll_keyboard() {
-            let scancode = unsafe { inb(ps2_ports::DATA) };
-            // Process it directly
-            process_scancode(scancode);
-            // Check buffer again
-            let mut buf = KEYBOARD_BUFFER.lock();
-            if let Some(c) = buf.pop() {
-                return c;
-            }
-        }
-
-        // Yield to other threads while waiting
+        // Yield to other threads while waiting for keyboard input
         unsafe { crate::ke::scheduler::ki_yield(); }
     }
 }
@@ -426,7 +406,7 @@ pub fn init() {
 
     // Wait for keyboard controller to be ready
     unsafe {
-        // Disable devices
+        // Disable devices temporarily
         wait_write_ready();
         outb(ps2_ports::COMMAND, 0xAD); // Disable keyboard
         wait_write_ready();
@@ -443,10 +423,15 @@ pub fn init() {
         wait_read_ready();
         let mut config = inb(ps2_ports::DATA);
 
-        // Enable keyboard interrupt (bit 0), disable mouse interrupt (bit 1)
+        // Configure the controller:
+        // Bit 0: Enable keyboard interrupt (IRQ1)
+        // Bit 1: Disable mouse interrupt
+        // Bit 4: Enable keyboard clock
+        // Bit 6: Keep translation enabled (QEMU default) - translates set 2 to set 1
         config |= 0x01;  // Enable keyboard IRQ
         config &= !0x02; // Disable mouse IRQ
-        config &= !0x10; // Enable keyboard clock
+        config &= !0x10; // Enable keyboard clock (clear disable bit)
+        config |= 0x40;  // Ensure translation is enabled
 
         // Write configuration
         wait_write_ready();
@@ -458,25 +443,17 @@ pub fn init() {
         wait_write_ready();
         outb(ps2_ports::COMMAND, 0xAE);
 
-        // Reset keyboard
-        wait_write_ready();
-        outb(ps2_ports::DATA, 0xFF);
-        wait_read_ready();
-        let _ = inb(ps2_ports::DATA); // ACK
+        // Flush any pending data
+        for _ in 0..10 {
+            if (inb(ps2_ports::STATUS) & ps2_status::OUTPUT_FULL) != 0 {
+                let _ = inb(ps2_ports::DATA);
+            }
+        }
 
-        // Set scancode set 1
-        wait_write_ready();
-        outb(ps2_ports::DATA, 0xF0);
-        wait_read_ready();
-        let _ = inb(ps2_ports::DATA);
-        wait_write_ready();
-        outb(ps2_ports::DATA, 0x01);
-        wait_read_ready();
-        let _ = inb(ps2_ports::DATA);
-
-        // Enable scanning
+        // Enable scanning (in case it was disabled)
         wait_write_ready();
         outb(ps2_ports::DATA, 0xF4);
+        // Wait for ACK
         wait_read_ready();
         let _ = inb(ps2_ports::DATA);
     }
