@@ -80,6 +80,7 @@ pub enum SyscallNumber {
     NtCreateSemaphore = 36,
     NtReleaseMutant = 37,
     NtCreateMutant = 38,
+    NtSignalAndWaitForSingleObject = 39,
 
     // Section objects (shared memory/file mapping)
     NtCreateSection = 40,
@@ -318,6 +319,7 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtCreateSemaphore as usize, sys_create_semaphore);
     register_syscall(SyscallNumber::NtReleaseMutant as usize, sys_release_mutant);
     register_syscall(SyscallNumber::NtCreateMutant as usize, sys_create_mutant);
+    register_syscall(SyscallNumber::NtSignalAndWaitForSingleObject as usize, sys_signal_and_wait_for_single_object);
 
     // Memory management syscalls
     register_syscall(SyscallNumber::NtAllocateVirtualMemory as usize, sys_allocate_virtual_memory);
@@ -1844,6 +1846,8 @@ pub mod wait_status {
     pub const STATUS_MAXIMUM_WAIT_OBJECTS_EXCEEDED: isize = 0xC00000E1u32 as isize;
     /// Mutant limit exceeded
     pub const STATUS_MUTANT_LIMIT_EXCEEDED: isize = 0xC0000191u32 as isize;
+    /// Mutant not owned (trying to release a mutex not owned by caller)
+    pub const STATUS_MUTANT_NOT_OWNED: isize = 0xC0000046u32 as isize;
 }
 
 /// NtWaitForSingleObject - Wait for a single object to become signaled
@@ -2299,6 +2303,256 @@ fn cleanup_wait_objects(
             unsafe { crate::ob::ob_dereference_object(objects[i] as *mut u8); }
         }
     }
+}
+
+/// NtSignalAndWaitForSingleObject - Atomically signal one object and wait on another
+///
+/// This syscall provides atomic signal-and-wait semantics, which is essential for
+/// implementing condition variables and other synchronization patterns.
+///
+/// # Arguments
+/// * `signal_handle` - Handle to the object to signal (Event, Semaphore, or Mutex)
+/// * `wait_handle` - Handle to the object to wait on
+/// * `alertable` - If TRUE, the wait is alertable (APCs can be delivered)
+/// * `timeout` - Pointer to timeout value (NULL = infinite, negative = relative)
+///
+/// # Returns
+/// * STATUS_SUCCESS/STATUS_WAIT_0 - Object was signaled and wait was satisfied
+/// * STATUS_TIMEOUT - Wait timed out
+/// * STATUS_ABANDONED_WAIT_0 - Waited on mutex was abandoned
+/// * STATUS_ALERTED - Wait was interrupted by an alert
+/// * STATUS_USER_APC - User APC was delivered
+/// * STATUS_INVALID_HANDLE - Invalid handle
+/// * STATUS_OBJECT_TYPE_MISMATCH - Signal handle is not a valid signal object
+/// * STATUS_ACCESS_DENIED - Access denied to one of the objects
+fn sys_signal_and_wait_for_single_object(
+    signal_handle: usize,
+    wait_handle: usize,
+    alertable: usize,
+    timeout: usize,
+    _: usize,
+    _: usize,
+) -> isize {
+    use crate::ke::dispatcher::DispatcherHeader;
+
+    crate::serial_println!(
+        "[SYSCALL] NtSignalAndWaitForSingleObject(signal=0x{:X}, wait=0x{:X}, alertable={}, timeout=0x{:X})",
+        signal_handle, wait_handle, alertable, timeout
+    );
+
+    let is_alertable = alertable != 0;
+
+    // Validate handles
+    if signal_handle == 0 {
+        crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: NULL signal handle");
+        return wait_status::STATUS_INVALID_HANDLE;
+    }
+
+    if wait_handle == 0 {
+        crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: NULL wait handle");
+        return wait_status::STATUS_INVALID_HANDLE;
+    }
+
+    // Cannot signal and wait on the same object
+    if signal_handle == wait_handle {
+        crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: same handle for signal and wait");
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Parse timeout value
+    let timeout_ms = if timeout == 0 {
+        crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: infinite wait");
+        None
+    } else {
+        let timeout_100ns = unsafe { *(timeout as *const i64) };
+        if timeout_100ns == 0 {
+            crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: poll (no wait)");
+            Some(0u64)
+        } else if timeout_100ns < 0 {
+            let ms = ((-timeout_100ns) / 10_000) as u64;
+            crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: relative timeout {} ms", ms);
+            Some(ms)
+        } else {
+            crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: absolute timeout (treating as immediate)");
+            Some(0u64)
+        }
+    };
+
+    // Step 1: Signal the first object
+    let signal_result = signal_object_internal(signal_handle);
+    if signal_result != 0 {
+        crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: failed to signal object (status=0x{:X})", signal_result);
+        return signal_result;
+    }
+
+    crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: signaled object 0x{:X}", signal_handle);
+
+    // Step 2: Wait on the second object
+    // First, try sync object pool
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(wait_handle) } {
+        crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: waiting on sync object type {:?}", obj_type);
+
+        let result = match obj_type {
+            SyncObjectType::Event => unsafe {
+                let event_ptr = core::ptr::addr_of_mut!((*entry).data.event);
+                let header = &mut **event_ptr as *mut crate::ke::KEvent as *mut DispatcherHeader;
+                wait_on_dispatcher_object(header, timeout_ms, is_alertable)
+            },
+            SyncObjectType::Semaphore => unsafe {
+                let sem_ptr = core::ptr::addr_of_mut!((*entry).data.semaphore);
+                let header = &mut **sem_ptr as *mut crate::ke::KSemaphore as *mut DispatcherHeader;
+                wait_on_dispatcher_object(header, timeout_ms, is_alertable)
+            },
+            SyncObjectType::Mutex => unsafe {
+                let mutex_ptr = core::ptr::addr_of_mut!((*entry).data.mutex);
+                let header = &mut **mutex_ptr as *mut crate::ke::KMutex as *mut DispatcherHeader;
+                wait_on_dispatcher_object(header, timeout_ms, is_alertable)
+            },
+            SyncObjectType::None => {
+                crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: invalid wait sync object");
+                wait_status::STATUS_INVALID_HANDLE
+            }
+        };
+
+        return result;
+    }
+
+    // Check if it's a process handle - wait for process termination
+    if let Some(pid) = unsafe { get_process_id(wait_handle) } {
+        crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: waiting on process {}", pid);
+        return wait_on_process(pid, timeout_ms, is_alertable);
+    }
+
+    // Check if it's a thread handle - wait for thread termination
+    if let Some(tid) = unsafe { get_thread_id(wait_handle) } {
+        crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: waiting on thread {}", tid);
+        return wait_on_thread(tid, timeout_ms, is_alertable);
+    }
+
+    // Try object manager for kernel objects
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(wait_handle as u32, 0);
+        if obj.is_null() {
+            crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: wait handle not found in OB");
+            return wait_status::STATUS_INVALID_HANDLE;
+        }
+        obj
+    };
+
+    crate::serial_println!("[SYSCALL] NtSignalAndWaitForSingleObject: waiting on OB object at {:p}", object);
+
+    let result = {
+        let header = object as *mut DispatcherHeader;
+        wait_on_dispatcher_object(header, timeout_ms, is_alertable)
+    };
+
+    // Dereference the object
+    unsafe { crate::ob::ob_dereference_object(object); }
+
+    result
+}
+
+/// Internal helper to signal an object
+///
+/// Signals the object based on its type:
+/// - Event: Sets the event
+/// - Semaphore: Releases with count 1
+/// - Mutex: Releases the mutex
+///
+/// Returns STATUS_SUCCESS (0) on success, error status on failure
+fn signal_object_internal(handle: usize) -> isize {
+    // Try sync object pool first
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
+        match obj_type {
+            SyncObjectType::Event => {
+                unsafe {
+                    let event = &mut *core::ptr::addr_of_mut!((*entry).data.event);
+                    event.set();
+                }
+                crate::serial_println!("[SYSCALL] signal_object_internal: set event");
+                return 0; // STATUS_SUCCESS
+            }
+            SyncObjectType::Semaphore => {
+                unsafe {
+                    let sem = &mut *core::ptr::addr_of_mut!((*entry).data.semaphore);
+                    sem.release(1);
+                }
+                crate::serial_println!("[SYSCALL] signal_object_internal: released semaphore");
+                return 0;
+            }
+            SyncObjectType::Mutex => {
+                unsafe {
+                    let mutex = &mut *core::ptr::addr_of_mut!((*entry).data.mutex);
+                    if !mutex.is_owned() {
+                        // Cannot release a mutex we don't own
+                        crate::serial_println!("[SYSCALL] signal_object_internal: mutex not owned");
+                        return wait_status::STATUS_MUTANT_NOT_OWNED;
+                    }
+                    mutex.release();
+                }
+                crate::serial_println!("[SYSCALL] signal_object_internal: released mutex");
+                return 0;
+            }
+            SyncObjectType::None => {
+                return wait_status::STATUS_INVALID_HANDLE;
+            }
+        }
+    }
+
+    // Try object manager
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
+        if obj.is_null() {
+            crate::serial_println!("[SYSCALL] signal_object_internal: handle not found");
+            return wait_status::STATUS_INVALID_HANDLE;
+        }
+        obj
+    };
+
+    // Determine object type and signal appropriately
+    // We need to check the dispatcher header type
+    let header = object as *mut crate::ke::dispatcher::DispatcherHeader;
+    let obj_type = unsafe { (*header).object_type };
+
+    let result = match obj_type {
+        crate::ke::dispatcher::DispatcherType::Event => {
+            unsafe {
+                let event = object as *mut crate::ke::event::KEvent;
+                (*event).set();
+            }
+            crate::serial_println!("[SYSCALL] signal_object_internal: set OB event");
+            0
+        }
+        crate::ke::dispatcher::DispatcherType::Semaphore => {
+            unsafe {
+                let sem = object as *mut crate::ke::KSemaphore;
+                (*sem).release(1);
+            }
+            crate::serial_println!("[SYSCALL] signal_object_internal: released OB semaphore");
+            0
+        }
+        crate::ke::dispatcher::DispatcherType::Mutex => {
+            unsafe {
+                let mutex = object as *mut crate::ke::KMutex;
+                if !(*mutex).is_owned() {
+                    crate::serial_println!("[SYSCALL] signal_object_internal: OB mutex not owned");
+                    wait_status::STATUS_MUTANT_NOT_OWNED
+                } else {
+                    (*mutex).release();
+                    crate::serial_println!("[SYSCALL] signal_object_internal: released OB mutex");
+                    0
+                }
+            }
+        }
+        _ => {
+            crate::serial_println!("[SYSCALL] signal_object_internal: unsupported object type {:?}", obj_type);
+            wait_status::STATUS_OBJECT_TYPE_MISMATCH
+        }
+    };
+
+    unsafe { crate::ob::ob_dereference_object(object); }
+
+    result
 }
 
 /// NtSetEvent - Set (signal) an event
