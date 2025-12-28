@@ -22,12 +22,19 @@
 //! - `FAST_MUTEX`: Fast kernel mutex
 //! - `LOOKASIDE_LIST_EX`: Per-CPU lookaside list
 
-// TODO: Submodules
-// pub mod fast_mutex;
-// pub mod lookaside;
-// pub mod pool;
-// pub mod pushlock;
-// pub mod resource;
-// pub mod rundown;
-// pub mod timer;
-// pub mod worker;
+pub mod fast_mutex;
+pub mod lookaside;
+pub mod pushlock;
+pub mod resource;
+pub mod rundown;
+pub mod worker;
+// pub mod pool;      // Uses mm::pool
+// pub mod timer;     // Uses ke::timer
+
+// Re-exports for convenience
+pub use fast_mutex::*;
+pub use lookaside::*;
+pub use pushlock::*;
+pub use resource::*;
+pub use rundown::*;
+pub use worker::*;
