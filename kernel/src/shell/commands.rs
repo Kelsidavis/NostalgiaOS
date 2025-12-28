@@ -1072,6 +1072,78 @@ fn parse_number(s: &str) -> Option<usize> {
     }
 }
 
+/// Resume suspended threads/processes
+pub fn cmd_resume(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Usage: resume <thread|process> <id>");
+        outln!("");
+        outln!("Examples:");
+        outln!("  resume thread 5       - Resume thread with TID 5");
+        outln!("  resume process 4      - Resume all threads in process PID 4");
+        return;
+    }
+
+    extern "C" {
+        fn syscall_dispatcher(
+            num: usize, a1: usize, a2: usize, a3: usize,
+            a4: usize, a5: usize, a6: usize,
+        ) -> isize;
+    }
+
+    // Syscall numbers
+    const NT_RESUME_PROCESS: usize = 94;
+    const NT_RESUME_THREAD: usize = 99;
+
+    if eq_ignore_case(args[0], "thread") {
+        if args.len() < 2 {
+            outln!("Usage: resume thread <tid>");
+            return;
+        }
+        let tid: usize = match parse_number(args[1]) {
+            Some(n) => n,
+            None => {
+                outln!("Invalid thread ID: {}", args[1]);
+                return;
+            }
+        };
+        // Thread handle = 0x1000 + tid (sync object handle base)
+        let handle = 0x1000 + tid;
+        outln!("Resuming thread {} (handle {:#x})...", tid, handle);
+        let result = unsafe { syscall_dispatcher(NT_RESUME_THREAD, handle, 0, 0, 0, 0, 0) };
+        if result >= 0 {
+            outln!("Thread resumed. Previous suspend count: {}", result);
+        } else {
+            outln!("Failed to resume thread: {:#x}", result as u32);
+        }
+
+    } else if eq_ignore_case(args[0], "process") {
+        if args.len() < 2 {
+            outln!("Usage: resume process <pid>");
+            return;
+        }
+        let pid: usize = match parse_number(args[1]) {
+            Some(n) => n,
+            None => {
+                outln!("Invalid process ID: {}", args[1]);
+                return;
+            }
+        };
+        // Process handle = 0x5000 + pid
+        let handle = 0x5000 + pid;
+        outln!("Resuming process {} (handle {:#x})...", pid, handle);
+        let result = unsafe { syscall_dispatcher(NT_RESUME_PROCESS, handle, 0, 0, 0, 0, 0) };
+        if result == 0 {
+            outln!("Process resumed successfully.");
+        } else {
+            outln!("Failed to resume process: {:#x}", result as u32);
+        }
+
+    } else {
+        outln!("Unknown subcommand: {}", args[0]);
+        outln!("Use 'resume' without arguments for help.");
+    }
+}
+
 /// Path buffer for resolved paths
 static mut PATH_BUFFER: [u8; 128] = [0u8; 128];
 
