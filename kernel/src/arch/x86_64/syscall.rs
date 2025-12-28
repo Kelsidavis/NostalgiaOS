@@ -330,6 +330,7 @@ unsafe fn init_syscall_table() {
 
     // Timer syscalls
     register_syscall(SyscallNumber::NtCreateTimer as usize, sys_create_timer);
+    register_syscall(SyscallNumber::NtOpenTimer as usize, sys_open_timer);
     register_syscall(SyscallNumber::NtSetTimer as usize, sys_set_timer);
     register_syscall(SyscallNumber::NtCancelTimer as usize, sys_cancel_timer);
     register_syscall(SyscallNumber::NtQueryTimer as usize, sys_query_timer);
@@ -1865,6 +1866,8 @@ pub mod wait_status {
     pub const STATUS_INSUFFICIENT_RESOURCES: isize = 0xC000009Au32 as isize;
     /// Buffer too small for requested information
     pub const STATUS_INFO_LENGTH_MISMATCH: isize = 0xC0000004u32 as isize;
+    /// Object name not found
+    pub const STATUS_OBJECT_NAME_NOT_FOUND: isize = 0xC0000034u32 as isize;
 }
 
 /// NtWaitForSingleObject - Wait for a single object to become signaled
@@ -3038,6 +3041,86 @@ pub struct TimerBasicInformation {
     pub timer_state: u32,
 }
 
+// ============================================================================
+// Named Timer Table
+// ============================================================================
+
+/// Maximum number of named timers
+const MAX_NAMED_TIMERS: usize = 64;
+
+/// Maximum timer name length
+const MAX_TIMER_NAME_LEN: usize = 64;
+
+/// Named timer entry
+struct NamedTimerEntry {
+    /// Timer name (null-terminated UTF-8)
+    name: [u8; MAX_TIMER_NAME_LEN],
+    /// Name length
+    name_len: usize,
+    /// Handle to the timer in sync object pool
+    handle: usize,
+    /// Is this entry in use
+    in_use: bool,
+}
+
+impl NamedTimerEntry {
+    const fn new() -> Self {
+        Self {
+            name: [0; MAX_TIMER_NAME_LEN],
+            name_len: 0,
+            handle: 0,
+            in_use: false,
+        }
+    }
+}
+
+/// Named timer table
+static mut NAMED_TIMER_TABLE: [NamedTimerEntry; MAX_NAMED_TIMERS] = {
+    const INIT: NamedTimerEntry = NamedTimerEntry::new();
+    [INIT; MAX_NAMED_TIMERS]
+};
+
+/// Register a named timer
+unsafe fn register_named_timer(name: &[u8], handle: usize) -> bool {
+    for entry in NAMED_TIMER_TABLE.iter_mut() {
+        if !entry.in_use {
+            let len = name.len().min(MAX_TIMER_NAME_LEN - 1);
+            entry.name[..len].copy_from_slice(&name[..len]);
+            entry.name[len] = 0;
+            entry.name_len = len;
+            entry.handle = handle;
+            entry.in_use = true;
+            return true;
+        }
+    }
+    false
+}
+
+/// Find a named timer by name
+unsafe fn find_named_timer(name: &[u8]) -> Option<usize> {
+    for entry in NAMED_TIMER_TABLE.iter() {
+        if entry.in_use && entry.name_len == name.len() {
+            if &entry.name[..entry.name_len] == name {
+                return Some(entry.handle);
+            }
+        }
+    }
+    None
+}
+
+/// Unregister a named timer
+#[allow(dead_code)]
+unsafe fn unregister_named_timer(handle: usize) {
+    for entry in NAMED_TIMER_TABLE.iter_mut() {
+        if entry.in_use && entry.handle == handle {
+            entry.in_use = false;
+            entry.name_len = 0;
+            entry.handle = 0;
+            break;
+        }
+    }
+}
+
 /// NtCreateTimer - Create a timer object
 ///
 /// Creates a waitable timer that can be set to expire at a specified time.
@@ -3055,7 +3138,7 @@ pub struct TimerBasicInformation {
 fn sys_create_timer(
     timer_handle: usize,
     _desired_access: usize,
-    _object_attributes: usize,
+    object_attributes: usize,
     timer_type_arg: usize,
     _: usize,
     _: usize,
@@ -3074,6 +3157,45 @@ fn sys_create_timer(
     if timer_type_arg > 1 {
         crate::serial_println!("[SYSCALL] NtCreateTimer: invalid timer type {}", timer_type_arg);
         return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Extract timer name if object_attributes is provided
+    let mut timer_name: Option<([u8; MAX_TIMER_NAME_LEN], usize)> = None;
+    if object_attributes != 0 {
+        let obj_attr = unsafe { &*(object_attributes as *const ObjectAttributes) };
+        if obj_attr.object_name != 0 {
+            let unicode_str = unsafe { &*(obj_attr.object_name as *const UnicodeString) };
+            if unicode_str.buffer != 0 && unicode_str.length > 0 {
+                let name_len_chars = (unicode_str.length / 2) as usize;
+                let mut name_buf = [0u8; MAX_TIMER_NAME_LEN];
+                let mut name_len = 0usize;
+
+                unsafe {
+                    let utf16_ptr = unicode_str.buffer as *const u16;
+                    for i in 0..name_len_chars {
+                        if name_len >= MAX_TIMER_NAME_LEN - 1 {
+                            break;
+                        }
+                        let ch = *utf16_ptr.add(i);
+                        if ch < 128 {
+                            name_buf[name_len] = ch as u8;
+                            name_len += 1;
+                        }
+                    }
+                }
+
+                if name_len > 0 {
+                    // Check if timer with this name already exists
+                    if let Some(existing_handle) = unsafe { find_named_timer(&name_buf[..name_len]) } {
+                        // Timer exists - return existing handle (or error depending on flags)
+                        unsafe { *(timer_handle as *mut usize) = existing_handle; }
+                        crate::serial_println!("[SYSCALL] NtCreateTimer: existing timer found -> handle 0x{:X}", existing_handle);
+                        return 0; // STATUS_SUCCESS (should be STATUS_OBJECT_NAME_EXISTS for full compat)
+                    }
+                    timer_name = Some((name_buf, name_len));
+                }
+            }
+        }
     }
 
     // Allocate timer from pool
@@ -3105,9 +3227,139 @@ fn sys_create_timer(
         *(timer_handle as *mut usize) = handle;
     }
 
+    // Register named timer if name was provided
+    if let Some((name_buf, name_len)) = timer_name {
+        unsafe {
+            if !register_named_timer(&name_buf[..name_len], handle) {
+                crate::serial_println!("[SYSCALL] NtCreateTimer: failed to register named timer");
+                // Timer is still created, just not named
+            } else {
+                let name_str = core::str::from_utf8(&name_buf[..name_len]).unwrap_or("<invalid>");
+                crate::serial_println!("[SYSCALL] NtCreateTimer: registered named timer '{}'", name_str);
+            }
+        }
+    }
+
     crate::serial_println!("[SYSCALL] NtCreateTimer: created timer handle 0x{:X}", handle);
 
     0 // STATUS_SUCCESS
+}
+
+/// NtOpenTimer - Open an existing named timer object
+///
+/// Opens a handle to an existing timer object by name.
+///
+/// # Arguments
+/// * `timer_handle` - Pointer to receive the timer handle
+/// * `desired_access` - Access rights requested
+/// * `object_attributes` - Pointer to OBJECT_ATTRIBUTES containing the timer name
+///
+/// # Returns
+/// * STATUS_SUCCESS - Timer opened successfully
+/// * STATUS_INVALID_PARAMETER - Invalid parameter
+/// * STATUS_OBJECT_NAME_NOT_FOUND - Timer with specified name not found
+/// * STATUS_OBJECT_TYPE_MISMATCH - Object exists but is not a timer
+fn sys_open_timer(
+    timer_handle: usize,
+    _desired_access: usize,
+    object_attributes: usize,
+    _: usize,
+    _: usize,
+    _: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtOpenTimer(handle_ptr=0x{:X}, obj_attr=0x{:X})",
+        timer_handle, object_attributes
+    );
+
+    // Validate parameters
+    if timer_handle == 0 {
+        crate::serial_println!("[SYSCALL] NtOpenTimer: NULL handle pointer");
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    if object_attributes == 0 {
+        crate::serial_println!("[SYSCALL] NtOpenTimer: NULL object_attributes");
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Read the OBJECT_ATTRIBUTES structure
+    let obj_attr = unsafe { &*(object_attributes as *const ObjectAttributes) };
+
+    // Get the object name from UNICODE_STRING
+    if obj_attr.object_name == 0 {
+        crate::serial_println!("[SYSCALL] NtOpenTimer: NULL object name");
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Read the UNICODE_STRING structure
+    let unicode_str = unsafe { &*(obj_attr.object_name as *const UnicodeString) };
+
+    if unicode_str.buffer == 0 || unicode_str.length == 0 {
+        crate::serial_println!("[SYSCALL] NtOpenTimer: empty timer name");
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Convert the name from UTF-16 to UTF-8
+    let name_len_chars = (unicode_str.length / 2) as usize;
+    let mut name_buf = [0u8; MAX_TIMER_NAME_LEN];
+    let mut name_len = 0usize;
+
+    unsafe {
+        let utf16_ptr = unicode_str.buffer as *const u16;
+        for i in 0..name_len_chars {
+            if name_len >= MAX_TIMER_NAME_LEN - 1 {
+                break;
+            }
+            let ch = *utf16_ptr.add(i);
+            // Simple ASCII conversion (full UTF-16 to UTF-8 would be more complex)
+            if ch < 128 {
+                name_buf[name_len] = ch as u8;
+                name_len += 1;
+            }
+        }
+    }
+
+    if name_len == 0 {
+        crate::serial_println!("[SYSCALL] NtOpenTimer: failed to convert timer name");
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    let name_str = core::str::from_utf8(&name_buf[..name_len]).unwrap_or("<invalid>");
+    crate::serial_println!("[SYSCALL] NtOpenTimer: looking for timer '{}'", name_str);
+
+    // Look up the named timer
+    let existing_handle = unsafe { find_named_timer(&name_buf[..name_len]) };
+
+    match existing_handle {
+        Some(handle) => {
+            // Verify it's still a valid timer
+            if let Some((_, obj_type)) = unsafe { get_sync_object(handle) } {
+                if obj_type != SyncObjectType::Timer {
+                    crate::serial_println!("[SYSCALL] NtOpenTimer: object is not a timer");
+                    return wait_status::STATUS_OBJECT_TYPE_MISMATCH;
+                }
+
+                // Return the handle to the caller
+                // Note: In a full implementation, we'd create a new handle referencing the same object
+                // For now, we return the same handle (simplified)
+                unsafe { *(timer_handle as *mut usize) = handle; }
+
+                crate::serial_println!("[SYSCALL] NtOpenTimer: opened timer '{}' -> handle 0x{:X}",
+                    name_str, handle);
+                0 // STATUS_SUCCESS
+            } else {
+                crate::serial_println!("[SYSCALL] NtOpenTimer: named timer no longer valid");
+                wait_status::STATUS_OBJECT_NAME_NOT_FOUND
+            }
+        }
+        None => {
+            // Try looking in object manager for kernel objects
+            // For now, just return not found
+            crate::serial_println!("[SYSCALL] NtOpenTimer: timer '{}' not found", name_str);
+            wait_status::STATUS_OBJECT_NAME_NOT_FOUND
+        }
+    }
 }
 
 /// NtSetTimer - Set a timer to expire at a specified time
