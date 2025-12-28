@@ -6531,18 +6531,125 @@ fn sys_set_information_process(
 }
 
 /// Thread information classes for Set operations
+#[allow(non_snake_case, non_upper_case_globals)]
 pub mod set_thread_info_class {
+    /// Set thread priority (relative: -15 to +15)
+    pub const ThreadPriority: u32 = 1;
+    /// Set thread base priority
+    pub const ThreadBasePriority: u32 = 3;
+    /// Set thread CPU affinity mask
+    pub const ThreadAffinityMask: u32 = 4;
+    /// Set thread impersonation token
+    pub const ThreadImpersonationToken: u32 = 5;
+    /// Enable/disable alignment fault fixup
+    pub const ThreadEnableAlignmentFaultFixup: u32 = 7;
+    /// Set Win32 start address
+    pub const ThreadQuerySetWin32StartAddress: u32 = 9;
+    /// Zero a specific TLS cell
+    pub const ThreadZeroTlsCell: u32 = 10;
+    /// Set ideal processor hint
+    pub const ThreadIdealProcessor: u32 = 13;
+    /// Set/disable priority boost
+    pub const ThreadPriorityBoost: u32 = 14;
+    /// Set TLS array address
+    pub const ThreadSetTlsArrayAddress: u32 = 15;
+    /// Hide thread from debugger
+    pub const ThreadHideFromDebugger: u32 = 17;
+    /// Set break on termination flag (critical thread)
+    pub const ThreadBreakOnTermination: u32 = 18;
+    /// Switch legacy state
+    pub const ThreadSwitchLegacyState: u32 = 19;
+    /// Set I/O priority
+    pub const ThreadIoPriority: u32 = 22;
+    /// Set page priority
+    pub const ThreadPagePriority: u32 = 24;
+    /// Set actual base priority
+    pub const ThreadActualBasePriority: u32 = 25;
+    /// Set processor group affinity
+    pub const ThreadGroupInformation: u32 = 30;
+    /// Set ideal processor (extended)
+    pub const ThreadIdealProcessorEx: u32 = 33;
+    /// Set power throttling state
+    pub const ThreadPowerThrottlingState: u32 = 49;
+
+    // Legacy uppercase names for compatibility
     pub const THREAD_PRIORITY: u32 = 1;
     pub const THREAD_BASE_PRIORITY: u32 = 3;
     pub const THREAD_AFFINITY_MASK: u32 = 4;
     pub const THREAD_IMPERSONATION_TOKEN: u32 = 5;
     pub const THREAD_IDEAL_PROCESSOR: u32 = 13;
-    pub const THREAD_ZERO_TLS_CELL: u32 = 14;
+    pub const THREAD_ZERO_TLS_CELL: u32 = 10;
     pub const THREAD_BREAK_ON_TERMINATION: u32 = 18;
     pub const THREAD_HIDE_FROM_DEBUGGER: u32 = 17;
 }
 
+/// Thread priority boost structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadPriorityBoostInfo {
+    /// TRUE to disable priority boost
+    pub disable_boost: u32,
+}
+
+/// Thread I/O priority hint
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadIoPriorityInfo {
+    /// I/O priority level (0-4)
+    pub io_priority: u32,
+}
+
+/// I/O priority levels
+#[allow(non_snake_case, non_upper_case_globals)]
+pub mod IoPriority {
+    pub const IoPriorityVeryLow: u32 = 0;
+    pub const IoPriorityLow: u32 = 1;
+    pub const IoPriorityNormal: u32 = 2;
+    pub const IoPriorityHigh: u32 = 3;
+    pub const IoPriorityCritical: u32 = 4;
+}
+
+/// Thread page priority info
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ThreadPagePriorityInfo {
+    /// Page priority (0-7, default 5)
+    pub page_priority: u32,
+}
+
+/// Thread group affinity
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct GroupAffinity {
+    /// Affinity mask within the group
+    pub mask: u64,
+    /// Processor group number
+    pub group: u16,
+    /// Reserved
+    pub reserved: [u16; 3],
+}
+
+/// Processor number (extended ideal processor)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessorNumber {
+    /// Processor group
+    pub group: u16,
+    /// Processor number within group
+    pub number: u8,
+    /// Reserved
+    pub reserved: u8,
+}
+
 /// NtSetInformationThread - Set thread attributes
+///
+/// Sets information for a thread based on the specified information class.
+///
+/// # Arguments
+/// * `thread_handle` - Handle to the thread (0xFFFFFFFE = current thread)
+/// * `thread_information_class` - Type of information to set
+/// * `thread_information` - Buffer containing the information
+/// * `thread_information_length` - Size of the buffer
 fn sys_set_information_thread(
     thread_handle: usize,
     thread_information_class: usize,
@@ -6550,123 +6657,434 @@ fn sys_set_information_thread(
     thread_information_length: usize,
     _: usize, _: usize,
 ) -> isize {
+    const STATUS_SUCCESS: isize = 0;
+    const STATUS_INVALID_HANDLE: isize = 0xC0000008u32 as isize;
+    const STATUS_INFO_LENGTH_MISMATCH: isize = 0xC0000004u32 as isize;
+    const STATUS_INVALID_PARAMETER: isize = 0xC000000Du32 as isize;
+    const STATUS_INVALID_INFO_CLASS: isize = 0xC0000003u32 as isize;
+    const STATUS_ACCESS_DENIED: isize = 0xC0000022u32 as isize;
+
+    // Get thread ID from handle
+    // Special handle -2 (0xFFFFFFFE) means current thread
     let tid = if thread_handle == 0xFFFFFFFE || thread_handle == (usize::MAX - 1) {
-        // Current thread
         unsafe {
             let prcb = crate::ke::prcb::get_current_prcb();
             if !prcb.current_thread.is_null() {
                 (*prcb.current_thread).thread_id
             } else {
-                0
+                return STATUS_INVALID_HANDLE;
             }
         }
+    } else if thread_handle == 0 {
+        return STATUS_INVALID_HANDLE;
     } else {
         match unsafe { get_thread_id(thread_handle) } {
             Some(t) => t,
-            None => return -1,
+            None => return STATUS_INVALID_HANDLE,
         }
     };
+
+    // Validate buffer
+    if thread_information == 0 && thread_information_length > 0 {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Look up thread structure
+    let thread = unsafe { crate::ps::cid::ps_lookup_thread_by_id(tid) };
+    let ethread = thread as *mut crate::ps::EThread;
 
     crate::serial_println!("[SYSCALL] NtSetInformationThread(tid={}, class={})",
         tid, thread_information_class);
 
-    if thread_information == 0 && thread_information_length > 0 {
-        return -1;
-    }
-
     match thread_information_class as u32 {
-        set_thread_info_class::THREAD_PRIORITY => {
+        // Class 1: ThreadPriority (relative priority -15 to +15)
+        set_thread_info_class::ThreadPriority => {
             if thread_information_length < 4 {
-                return -1;
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
 
             let priority = unsafe { *(thread_information as *const i32) };
-            crate::serial_println!("[SYSCALL] SetInformationThread: priority = {}", priority);
 
-            // Validate priority range (-15 to +15 relative, or 0-31 absolute)
+            // Validate priority range (-15 to +15 for relative priority)
             if priority < -15 || priority > 15 {
-                return -1; // STATUS_INVALID_PARAMETER
+                return STATUS_INVALID_PARAMETER;
             }
 
-            // TODO: Actually set thread priority
-            // Would call ke::set_thread_priority(thread, priority)
+            crate::serial_println!("[SYSCALL] SetInformationThread: priority delta = {}", priority);
 
-            0
+            // Apply priority delta to thread
+            if !ethread.is_null() {
+                unsafe {
+                    let tcb = (*ethread).get_tcb_mut();
+                    let new_priority = ((*tcb).base_priority as i32 + priority)
+                        .clamp(0, 31) as i8;
+                    (*tcb).priority = new_priority;
+                }
+            }
+
+            STATUS_SUCCESS
         }
-        set_thread_info_class::THREAD_BASE_PRIORITY => {
+
+        // Class 3: ThreadBasePriority
+        set_thread_info_class::ThreadBasePriority => {
             if thread_information_length < 4 {
-                return -1;
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
 
             let base_priority = unsafe { *(thread_information as *const i32) };
+
+            // Validate base priority range (0-31)
+            if base_priority < 0 || base_priority > 31 {
+                return STATUS_INVALID_PARAMETER;
+            }
+
             crate::serial_println!("[SYSCALL] SetInformationThread: base priority = {}", base_priority);
 
-            // TODO: Set thread base priority
+            if !ethread.is_null() {
+                unsafe {
+                    let tcb = (*ethread).get_tcb_mut();
+                    (*tcb).base_priority = base_priority as i8;
+                    // Also update current priority if not boosted
+                    if (*tcb).priority < base_priority as i8 {
+                        (*tcb).priority = base_priority as i8;
+                    }
+                }
+            }
 
-            0
+            STATUS_SUCCESS
         }
-        set_thread_info_class::THREAD_AFFINITY_MASK => {
+
+        // Class 4: ThreadAffinityMask
+        set_thread_info_class::ThreadAffinityMask => {
             if thread_information_length < 8 {
-                return -1;
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
 
             let affinity = unsafe { *(thread_information as *const u64) };
+
+            // Affinity must have at least one bit set
+            if affinity == 0 {
+                return STATUS_INVALID_PARAMETER;
+            }
+
             crate::serial_println!("[SYSCALL] SetInformationThread: affinity = {:#x}", affinity);
 
-            // Affinity must be subset of process affinity
-            // TODO: Validate and set thread affinity
+            // For now, we only support single processor, so any affinity with bit 0 is valid
+            if (affinity & 1) == 0 {
+                return STATUS_INVALID_PARAMETER;
+            }
 
-            0
+            // TODO: Store affinity mask in thread structure when multi-processor support added
+
+            STATUS_SUCCESS
         }
-        set_thread_info_class::THREAD_IMPERSONATION_TOKEN => {
-            // Set thread impersonation token (or clear it with NULL handle)
+
+        // Class 5: ThreadImpersonationToken
+        set_thread_info_class::ThreadImpersonationToken => {
             if thread_information_length < 8 {
-                return -1;
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
 
             let token_handle = unsafe { *(thread_information as *const usize) };
+
             crate::serial_println!("[SYSCALL] SetInformationThread: impersonation token = {:#x}",
                 token_handle);
 
-            // TODO: Implement thread impersonation
-            // Would store token in thread->impersonation_token
+            if !ethread.is_null() {
+                unsafe {
+                    if token_handle == 0 {
+                        // Clear impersonation
+                        (*ethread).impersonation_info = core::ptr::null_mut();
+                        (*ethread).clear_flag(crate::ps::ethread::thread_flags::PS_THREAD_FLAGS_IMPERSONATING);
+                    } else {
+                        // Set impersonation token
+                        // TODO: Look up token from handle and validate
+                        (*ethread).impersonation_info = token_handle as *mut u8;
+                        (*ethread).set_flag(crate::ps::ethread::thread_flags::PS_THREAD_FLAGS_IMPERSONATING);
+                    }
+                }
+            }
 
-            0
+            STATUS_SUCCESS
         }
-        set_thread_info_class::THREAD_IDEAL_PROCESSOR => {
+
+        // Class 7: ThreadEnableAlignmentFaultFixup
+        set_thread_info_class::ThreadEnableAlignmentFaultFixup => {
+            if thread_information_length < 1 {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            let enable = unsafe { *(thread_information as *const u8) };
+
+            crate::serial_println!("[SYSCALL] SetInformationThread: alignment fault fixup = {}",
+                enable != 0);
+
+            // TODO: Store alignment fault fixup flag
+            // This affects how unaligned memory accesses are handled
+
+            STATUS_SUCCESS
+        }
+
+        // Class 9: ThreadQuerySetWin32StartAddress
+        set_thread_info_class::ThreadQuerySetWin32StartAddress => {
+            if thread_information_length < 8 {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            let start_address = unsafe { *(thread_information as *const u64) };
+
+            crate::serial_println!("[SYSCALL] SetInformationThread: Win32 start address = {:#x}",
+                start_address);
+
+            if !ethread.is_null() {
+                unsafe {
+                    (*ethread).win32_start_address = start_address as *mut u8;
+                }
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 10: ThreadZeroTlsCell
+        set_thread_info_class::ThreadZeroTlsCell => {
             if thread_information_length < 4 {
-                return -1;
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            let tls_index = unsafe { *(thread_information as *const u32) };
+
+            crate::serial_println!("[SYSCALL] SetInformationThread: zero TLS cell {}", tls_index);
+
+            // TODO: Zero the specified TLS slot in the thread's TEB
+            // This requires access to the TEB structure
+
+            STATUS_SUCCESS
+        }
+
+        // Class 13: ThreadIdealProcessor
+        set_thread_info_class::ThreadIdealProcessor => {
+            if thread_information_length < 4 {
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
 
             let ideal_proc = unsafe { *(thread_information as *const u32) };
+
             crate::serial_println!("[SYSCALL] SetInformationThread: ideal processor = {}", ideal_proc);
 
-            // TODO: Set ideal processor for scheduler hints
+            // For single processor system, only processor 0 is valid
+            // Special value MAXIMUM_PROCESSORS (0xFF) means no preference
+            if ideal_proc != 0 && ideal_proc != 0xFF {
+                // We only have one processor, but accept the request
+                crate::serial_println!("[SYSCALL] Warning: ideal processor {} not available", ideal_proc);
+            }
 
-            0
+            // TODO: Store ideal processor hint for scheduler
+
+            STATUS_SUCCESS
         }
-        set_thread_info_class::THREAD_HIDE_FROM_DEBUGGER => {
-            crate::serial_println!("[SYSCALL] SetInformationThread: hide from debugger");
-            // TODO: Set thread flag to hide from debugger
-            0
-        }
-        set_thread_info_class::THREAD_BREAK_ON_TERMINATION => {
+
+        // Class 14: ThreadPriorityBoost
+        set_thread_info_class::ThreadPriorityBoost => {
             if thread_information_length < 4 {
-                return -1;
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            let disable_boost = unsafe { *(thread_information as *const u32) };
+
+            crate::serial_println!("[SYSCALL] SetInformationThread: priority boost disabled = {}",
+                disable_boost != 0);
+
+            // TODO: Store priority boost disable flag in thread
+            // When set, the thread won't receive temporary priority boosts
+
+            STATUS_SUCCESS
+        }
+
+        // Class 15: ThreadSetTlsArrayAddress
+        set_thread_info_class::ThreadSetTlsArrayAddress => {
+            if thread_information_length < 8 {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            let tls_array = unsafe { *(thread_information as *const u64) };
+
+            crate::serial_println!("[SYSCALL] SetInformationThread: TLS array address = {:#x}",
+                tls_array);
+
+            // TODO: Set TLS expansion slots array address in TEB
+
+            STATUS_SUCCESS
+        }
+
+        // Class 17: ThreadHideFromDebugger
+        set_thread_info_class::ThreadHideFromDebugger => {
+            // This class takes no input data - just sets a flag
+            crate::serial_println!("[SYSCALL] SetInformationThread: hide from debugger");
+
+            // TODO: Set hidden from debugger flag
+            // This makes the thread invisible to debugger enumeration
+
+            STATUS_SUCCESS
+        }
+
+        // Class 18: ThreadBreakOnTermination
+        set_thread_info_class::ThreadBreakOnTermination => {
+            if thread_information_length < 4 {
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
 
             let break_on_term = unsafe { *(thread_information as *const u32) };
+
             crate::serial_println!("[SYSCALL] SetInformationThread: break on termination = {}",
                 break_on_term != 0);
 
-            // TODO: Set critical thread flag
+            // Setting this requires SeDebugPrivilege in real NT
+            // For now, we allow it
 
-            0
+            // TODO: Set critical thread flag - if set, terminating this thread
+            // will cause a system crash (bugcheck)
+
+            STATUS_SUCCESS
         }
+
+        // Class 19: ThreadSwitchLegacyState
+        set_thread_info_class::ThreadSwitchLegacyState => {
+            crate::serial_println!("[SYSCALL] SetInformationThread: switch legacy state");
+
+            // This is used for x87 FPU state management
+            // Not critical for basic functionality
+
+            STATUS_SUCCESS
+        }
+
+        // Class 22: ThreadIoPriority
+        set_thread_info_class::ThreadIoPriority => {
+            if thread_information_length < 4 {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            let io_priority = unsafe { *(thread_information as *const u32) };
+
+            // Validate I/O priority (0-4)
+            if io_priority > IoPriority::IoPriorityCritical {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            crate::serial_println!("[SYSCALL] SetInformationThread: I/O priority = {}", io_priority);
+
+            // TODO: Store I/O priority for I/O scheduling
+
+            STATUS_SUCCESS
+        }
+
+        // Class 24: ThreadPagePriority
+        set_thread_info_class::ThreadPagePriority => {
+            if thread_information_length < 4 {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            let page_priority = unsafe { *(thread_information as *const u32) };
+
+            // Validate page priority (0-7)
+            if page_priority > 7 {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            crate::serial_println!("[SYSCALL] SetInformationThread: page priority = {}", page_priority);
+
+            // TODO: Store page priority for memory management
+
+            STATUS_SUCCESS
+        }
+
+        // Class 25: ThreadActualBasePriority
+        set_thread_info_class::ThreadActualBasePriority => {
+            if thread_information_length < 4 {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            let actual_base = unsafe { *(thread_information as *const i32) };
+
+            // Validate priority (0-31)
+            if actual_base < 0 || actual_base > 31 {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            crate::serial_println!("[SYSCALL] SetInformationThread: actual base priority = {}",
+                actual_base);
+
+            if !ethread.is_null() {
+                unsafe {
+                    let tcb = (*ethread).get_tcb_mut();
+                    (*tcb).base_priority = actual_base as i8;
+                    (*tcb).priority = actual_base as i8;
+                }
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 30: ThreadGroupInformation
+        set_thread_info_class::ThreadGroupInformation => {
+            if thread_information_length < core::mem::size_of::<GroupAffinity>() {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            let group_affinity = unsafe { &*(thread_information as *const GroupAffinity) };
+
+            crate::serial_println!(
+                "[SYSCALL] SetInformationThread: group {} affinity = {:#x}",
+                group_affinity.group, group_affinity.mask
+            );
+
+            // We only support group 0
+            if group_affinity.group != 0 {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            // Mask must have at least one bit set and include processor 0
+            if group_affinity.mask == 0 || (group_affinity.mask & 1) == 0 {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 33: ThreadIdealProcessorEx
+        set_thread_info_class::ThreadIdealProcessorEx => {
+            if thread_information_length < core::mem::size_of::<ProcessorNumber>() {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            let proc_num = unsafe { &*(thread_information as *const ProcessorNumber) };
+
+            crate::serial_println!(
+                "[SYSCALL] SetInformationThread: ideal processor group {} number {}",
+                proc_num.group, proc_num.number
+            );
+
+            // We only support group 0, processor 0
+            if proc_num.group != 0 {
+                return STATUS_INVALID_PARAMETER;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 49: ThreadPowerThrottlingState
+        set_thread_info_class::ThreadPowerThrottlingState => {
+            crate::serial_println!("[SYSCALL] SetInformationThread: power throttling state");
+
+            // Power throttling is a Windows 10+ feature
+            // Accept but ignore for compatibility
+
+            STATUS_SUCCESS
+        }
+
         _ => {
             crate::serial_println!("[SYSCALL] NtSetInformationThread: unsupported class {}",
                 thread_information_class);
-            -1
+            STATUS_INVALID_INFO_CLASS
         }
     }
 }
