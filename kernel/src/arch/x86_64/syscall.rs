@@ -4407,6 +4407,8 @@ pub enum HandleType {
     Process = 9,
     Token = 10,
     IoCompletion = 11,
+    Timer = 12,
+    Debug = 13,
 }
 
 /// Generic handle entry
@@ -4909,32 +4911,179 @@ fn close_handle_internal(handle: usize) -> isize {
     STATUS_INVALID_HANDLE
 }
 
-/// Object information class
+/// Object information class constants
+#[allow(non_snake_case, non_upper_case_globals)]
 pub mod object_info_class {
-    pub const OBJECT_BASIC_INFORMATION: u32 = 0;
-    pub const OBJECT_NAME_INFORMATION: u32 = 1;
-    pub const OBJECT_TYPE_INFORMATION: u32 = 2;
-    pub const OBJECT_TYPES_INFORMATION: u32 = 3;
-    pub const OBJECT_HANDLE_FLAG_INFORMATION: u32 = 4;
+    /// Basic object information (attributes, counts, etc.)
+    pub const ObjectBasicInformation: u32 = 0;
+    /// Object name information
+    pub const ObjectNameInformation: u32 = 1;
+    /// Object type information
+    pub const ObjectTypeInformation: u32 = 2;
+    /// All object types in the system
+    pub const ObjectTypesInformation: u32 = 3;
+    /// Handle flags (inherit, protect from close)
+    pub const ObjectHandleFlagInformation: u32 = 4;
+    /// Session information
+    pub const ObjectSessionInformation: u32 = 5;
+    /// Session object information (Vista+)
+    pub const ObjectSessionObjectInformation: u32 = 6;
+
+    // Legacy aliases
+    pub const OBJECT_BASIC_INFORMATION: u32 = ObjectBasicInformation;
+    pub const OBJECT_NAME_INFORMATION: u32 = ObjectNameInformation;
+    pub const OBJECT_TYPE_INFORMATION: u32 = ObjectTypeInformation;
+    pub const OBJECT_TYPES_INFORMATION: u32 = ObjectTypesInformation;
+    pub const OBJECT_HANDLE_FLAG_INFORMATION: u32 = ObjectHandleFlagInformation;
 }
 
 /// OBJECT_BASIC_INFORMATION structure
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct ObjectBasicInformation {
+    /// Object attributes
     pub attributes: u32,
+    /// Access rights granted to handle
     pub granted_access: u32,
+    /// Number of handles to object
     pub handle_count: u32,
+    /// Number of pointers to object
     pub pointer_count: u32,
+    /// Paged pool bytes charged
     pub paged_pool_charge: u32,
+    /// Non-paged pool bytes charged
     pub non_paged_pool_charge: u32,
+    /// Reserved
     pub reserved: [u32; 3],
+    /// Size of name information
     pub name_info_size: u32,
+    /// Size of type information
     pub type_info_size: u32,
+    /// Size of security descriptor
     pub security_descriptor_size: u32,
+    /// Object creation time
     pub creation_time: i64,
 }
 
+/// UNICODE_STRING structure for object names
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct UnicodeString {
+    /// Length in bytes (not including null terminator)
+    pub length: u16,
+    /// Maximum length in bytes
+    pub maximum_length: u16,
+    /// Pointer to buffer
+    pub buffer: u64,
+}
+
+/// OBJECT_NAME_INFORMATION structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectNameInformation {
+    /// Object name as UNICODE_STRING
+    pub name: UnicodeString,
+    // Name buffer follows inline
+}
+
+/// OBJECT_TYPE_INFORMATION structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectTypeInformation {
+    /// Type name
+    pub type_name: UnicodeString,
+    /// Total number of objects of this type
+    pub total_number_of_objects: u32,
+    /// Total number of handles to objects of this type
+    pub total_number_of_handles: u32,
+    /// Total paged pool usage
+    pub total_paged_pool_usage: u32,
+    /// Total non-paged pool usage
+    pub total_non_paged_pool_usage: u32,
+    /// Total name pool usage
+    pub total_name_pool_usage: u32,
+    /// Total handle table usage
+    pub total_handle_table_usage: u32,
+    /// High water mark for objects
+    pub high_water_number_of_objects: u32,
+    /// High water mark for handles
+    pub high_water_number_of_handles: u32,
+    /// High water mark for paged pool
+    pub high_water_paged_pool_usage: u32,
+    /// High water mark for non-paged pool
+    pub high_water_non_paged_pool_usage: u32,
+    /// High water mark for name pool
+    pub high_water_name_pool_usage: u32,
+    /// High water mark for handle table
+    pub high_water_handle_table_usage: u32,
+    /// Invalid attributes for this type
+    pub invalid_attributes: u32,
+    /// Generic mapping
+    pub generic_mapping: GenericMapping,
+    /// Valid access mask
+    pub valid_access_mask: u32,
+    /// Whether security is required
+    pub security_required: u8,
+    /// Whether object maintains handle count
+    pub maintain_handle_count: u8,
+    /// Type index
+    pub type_index: u8,
+    /// Reserved
+    pub reserved_byte: u8,
+    /// Pool type
+    pub pool_type: u32,
+    /// Default paged pool charge
+    pub default_paged_pool_charge: u32,
+    /// Default non-paged pool charge
+    pub default_non_paged_pool_charge: u32,
+    // Type name buffer follows inline
+}
+
+/// GENERIC_MAPPING structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct GenericMapping {
+    pub generic_read: u32,
+    pub generic_write: u32,
+    pub generic_execute: u32,
+    pub generic_all: u32,
+}
+
+/// OBJECT_HANDLE_FLAG_INFORMATION structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectHandleFlagInformation {
+    /// Whether handle is inheritable
+    pub inherit: u8,
+    /// Whether handle is protected from close
+    pub protect_from_close: u8,
+}
+
+/// OBJECT_TYPES_INFORMATION header
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectTypesInformation {
+    /// Number of types
+    pub number_of_types: u32,
+    // Array of ObjectTypeInformation follows
+}
+
 /// NtQueryObject - Query object information
+///
+/// # Arguments
+/// * `handle` - Handle to query (or NULL for some classes)
+/// * `object_information_class` - Type of information to query
+/// * `object_information` - Buffer to receive information
+/// * `object_information_length` - Size of buffer
+/// * `return_length` - Receives required buffer size
+///
+/// # Returns
+/// * STATUS_SUCCESS - Information was successfully returned
+/// * STATUS_INVALID_HANDLE - Handle is invalid
+/// * STATUS_INVALID_PARAMETER - Invalid parameter
+/// * STATUS_INFO_LENGTH_MISMATCH - Buffer too small
+/// * STATUS_INVALID_INFO_CLASS - Unknown information class
+/// * STATUS_BUFFER_OVERFLOW - Buffer too small but return_length set
 fn sys_query_object(
     handle: usize,
     object_information_class: usize,
@@ -4943,83 +5092,469 @@ fn sys_query_object(
     return_length: usize,
     _: usize,
 ) -> isize {
-    if handle == 0 || object_information == 0 {
-        return -1;
+    // NT status codes
+    const STATUS_SUCCESS: isize = 0;
+    const STATUS_INVALID_HANDLE: isize = 0xC0000008u32 as isize;
+    const STATUS_INVALID_PARAMETER: isize = 0xC000000Du32 as isize;
+    const STATUS_INFO_LENGTH_MISMATCH: isize = 0xC0000004u32 as isize;
+    const STATUS_INVALID_INFO_CLASS: isize = 0xC0000003u32 as isize;
+    const STATUS_BUFFER_OVERFLOW: isize = 0x80000005u32 as isize;
+    const STATUS_BUFFER_TOO_SMALL: isize = 0xC0000023u32 as isize;
+
+    crate::serial_println!(
+        "[SYSCALL] NtQueryObject(handle=0x{:X}, class={}, buffer=0x{:X}, len={})",
+        handle, object_information_class, object_information, object_information_length
+    );
+
+    // ObjectTypesInformation doesn't require a handle
+    let info_class = object_information_class as u32;
+
+    // Validate handle for classes that require it
+    if info_class != object_info_class::ObjectTypesInformation {
+        if handle == 0 {
+            crate::serial_println!("[SYSCALL] NtQueryObject: NULL handle");
+            return STATUS_INVALID_HANDLE;
+        }
     }
 
-    crate::serial_println!("[SYSCALL] NtQueryObject(handle={:#x}, class={})",
-        handle, object_information_class);
-
+    // Get handle type
     let handle_type = get_handle_type(handle);
 
-    match object_information_class as u32 {
-        object_info_class::OBJECT_BASIC_INFORMATION => {
+    // Try to get object from object manager for additional info
+    let ob_handle = handle as u32;
+    let ob_object = if handle != 0 {
+        unsafe { crate::ob::ob_reference_object_by_handle(ob_handle, 0) }
+    } else {
+        core::ptr::null_mut()
+    };
+
+    let result = match info_class {
+        object_info_class::ObjectBasicInformation => {
             let required = core::mem::size_of::<ObjectBasicInformation>();
 
+            // Set return length
             if return_length != 0 {
-                unsafe { *(return_length as *mut usize) = required; }
+                unsafe { *(return_length as *mut u32) = required as u32; }
             }
 
-            if object_information_length < required {
-                return 0x80000005u32 as isize; // STATUS_BUFFER_OVERFLOW
-            }
+            // Check buffer size
+            if object_information == 0 {
+                STATUS_INVALID_PARAMETER
+            } else if object_information_length < required {
+                STATUS_INFO_LENGTH_MISMATCH
+            } else {
+                // Get counts from object manager if available
+                let (handle_count, pointer_count) = if !ob_object.is_null() {
+                    unsafe {
+                        let header = crate::ob::ObjectHeader::from_body(ob_object);
+                        ((*header).handle_count() as u32, (*header).pointer_count() as u32)
+                    }
+                } else {
+                    (1, 1) // Default values
+                };
 
-            unsafe {
-                let info = object_information as *mut ObjectBasicInformation;
-                (*info).attributes = 0;
-                (*info).granted_access = 0x1F0001; // GENERIC_ALL
-                (*info).handle_count = 1;
-                (*info).pointer_count = 1;
-                (*info).paged_pool_charge = 0;
-                (*info).non_paged_pool_charge = 0;
-                (*info).reserved = [0; 3];
-                (*info).name_info_size = 0;
-                (*info).type_info_size = 32;
-                (*info).security_descriptor_size = 0;
-                (*info).creation_time = 0;
-            }
+                unsafe {
+                    let info = object_information as *mut ObjectBasicInformation;
+                    (*info).attributes = 0; // OBJ_* flags
+                    (*info).granted_access = get_handle_access_mask(handle, handle_type);
+                    (*info).handle_count = handle_count;
+                    (*info).pointer_count = pointer_count;
+                    (*info).paged_pool_charge = 0;
+                    (*info).non_paged_pool_charge = 256; // Typical kernel object size
+                    (*info).reserved = [0; 3];
+                    (*info).name_info_size = 0; // Would need object name length
+                    (*info).type_info_size = core::mem::size_of::<ObjectTypeInformation>() as u32;
+                    (*info).security_descriptor_size = 0;
+                    (*info).creation_time = 0; // Would need actual creation time
+                }
 
-            0
+                crate::serial_println!("[SYSCALL] NtQueryObject: returned ObjectBasicInformation");
+                STATUS_SUCCESS
+            }
         }
-        object_info_class::OBJECT_TYPE_INFORMATION => {
-            // Return type name
-            let type_name = match handle_type {
-                HandleType::File => "File",
-                HandleType::Event => "Event",
-                HandleType::Semaphore => "Semaphore",
-                HandleType::Mutex => "Mutant",
-                HandleType::Section => "Section",
-                HandleType::Key => "Key",
-                HandleType::Port => "Port",
-                HandleType::Thread => "Thread",
-                HandleType::Process => "Process",
-                HandleType::Token => "Token",
-                _ => "Unknown",
-            };
 
-            let name_bytes = type_name.as_bytes();
-            let required = 68 + name_bytes.len(); // Header + name
+        object_info_class::ObjectNameInformation => {
+            // Get object name based on handle type
+            let name = get_object_name(handle, handle_type);
+            let name_bytes = name.as_bytes();
+
+            // Calculate required size: header + null-terminated wide string
+            let name_buffer_size = (name_bytes.len() + 1) * 2; // UTF-16
+            let required = core::mem::size_of::<ObjectNameInformation>() + name_buffer_size;
 
             if return_length != 0 {
-                unsafe { *(return_length as *mut usize) = required; }
+                unsafe { *(return_length as *mut u32) = required as u32; }
             }
 
-            if object_information_length < required {
-                return 0x80000005u32 as isize;
-            }
+            if object_information == 0 {
+                STATUS_INVALID_PARAMETER
+            } else if object_information_length < required {
+                if object_information_length >= core::mem::size_of::<ObjectNameInformation>() {
+                    STATUS_BUFFER_OVERFLOW
+                } else {
+                    STATUS_INFO_LENGTH_MISMATCH
+                }
+            } else {
+                unsafe {
+                    let info = object_information as *mut ObjectNameInformation;
+                    let buffer_ptr = (object_information + core::mem::size_of::<ObjectNameInformation>()) as *mut u16;
 
-            // Write type info (simplified)
-            unsafe {
-                let ptr = object_information as *mut u8;
-                // Name length at offset 0
-                *(ptr as *mut u16) = name_bytes.len() as u16;
-                // Name at offset 68
-                core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), ptr.add(68), name_bytes.len());
-            }
+                    // Write UNICODE_STRING
+                    (*info).name.length = (name_bytes.len() * 2) as u16;
+                    (*info).name.maximum_length = (name_buffer_size) as u16;
+                    (*info).name.buffer = buffer_ptr as u64;
 
-            0
+                    // Write name as UTF-16LE
+                    for (i, &byte) in name_bytes.iter().enumerate() {
+                        *buffer_ptr.add(i) = byte as u16;
+                    }
+                    // Null terminator
+                    *buffer_ptr.add(name_bytes.len()) = 0;
+                }
+
+                crate::serial_println!("[SYSCALL] NtQueryObject: returned ObjectNameInformation: {}", name);
+                STATUS_SUCCESS
+            }
         }
-        _ => -1, // STATUS_INVALID_INFO_CLASS
+
+        object_info_class::ObjectTypeInformation => {
+            // Get type name
+            let type_name = get_type_name(handle_type, ob_object);
+            let type_bytes = type_name.as_bytes();
+
+            // Calculate required size
+            let name_buffer_size = (type_bytes.len() + 1) * 2;
+            let required = core::mem::size_of::<ObjectTypeInformation>() + name_buffer_size;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut u32) = required as u32; }
+            }
+
+            if object_information == 0 {
+                STATUS_INVALID_PARAMETER
+            } else if object_information_length < required {
+                STATUS_INFO_LENGTH_MISMATCH
+            } else {
+                unsafe {
+                    let info = object_information as *mut ObjectTypeInformation;
+                    let buffer_ptr = (object_information + core::mem::size_of::<ObjectTypeInformation>()) as *mut u16;
+
+                    // Type name
+                    (*info).type_name.length = (type_bytes.len() * 2) as u16;
+                    (*info).type_name.maximum_length = name_buffer_size as u16;
+                    (*info).type_name.buffer = buffer_ptr as u64;
+
+                    // Statistics
+                    (*info).total_number_of_objects = 1;
+                    (*info).total_number_of_handles = 1;
+                    (*info).total_paged_pool_usage = 0;
+                    (*info).total_non_paged_pool_usage = 256;
+                    (*info).total_name_pool_usage = 0;
+                    (*info).total_handle_table_usage = 0;
+                    (*info).high_water_number_of_objects = 1;
+                    (*info).high_water_number_of_handles = 1;
+                    (*info).high_water_paged_pool_usage = 0;
+                    (*info).high_water_non_paged_pool_usage = 256;
+                    (*info).high_water_name_pool_usage = 0;
+                    (*info).high_water_handle_table_usage = 0;
+
+                    // Access info
+                    (*info).invalid_attributes = 0;
+                    (*info).generic_mapping = get_type_generic_mapping(handle_type);
+                    (*info).valid_access_mask = get_type_valid_access(handle_type);
+                    (*info).security_required = 0;
+                    (*info).maintain_handle_count = 0;
+                    (*info).type_index = get_type_index(handle_type);
+                    (*info).reserved_byte = 0;
+                    (*info).pool_type = 0; // NonPagedPool
+                    (*info).default_paged_pool_charge = 0;
+                    (*info).default_non_paged_pool_charge = 256;
+
+                    // Write type name as UTF-16LE
+                    for (i, &byte) in type_bytes.iter().enumerate() {
+                        *buffer_ptr.add(i) = byte as u16;
+                    }
+                    *buffer_ptr.add(type_bytes.len()) = 0;
+                }
+
+                crate::serial_println!("[SYSCALL] NtQueryObject: returned ObjectTypeInformation: {}", type_name);
+                STATUS_SUCCESS
+            }
+        }
+
+        object_info_class::ObjectHandleFlagInformation => {
+            let required = core::mem::size_of::<ObjectHandleFlagInformation>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut u32) = required as u32; }
+            }
+
+            if object_information == 0 {
+                STATUS_INVALID_PARAMETER
+            } else if object_information_length < required {
+                STATUS_INFO_LENGTH_MISMATCH
+            } else {
+                unsafe {
+                    let info = object_information as *mut ObjectHandleFlagInformation;
+                    // For now, return defaults (not inheritable, not protected)
+                    (*info).inherit = 0;
+                    (*info).protect_from_close = 0;
+                }
+
+                crate::serial_println!("[SYSCALL] NtQueryObject: returned ObjectHandleFlagInformation");
+                STATUS_SUCCESS
+            }
+        }
+
+        object_info_class::ObjectTypesInformation => {
+            // Return information about all object types in the system
+            // This is a variable-length structure
+
+            // Define known types
+            const KNOWN_TYPES: &[&str] = &[
+                "Type", "Directory", "SymbolicLink", "Token", "Job", "Process",
+                "Thread", "Event", "Mutant", "Semaphore", "Timer", "KeyedEvent",
+                "WindowStation", "Desktop", "Section", "Key", "Port", "WaitablePort",
+                "Adapter", "Controller", "Device", "Driver", "IoCompletion", "File",
+                "TpWorkerFactory", "DebugObject"
+            ];
+
+            // Calculate required size
+            let header_size = core::mem::size_of::<ObjectTypesInformation>();
+            let mut total_size = header_size;
+
+            for type_name in KNOWN_TYPES {
+                let name_size = (type_name.len() + 1) * 2;
+                let aligned_entry = (core::mem::size_of::<ObjectTypeInformation>() + name_size + 7) & !7;
+                total_size += aligned_entry;
+            }
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut u32) = total_size as u32; }
+            }
+
+            if object_information == 0 {
+                // Just querying size
+                STATUS_SUCCESS
+            } else if object_information_length < total_size {
+                STATUS_INFO_LENGTH_MISMATCH
+            } else {
+                unsafe {
+                    let header = object_information as *mut ObjectTypesInformation;
+                    (*header).number_of_types = KNOWN_TYPES.len() as u32;
+
+                    let mut offset = header_size;
+
+                    for (idx, type_name) in KNOWN_TYPES.iter().enumerate() {
+                        let entry_ptr = (object_information + offset) as *mut ObjectTypeInformation;
+                        let name_bytes = type_name.as_bytes();
+                        let name_size = (name_bytes.len() + 1) * 2;
+                        let buffer_ptr = (entry_ptr as usize + core::mem::size_of::<ObjectTypeInformation>()) as *mut u16;
+
+                        (*entry_ptr).type_name.length = (name_bytes.len() * 2) as u16;
+                        (*entry_ptr).type_name.maximum_length = name_size as u16;
+                        (*entry_ptr).type_name.buffer = buffer_ptr as u64;
+
+                        (*entry_ptr).total_number_of_objects = 0;
+                        (*entry_ptr).total_number_of_handles = 0;
+                        (*entry_ptr).total_paged_pool_usage = 0;
+                        (*entry_ptr).total_non_paged_pool_usage = 0;
+                        (*entry_ptr).total_name_pool_usage = 0;
+                        (*entry_ptr).total_handle_table_usage = 0;
+                        (*entry_ptr).high_water_number_of_objects = 0;
+                        (*entry_ptr).high_water_number_of_handles = 0;
+                        (*entry_ptr).high_water_paged_pool_usage = 0;
+                        (*entry_ptr).high_water_non_paged_pool_usage = 0;
+                        (*entry_ptr).high_water_name_pool_usage = 0;
+                        (*entry_ptr).high_water_handle_table_usage = 0;
+                        (*entry_ptr).invalid_attributes = 0;
+                        (*entry_ptr).generic_mapping = GenericMapping {
+                            generic_read: 0x20001,
+                            generic_write: 0x20002,
+                            generic_execute: 0x20000,
+                            generic_all: 0x1F0003,
+                        };
+                        (*entry_ptr).valid_access_mask = 0x1F0003;
+                        (*entry_ptr).security_required = 0;
+                        (*entry_ptr).maintain_handle_count = 0;
+                        (*entry_ptr).type_index = (idx + 2) as u8; // Type indices start at 2
+                        (*entry_ptr).reserved_byte = 0;
+                        (*entry_ptr).pool_type = 0;
+                        (*entry_ptr).default_paged_pool_charge = 0;
+                        (*entry_ptr).default_non_paged_pool_charge = 256;
+
+                        // Write type name
+                        for (i, &byte) in name_bytes.iter().enumerate() {
+                            *buffer_ptr.add(i) = byte as u16;
+                        }
+                        *buffer_ptr.add(name_bytes.len()) = 0;
+
+                        let aligned_entry = (core::mem::size_of::<ObjectTypeInformation>() + name_size + 7) & !7;
+                        offset += aligned_entry;
+                    }
+                }
+
+                crate::serial_println!("[SYSCALL] NtQueryObject: returned ObjectTypesInformation ({} types)", KNOWN_TYPES.len());
+                STATUS_SUCCESS
+            }
+        }
+
+        object_info_class::ObjectSessionInformation => {
+            // Returns session ID for the object
+            let required = core::mem::size_of::<u32>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut u32) = required as u32; }
+            }
+
+            if object_information == 0 {
+                STATUS_INVALID_PARAMETER
+            } else if object_information_length < required {
+                STATUS_INFO_LENGTH_MISMATCH
+            } else {
+                unsafe {
+                    let session_id = object_information as *mut u32;
+                    *session_id = 0; // Session 0 (console session)
+                }
+                STATUS_SUCCESS
+            }
+        }
+
+        _ => {
+            crate::serial_println!("[SYSCALL] NtQueryObject: unknown info class {}", info_class);
+            STATUS_INVALID_INFO_CLASS
+        }
+    };
+
+    // Dereference object if we referenced it
+    if !ob_object.is_null() {
+        unsafe { crate::ob::ob_dereference_object(ob_object); }
+    }
+
+    result
+}
+
+/// Get object name based on handle type
+fn get_object_name(_handle: usize, handle_type: HandleType) -> &'static str {
+    match handle_type {
+        HandleType::File => "\\Device\\HarddiskVolume1\\",
+        HandleType::Event => "\\BaseNamedObjects\\Event",
+        HandleType::Semaphore => "\\BaseNamedObjects\\Semaphore",
+        HandleType::Mutex => "\\BaseNamedObjects\\Mutant",
+        HandleType::Section => "\\BaseNamedObjects\\Section",
+        HandleType::Key => "\\REGISTRY\\MACHINE",
+        HandleType::Port => "\\Windows\\ApiPort",
+        HandleType::Thread => "",
+        HandleType::Process => "",
+        HandleType::Token => "",
+        HandleType::Debug => "\\BaseNamedObjects\\Debug",
+        HandleType::IoCompletion => "\\BaseNamedObjects\\IoCompletion",
+        _ => "",
+    }
+}
+
+/// Get type name for object
+fn get_type_name(handle_type: HandleType, _ob_object: *mut u8) -> &'static str {
+    match handle_type {
+        HandleType::File => "File",
+        HandleType::Event => "Event",
+        HandleType::Semaphore => "Semaphore",
+        HandleType::Mutex => "Mutant",
+        HandleType::Section => "Section",
+        HandleType::Key => "Key",
+        HandleType::Port => "Port",
+        HandleType::Thread => "Thread",
+        HandleType::Process => "Process",
+        HandleType::Token => "Token",
+        HandleType::Debug => "DebugObject",
+        HandleType::IoCompletion => "IoCompletion",
+        HandleType::Timer => "Timer",
+        HandleType::None => "Unknown",
+    }
+}
+
+/// Get access mask for handle based on type
+fn get_handle_access_mask(_handle: usize, handle_type: HandleType) -> u32 {
+    match handle_type {
+        HandleType::File => 0x0012019F, // FILE_ALL_ACCESS
+        HandleType::Event => 0x001F0003, // EVENT_ALL_ACCESS
+        HandleType::Semaphore => 0x001F0003, // SEMAPHORE_ALL_ACCESS
+        HandleType::Mutex => 0x001F0001, // MUTANT_ALL_ACCESS
+        HandleType::Section => 0x000F001F, // SECTION_ALL_ACCESS
+        HandleType::Key => 0x000F003F, // KEY_ALL_ACCESS
+        HandleType::Port => 0x001F0001, // PORT_ALL_ACCESS
+        HandleType::Thread => 0x001FFFFF, // THREAD_ALL_ACCESS
+        HandleType::Process => 0x001FFFFF, // PROCESS_ALL_ACCESS
+        HandleType::Token => 0x000F01FF, // TOKEN_ALL_ACCESS
+        HandleType::Debug => 0x001F000F, // DEBUG_ALL_ACCESS
+        HandleType::IoCompletion => 0x001F0003,
+        _ => 0x001F0001, // Generic all
+    }
+}
+
+/// Get generic mapping for type
+fn get_type_generic_mapping(handle_type: HandleType) -> GenericMapping {
+    match handle_type {
+        HandleType::File => GenericMapping {
+            generic_read: 0x00120089,
+            generic_write: 0x00120116,
+            generic_execute: 0x001200A0,
+            generic_all: 0x001F01FF,
+        },
+        HandleType::Process => GenericMapping {
+            generic_read: 0x00020410,
+            generic_write: 0x00020028,
+            generic_execute: 0x00120000,
+            generic_all: 0x001F0FFF,
+        },
+        HandleType::Thread => GenericMapping {
+            generic_read: 0x00020048,
+            generic_write: 0x00020037,
+            generic_execute: 0x00120000,
+            generic_all: 0x001F03FF,
+        },
+        _ => GenericMapping {
+            generic_read: 0x00020001,
+            generic_write: 0x00020002,
+            generic_execute: 0x00020000,
+            generic_all: 0x001F0003,
+        },
+    }
+}
+
+/// Get valid access mask for type
+fn get_type_valid_access(handle_type: HandleType) -> u32 {
+    match handle_type {
+        HandleType::File => 0x001F01FF,
+        HandleType::Event => 0x001F0003,
+        HandleType::Semaphore => 0x001F0003,
+        HandleType::Mutex => 0x001F0001,
+        HandleType::Section => 0x000F001F,
+        HandleType::Key => 0x000F003F,
+        HandleType::Process => 0x001FFFFF,
+        HandleType::Thread => 0x001FFFFF,
+        HandleType::Token => 0x000F01FF,
+        _ => 0x001F0003,
+    }
+}
+
+/// Get type index for handle type
+fn get_type_index(handle_type: HandleType) -> u8 {
+    match handle_type {
+        HandleType::Process => 7,
+        HandleType::Thread => 8,
+        HandleType::Event => 11,
+        HandleType::Mutex => 12,
+        HandleType::Semaphore => 13,
+        HandleType::Timer => 14,
+        HandleType::Section => 16,
+        HandleType::Key => 17,
+        HandleType::Port => 18,
+        HandleType::File => 25,
+        HandleType::Token => 5,
+        HandleType::Debug => 27,
+        HandleType::IoCompletion => 24,
+        _ => 0,
     }
 }
 
