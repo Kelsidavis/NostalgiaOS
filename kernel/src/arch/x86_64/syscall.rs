@@ -4756,8 +4756,113 @@ fn sys_open_process(
     }
 }
 
-/// Process information class
+/// Process information class constants for query operations
+#[allow(non_snake_case, non_upper_case_globals)]
 pub mod process_info_class {
+    /// Basic process information (exit status, PEB, affinity, priority, IDs)
+    pub const ProcessBasicInformation: u32 = 0;
+    /// Quota limits (working set, paged/nonpaged pool)
+    pub const ProcessQuotaLimits: u32 = 1;
+    /// I/O counters (reads, writes, other operations)
+    pub const ProcessIoCounters: u32 = 2;
+    /// VM counters (virtual memory statistics)
+    pub const ProcessVmCounters: u32 = 3;
+    /// Process times (creation, exit, kernel, user)
+    pub const ProcessTimes: u32 = 4;
+    /// Base priority
+    pub const ProcessBasePriority: u32 = 5;
+    /// Raise priority
+    pub const ProcessRaisePriority: u32 = 6;
+    /// Debug port
+    pub const ProcessDebugPort: u32 = 7;
+    /// Exception port
+    pub const ProcessExceptionPort: u32 = 8;
+    /// Access token
+    pub const ProcessAccessToken: u32 = 9;
+    /// LDT information
+    pub const ProcessLdtInformation: u32 = 10;
+    /// LDT size
+    pub const ProcessLdtSize: u32 = 11;
+    /// Default hard error mode
+    pub const ProcessDefaultHardErrorMode: u32 = 12;
+    /// I/O port handlers
+    pub const ProcessIoPortHandlers: u32 = 13;
+    /// Pooled usage and limits
+    pub const ProcessPooledUsageAndLimits: u32 = 14;
+    /// Working set watch
+    pub const ProcessWorkingSetWatch: u32 = 15;
+    /// User mode IOPLs
+    pub const ProcessUserModeIOPL: u32 = 16;
+    /// Enable alignment fault fixup
+    pub const ProcessEnableAlignmentFaultFixup: u32 = 17;
+    /// Priority class
+    pub const ProcessPriorityClass: u32 = 18;
+    /// WX86 information
+    pub const ProcessWx86Information: u32 = 19;
+    /// Handle count
+    pub const ProcessHandleCount: u32 = 20;
+    /// Affinity mask
+    pub const ProcessAffinityMask: u32 = 21;
+    /// Priority boost
+    pub const ProcessPriorityBoost: u32 = 22;
+    /// Device map
+    pub const ProcessDeviceMap: u32 = 23;
+    /// Session information
+    pub const ProcessSessionInformation: u32 = 24;
+    /// Foreground information
+    pub const ProcessForegroundInformation: u32 = 25;
+    /// WOW64 information
+    pub const ProcessWow64Information: u32 = 26;
+    /// Image file name
+    pub const ProcessImageFileName: u32 = 27;
+    /// LUIDs for device maps
+    pub const ProcessLUIDDeviceMapsEnabled: u32 = 28;
+    /// Break on termination
+    pub const ProcessBreakOnTermination: u32 = 29;
+    /// Debug object handle
+    pub const ProcessDebugObjectHandle: u32 = 30;
+    /// Debug flags
+    pub const ProcessDebugFlags: u32 = 31;
+    /// Handle tracing
+    pub const ProcessHandleTracing: u32 = 32;
+    /// I/O priority
+    pub const ProcessIoPriority: u32 = 33;
+    /// Execute flags (DEP)
+    pub const ProcessExecuteFlags: u32 = 34;
+    /// TLS information
+    pub const ProcessTlsInformation: u32 = 35;
+    /// Cookie
+    pub const ProcessCookie: u32 = 36;
+    /// Image information
+    pub const ProcessImageInformation: u32 = 37;
+    /// Cycle time
+    pub const ProcessCycleTime: u32 = 38;
+    /// Page priority
+    pub const ProcessPagePriority: u32 = 39;
+    /// Instrumentation callback
+    pub const ProcessInstrumentationCallback: u32 = 40;
+    /// Thread stack allocation
+    pub const ProcessThreadStackAllocation: u32 = 41;
+    /// Working set watch extended
+    pub const ProcessWorkingSetWatchEx: u32 = 42;
+    /// Image file name (Win32)
+    pub const ProcessImageFileNameWin32: u32 = 43;
+    /// Image file mapping
+    pub const ProcessImageFileMapping: u32 = 44;
+    /// Affinity update mode
+    pub const ProcessAffinityUpdateMode: u32 = 45;
+    /// Memory allocation mode
+    pub const ProcessMemoryAllocationMode: u32 = 46;
+    /// Group information
+    pub const ProcessGroupInformation: u32 = 47;
+    /// Token virtualization enabled
+    pub const ProcessTokenVirtualizationEnabled: u32 = 48;
+    /// Console host process
+    pub const ProcessConsoleHostProcess: u32 = 49;
+    /// Window information
+    pub const ProcessWindowInformation: u32 = 50;
+
+    // Legacy uppercase names for compatibility
     pub const PROCESS_BASIC_INFORMATION: u32 = 0;
     pub const PROCESS_QUOTA_LIMITS: u32 = 1;
     pub const PROCESS_IO_COUNTERS: u32 = 2;
@@ -4769,18 +4874,193 @@ pub mod process_info_class {
     pub const PROCESS_IMAGE_FILE_NAME: u32 = 27;
 }
 
-/// PROCESS_BASIC_INFORMATION structure
+/// PROCESS_BASIC_INFORMATION structure (class 0)
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct ProcessBasicInformation {
+    /// Exit status (STATUS_PENDING if running)
     pub exit_status: i32,
+    /// Pointer to Process Environment Block
     pub peb_base_address: u64,
+    /// CPU affinity mask
     pub affinity_mask: u64,
+    /// Base scheduling priority
     pub base_priority: i32,
+    /// Process ID
     pub unique_process_id: u32,
+    /// Parent process ID
     pub inherited_from_unique_process_id: u32,
 }
 
+/// QUOTA_LIMITS structure (class 1)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct QuotaLimits {
+    /// Paged pool quota
+    pub paged_pool_limit: u64,
+    /// Non-paged pool quota
+    pub non_paged_pool_limit: u64,
+    /// Minimum working set size
+    pub minimum_working_set_size: u64,
+    /// Maximum working set size
+    pub maximum_working_set_size: u64,
+    /// Pagefile quota
+    pub pagefile_limit: u64,
+    /// Time limit
+    pub time_limit: i64,
+}
+
+/// IO_COUNTERS structure (class 2)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct IoCounters {
+    /// Read operations count
+    pub read_operation_count: u64,
+    /// Write operations count
+    pub write_operation_count: u64,
+    /// Other operations count
+    pub other_operation_count: u64,
+    /// Bytes read
+    pub read_transfer_count: u64,
+    /// Bytes written
+    pub write_transfer_count: u64,
+    /// Other bytes transferred
+    pub other_transfer_count: u64,
+}
+
+/// VM_COUNTERS structure (class 3)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct VmCounters {
+    /// Peak virtual size
+    pub peak_virtual_size: u64,
+    /// Current virtual size
+    pub virtual_size: u64,
+    /// Page fault count
+    pub page_fault_count: u32,
+    /// Peak working set size
+    pub peak_working_set_size: u64,
+    /// Current working set size
+    pub working_set_size: u64,
+    /// Quota peak paged pool usage
+    pub quota_peak_paged_pool_usage: u64,
+    /// Quota paged pool usage
+    pub quota_paged_pool_usage: u64,
+    /// Quota peak nonpaged pool usage
+    pub quota_peak_non_paged_pool_usage: u64,
+    /// Quota nonpaged pool usage
+    pub quota_non_paged_pool_usage: u64,
+    /// Pagefile usage
+    pub pagefile_usage: u64,
+    /// Peak pagefile usage
+    pub peak_pagefile_usage: u64,
+}
+
+/// KERNEL_USER_TIMES structure for processes (class 4)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessTimes {
+    /// Creation time (100-nanosecond intervals since 1601)
+    pub create_time: i64,
+    /// Exit time (0 if still running)
+    pub exit_time: i64,
+    /// Time spent in kernel mode
+    pub kernel_time: i64,
+    /// Time spent in user mode
+    pub user_time: i64,
+}
+
+/// Process priority class structure (class 18)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessPriorityClassInfo {
+    /// Whether process is in foreground
+    pub foreground: u8,
+    /// Priority class value
+    pub priority_class: u8,
+}
+
+/// Process session information (class 24)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessSessionInfo {
+    /// Session ID
+    pub session_id: u32,
+}
+
+/// Process cycle time information (class 38)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessCycleTimeInfo {
+    /// Accumulated cycle time
+    pub accumulated_cycles: u64,
+    /// Current cycle count
+    pub current_cycle_count: u64,
+}
+
+/// Process handle information (class 20 extended)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessHandleInfo {
+    /// Number of handles
+    pub handle_count: u32,
+}
+
+/// Process WOW64 information (class 26)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessWow64Info {
+    /// WOW64 PEB address (0 if native)
+    pub wow64_peb: u64,
+}
+
+/// Section image information (class 37)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct SectionImageInformation {
+    /// Transfer address (entry point)
+    pub transfer_address: u64,
+    /// Zero bits
+    pub zero_bits: u32,
+    /// Maximum stack size
+    pub maximum_stack_size: u64,
+    /// Committed stack size
+    pub committed_stack_size: u64,
+    /// Subsystem type
+    pub subsystem_type: u32,
+    /// Subsystem version (minor << 16 | major)
+    pub subsystem_version_low: u16,
+    pub subsystem_version_high: u16,
+    /// GpValue
+    pub gp_value: u32,
+    /// Image characteristics
+    pub image_characteristics: u16,
+    /// DLL characteristics
+    pub dll_characteristics: u16,
+    /// Machine type
+    pub machine: u16,
+    /// Image contains code
+    pub image_contains_code: u8,
+    /// Image flags
+    pub image_flags: u8,
+    /// Loader flags
+    pub loader_flags: u32,
+    /// Image file size
+    pub image_file_size: u32,
+    /// Checksum
+    pub checksum: u32,
+}
+
 /// NtQueryInformationProcess - Query process information
+///
+/// Retrieves information about a process based on the specified information class.
+///
+/// # Arguments
+/// * `process_handle` - Handle to the process (0xFFFFFFFF = current process)
+/// * `process_information_class` - Type of information to query
+/// * `process_information` - Buffer to receive the information
+/// * `process_information_length` - Size of the buffer
+/// * `return_length` - Optional pointer to receive actual size needed
 fn sys_query_information_process(
     process_handle: usize,
     process_information_class: usize,
@@ -4789,25 +5069,53 @@ fn sys_query_information_process(
     return_length: usize,
     _: usize,
 ) -> isize {
-    if process_handle == 0 || process_information == 0 {
-        return -1;
+    const STATUS_SUCCESS: isize = 0;
+    const STATUS_INVALID_HANDLE: isize = 0xC0000008u32 as isize;
+    const STATUS_INFO_LENGTH_MISMATCH: isize = 0xC0000004u32 as isize;
+    const STATUS_INVALID_INFO_CLASS: isize = 0xC0000003u32 as isize;
+    const STATUS_PENDING: i32 = 0x103;
+
+    // Validate buffer pointer
+    if process_information == 0 {
+        return STATUS_INVALID_HANDLE;
     }
 
-    // Special handle -1 means current process
-    let pid = if process_handle == usize::MAX {
-        4 // System process for now
+    // Get process ID from handle
+    // Special handle -1 (0xFFFFFFFF) means current process
+    let pid = if process_handle == usize::MAX || process_handle == 0xFFFFFFFF {
+        // Get current process ID
+        unsafe {
+            let prcb = crate::ke::prcb::get_current_prcb();
+            if !prcb.current_thread.is_null() {
+                let thread = prcb.current_thread as *mut crate::ps::EThread;
+                if !(*thread).thread_process.is_null() {
+                    (*(*thread).thread_process).unique_process_id
+                } else {
+                    4 // System process fallback
+                }
+            } else {
+                4 // System process fallback
+            }
+        }
+    } else if process_handle == 0 {
+        return STATUS_INVALID_HANDLE;
     } else {
         match unsafe { get_process_id(process_handle) } {
             Some(p) => p,
-            None => return -1,
+            None => return STATUS_INVALID_HANDLE,
         }
     };
+
+    // Look up process structure
+    let process = unsafe { crate::ps::cid::ps_lookup_process_by_id(pid) };
+    let eprocess = process as *mut crate::ps::EProcess;
 
     crate::serial_println!("[SYSCALL] NtQueryInformationProcess(pid={}, class={})",
         pid, process_information_class);
 
     match process_information_class as u32 {
-        process_info_class::PROCESS_BASIC_INFORMATION => {
+        // Class 0: ProcessBasicInformation
+        process_info_class::ProcessBasicInformation => {
             let required = core::mem::size_of::<ProcessBasicInformation>();
 
             if return_length != 0 {
@@ -4815,49 +5123,585 @@ fn sys_query_information_process(
             }
 
             if process_information_length < required {
-                return 0x80000005u32 as isize;
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
-
-            // Look up process
-            let process = unsafe { crate::ps::cid::ps_lookup_process_by_id(pid) };
 
             unsafe {
                 let info = process_information as *mut ProcessBasicInformation;
-                (*info).exit_status = 0x103; // STATUS_PENDING (still running)
-                (*info).peb_base_address = 0;
-                (*info).affinity_mask = 1;
-                (*info).base_priority = 8;
-                (*info).unique_process_id = pid;
-                (*info).inherited_from_unique_process_id = if !process.is_null() {
-                    let p = process as *mut crate::ps::EProcess;
-                    (*p).inherited_from_unique_process_id
+                if !eprocess.is_null() {
+                    let p = &*eprocess;
+                    (*info).exit_status = if p.exit_time > 0 { p.exit_status } else { STATUS_PENDING };
+                    (*info).peb_base_address = p.peb as u64;
+                    (*info).affinity_mask = 1; // Single processor
+                    (*info).base_priority = p.pcb.base_priority as i32;
+                    (*info).unique_process_id = p.unique_process_id;
+                    (*info).inherited_from_unique_process_id = p.inherited_from_unique_process_id;
+                } else {
+                    (*info).exit_status = STATUS_PENDING;
+                    (*info).peb_base_address = 0;
+                    (*info).affinity_mask = 1;
+                    (*info).base_priority = 8;
+                    (*info).unique_process_id = pid;
+                    (*info).inherited_from_unique_process_id = 0;
+                }
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 1: ProcessQuotaLimits
+        process_info_class::ProcessQuotaLimits => {
+            let required = core::mem::size_of::<QuotaLimits>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = process_information as *mut QuotaLimits;
+                // Default quota limits
+                (*info).paged_pool_limit = 0x20000000; // 512MB
+                (*info).non_paged_pool_limit = 0x10000000; // 256MB
+                (*info).minimum_working_set_size = 200 * 4096; // 200 pages
+                (*info).maximum_working_set_size = 45000 * 4096; // 45000 pages
+                (*info).pagefile_limit = 0xFFFFFFFF; // Unlimited
+                (*info).time_limit = -1; // No limit
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 2: ProcessIoCounters
+        process_info_class::ProcessIoCounters => {
+            let required = core::mem::size_of::<IoCounters>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = process_information as *mut IoCounters;
+                // We don't track I/O yet, return zeros
+                (*info).read_operation_count = 0;
+                (*info).write_operation_count = 0;
+                (*info).other_operation_count = 0;
+                (*info).read_transfer_count = 0;
+                (*info).write_transfer_count = 0;
+                (*info).other_transfer_count = 0;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 3: ProcessVmCounters
+        process_info_class::ProcessVmCounters => {
+            let required = core::mem::size_of::<VmCounters>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = process_information as *mut VmCounters;
+                if !eprocess.is_null() {
+                    let p = &*eprocess;
+                    (*info).peak_virtual_size = p.peak_virtual_size;
+                    (*info).virtual_size = p.virtual_size;
+                    (*info).page_fault_count = 0;
+                    (*info).peak_working_set_size = p.peak_working_set_size;
+                    (*info).working_set_size = p.working_set_size;
+                    (*info).quota_peak_paged_pool_usage = p.quota_paged_pool_usage;
+                    (*info).quota_paged_pool_usage = p.quota_paged_pool_usage;
+                    (*info).quota_peak_non_paged_pool_usage = p.quota_non_paged_pool_usage;
+                    (*info).quota_non_paged_pool_usage = p.quota_non_paged_pool_usage;
+                    (*info).pagefile_usage = 0;
+                    (*info).peak_pagefile_usage = 0;
+                } else {
+                    core::ptr::write_bytes(info, 0, 1);
+                }
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 4: ProcessTimes
+        process_info_class::ProcessTimes => {
+            let required = core::mem::size_of::<ProcessTimes>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = process_information as *mut ProcessTimes;
+                if !eprocess.is_null() {
+                    let p = &*eprocess;
+                    // Convert ticks to 100-nanosecond intervals
+                    (*info).create_time = (p.create_time as i64) * 10000;
+                    (*info).exit_time = if p.exit_time > 0 { (p.exit_time as i64) * 10000 } else { 0 };
+                    // Estimate kernel/user time
+                    let total_time = crate::hal::apic::get_tick_count().saturating_sub(p.create_time);
+                    (*info).kernel_time = (total_time as i64) * 10000;
+                    (*info).user_time = 0;
+                } else {
+                    (*info).create_time = 0;
+                    (*info).exit_time = 0;
+                    (*info).kernel_time = 0;
+                    (*info).user_time = 0;
+                }
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 5: ProcessBasePriority
+        process_info_class::ProcessBasePriority => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let base_priority = if !eprocess.is_null() {
+                    (*eprocess).pcb.base_priority as i32
+                } else {
+                    8
+                };
+                *(process_information as *mut i32) = base_priority;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 7: ProcessDebugPort
+        process_info_class::ProcessDebugPort => {
+            let required = 8usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let debug_port = if !eprocess.is_null() {
+                    (*eprocess).debug_port as u64
+                } else {
+                    0
+                };
+                *(process_information as *mut u64) = debug_port;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 18: ProcessPriorityClass
+        process_info_class::ProcessPriorityClass => {
+            let required = core::mem::size_of::<ProcessPriorityClassInfo>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = process_information as *mut ProcessPriorityClassInfo;
+                if !eprocess.is_null() {
+                    let priority = (*eprocess).pcb.base_priority;
+                    (*info).foreground = 0;
+                    // Map base priority to priority class
+                    (*info).priority_class = match priority {
+                        0..=4 => 1,   // IDLE
+                        5..=6 => 5,   // BELOW_NORMAL
+                        7..=8 => 2,   // NORMAL
+                        9..=10 => 3,  // ABOVE_NORMAL
+                        11..=15 => 4, // HIGH
+                        _ => 6,       // REALTIME
+                    };
+                } else {
+                    (*info).foreground = 0;
+                    (*info).priority_class = 2; // NORMAL
+                }
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 20: ProcessHandleCount
+        process_info_class::ProcessHandleCount => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Get actual handle count if we have an object table
+                let count = if !eprocess.is_null() && !(*eprocess).object_table.is_null() {
+                    (*(*eprocess).object_table).count()
+                } else {
+                    10 // Default handle count
+                };
+                *(process_information as *mut u32) = count;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 21: ProcessAffinityMask
+        process_info_class::ProcessAffinityMask => {
+            let required = 8usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Single processor affinity
+                *(process_information as *mut u64) = 1;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 22: ProcessPriorityBoost
+        process_info_class::ProcessPriorityBoost => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Priority boost not disabled
+                *(process_information as *mut u32) = 0;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 24: ProcessSessionInformation
+        process_info_class::ProcessSessionInformation => {
+            let required = core::mem::size_of::<ProcessSessionInfo>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = process_information as *mut ProcessSessionInfo;
+                (*info).session_id = if !eprocess.is_null() {
+                    (*eprocess).session_id
                 } else {
                     0
                 };
             }
 
-            0
+            STATUS_SUCCESS
         }
-        process_info_class::PROCESS_HANDLE_COUNT => {
+
+        // Class 26: ProcessWow64Information
+        process_info_class::ProcessWow64Information => {
+            let required = core::mem::size_of::<ProcessWow64Info>();
+
             if return_length != 0 {
-                unsafe { *(return_length as *mut usize) = 4; }
+                unsafe { *(return_length as *mut usize) = required; }
             }
 
-            if process_information_length < 4 {
-                return 0x80000005u32 as isize;
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
             }
 
-            // Return a dummy handle count
             unsafe {
-                *(process_information as *mut u32) = 10;
+                let info = process_information as *mut ProcessWow64Info;
+                // Native 64-bit process, no WOW64
+                (*info).wow64_peb = 0;
             }
 
-            0
+            STATUS_SUCCESS
         }
+
+        // Class 27: ProcessImageFileName
+        process_info_class::ProcessImageFileName => {
+            // Returns UNICODE_STRING with image name
+            // For now, return a fixed size response
+            let required = 520usize; // Max path in UNICODE_STRING format
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < 8 {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Write UNICODE_STRING header
+                let length: u16 = if !eprocess.is_null() {
+                    let mut len = 0u16;
+                    for &c in &(*eprocess).image_file_name {
+                        if c == 0 { break; }
+                        len += 2; // UTF-16
+                    }
+                    len
+                } else {
+                    0
+                };
+
+                let ptr = process_information as *mut u8;
+                *(ptr as *mut u16) = length; // Length
+                *(ptr.add(2) as *mut u16) = length + 2; // MaximumLength
+                *(ptr.add(8) as *mut u64) = if length > 0 {
+                    process_information as u64 + 16
+                } else {
+                    0
+                };
+
+                // Copy name as UTF-16 if we have space
+                if process_information_length >= 16 + length as usize && !eprocess.is_null() {
+                    let name_ptr = ptr.add(16) as *mut u16;
+                    for (i, &c) in (*eprocess).image_file_name.iter().enumerate() {
+                        if c == 0 { break; }
+                        *name_ptr.add(i) = c as u16;
+                    }
+                }
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 29: ProcessBreakOnTermination
+        process_info_class::ProcessBreakOnTermination => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Not a critical process
+                *(process_information as *mut u32) = 0;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 31: ProcessDebugFlags
+        process_info_class::ProcessDebugFlags => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Debug inherit flag (1 = no inherit)
+                let has_debug_port = if !eprocess.is_null() {
+                    !(*eprocess).debug_port.is_null()
+                } else {
+                    false
+                };
+                *(process_information as *mut u32) = if has_debug_port { 0 } else { 1 };
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 33: ProcessIoPriority
+        process_info_class::ProcessIoPriority => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Default I/O priority (Normal = 2)
+                *(process_information as *mut u32) = 2;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 34: ProcessExecuteFlags
+        process_info_class::ProcessExecuteFlags => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // DEP enabled (MEM_EXECUTE_OPTION_ENABLE = 2)
+                *(process_information as *mut u32) = 2;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 36: ProcessCookie
+        process_info_class::ProcessCookie => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Generate a simple cookie based on process ID
+                let cookie = (pid as u64).wrapping_mul(0x5DEECE66D).wrapping_add(0xB) as u32;
+                *(process_information as *mut u32) = cookie;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 37: ProcessImageInformation
+        process_info_class::ProcessImageInformation => {
+            let required = core::mem::size_of::<SectionImageInformation>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = process_information as *mut SectionImageInformation;
+                // Default values for a 64-bit Windows executable
+                (*info).transfer_address = 0;
+                (*info).zero_bits = 0;
+                (*info).maximum_stack_size = 0x100000; // 1MB
+                (*info).committed_stack_size = 0x1000; // 4KB
+                (*info).subsystem_type = 3; // IMAGE_SUBSYSTEM_WINDOWS_CUI
+                (*info).subsystem_version_low = 0;
+                (*info).subsystem_version_high = 6; // Windows 6.x
+                (*info).gp_value = 0;
+                (*info).image_characteristics = 0x22; // EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE
+                (*info).dll_characteristics = 0;
+                (*info).machine = 0x8664; // AMD64
+                (*info).image_contains_code = 1;
+                (*info).image_flags = 0;
+                (*info).loader_flags = 0;
+                (*info).image_file_size = 0;
+                (*info).checksum = 0;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 38: ProcessCycleTime
+        process_info_class::ProcessCycleTime => {
+            let required = core::mem::size_of::<ProcessCycleTimeInfo>();
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let info = process_information as *mut ProcessCycleTimeInfo;
+                // Read current TSC
+                let tsc: u64;
+                core::arch::asm!("rdtsc", "shl rdx, 32", "or rax, rdx", out("rax") tsc, out("rdx") _);
+                (*info).accumulated_cycles = tsc;
+                (*info).current_cycle_count = tsc;
+            }
+
+            STATUS_SUCCESS
+        }
+
+        // Class 39: ProcessPagePriority
+        process_info_class::ProcessPagePriority => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                // Default page priority (5 = normal)
+                *(process_information as *mut u32) = 5;
+            }
+
+            STATUS_SUCCESS
+        }
+
         _ => {
             crate::serial_println!("[SYSCALL] NtQueryInformationProcess: unsupported class {}",
                 process_information_class);
-            -1 // STATUS_INVALID_INFO_CLASS
+            STATUS_INVALID_INFO_CLASS
         }
     }
 }
