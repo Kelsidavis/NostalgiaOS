@@ -5538,18 +5538,130 @@ fn sys_adjust_privileges_token(
 // NtSetInformation Syscalls
 // ============================================================================
 
+// ============================================================================
+// NtSetInformationProcess Types and Structures
+// ============================================================================
+
 /// Process information classes for Set operations
-pub mod set_process_info_class {
-    pub const PROCESS_PRIORITY_CLASS: u32 = 18;
-    pub const PROCESS_AFFINITY_MASK: u32 = 21;
-    pub const PROCESS_RAISE_PRIORITY: u32 = 23;
-    pub const PROCESS_EXCEPTION_PORT: u32 = 8;
-    pub const PROCESS_ACCESS_TOKEN: u32 = 9;
-    pub const PROCESS_BREAK_ON_TERMINATION: u32 = 29;
-    pub const PROCESS_HANDLE_TRACING: u32 = 32;
+#[allow(non_snake_case, non_upper_case_globals)]
+pub mod ProcessInfoClassSet {
+    /// Basic limit information (working set, priority)
+    pub const ProcessBasicInformation: u32 = 0;
+    /// Set quota limits
+    pub const ProcessQuotaLimits: u32 = 1;
+    /// Set I/O counters (usually read-only)
+    pub const ProcessIoCounters: u32 = 2;
+    /// Set VM counters (usually read-only)
+    pub const ProcessVmCounters: u32 = 3;
+    /// Set process times (usually read-only)
+    pub const ProcessTimes: u32 = 4;
+    /// Set base priority for the process
+    pub const ProcessBasePriority: u32 = 5;
+    /// Raise priority (temporary boost)
+    pub const ProcessRaisePriority: u32 = 6;
+    /// Set debug port
+    pub const ProcessDebugPort: u32 = 7;
+    /// Set exception port
+    pub const ProcessExceptionPort: u32 = 8;
+    /// Set access token
+    pub const ProcessAccessToken: u32 = 9;
+    /// Set LDT information
+    pub const ProcessLdtInformation: u32 = 10;
+    /// Set LDT size
+    pub const ProcessLdtSize: u32 = 11;
+    /// Set default hard error mode
+    pub const ProcessDefaultHardErrorMode: u32 = 12;
+    /// Set I/O port handlers (VDM)
+    pub const ProcessIoPortHandlers: u32 = 13;
+    /// Set foreground information
+    pub const ProcessForegroundInformation: u32 = 15;
+    /// Set process priority class
+    pub const ProcessPriorityClass: u32 = 18;
+    /// Set Wx86 information
+    pub const ProcessWx86Information: u32 = 19;
+    /// Set handle count (read-only typically)
+    pub const ProcessHandleCount: u32 = 20;
+    /// Set affinity mask
+    pub const ProcessAffinityMask: u32 = 21;
+    /// Set priority boost disable
+    pub const ProcessPriorityBoost: u32 = 22;
+    /// Set session ID
+    pub const ProcessSessionInformation: u32 = 24;
+    /// Set DEP policy
+    pub const ProcessExecuteFlags: u32 = 34;
+    /// Set break on termination flag
+    pub const ProcessBreakOnTermination: u32 = 29;
+    /// Set instrumentation callback
+    pub const ProcessInstrumentationCallback: u32 = 40;
+}
+
+/// PROCESS_PRIORITY_CLASS structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessPriorityClass {
+    /// Set to TRUE to enable foreground boost
+    pub foreground: u8,
+    /// Priority class value
+    pub priority_class: u8,
+}
+
+/// Priority class values
+#[allow(non_snake_case)]
+pub mod PriorityClass {
+    pub const IDLE_PRIORITY_CLASS: u8 = 1;
+    pub const BELOW_NORMAL_PRIORITY_CLASS: u8 = 5;
+    pub const NORMAL_PRIORITY_CLASS: u8 = 2;
+    pub const ABOVE_NORMAL_PRIORITY_CLASS: u8 = 3;
+    pub const HIGH_PRIORITY_CLASS: u8 = 4;
+    pub const REALTIME_PRIORITY_CLASS: u8 = 6;
+}
+
+/// Base priority for each priority class
+fn priority_class_to_base_priority(class: u8) -> i8 {
+    match class {
+        PriorityClass::IDLE_PRIORITY_CLASS => 4,
+        PriorityClass::BELOW_NORMAL_PRIORITY_CLASS => 6,
+        PriorityClass::NORMAL_PRIORITY_CLASS => 8,
+        PriorityClass::ABOVE_NORMAL_PRIORITY_CLASS => 10,
+        PriorityClass::HIGH_PRIORITY_CLASS => 13,
+        PriorityClass::REALTIME_PRIORITY_CLASS => 24,
+        _ => 8, // Default to normal
+    }
+}
+
+/// PROCESS_ACCESS_TOKEN structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessAccessToken {
+    /// Handle to the token
+    pub token: usize,
+    /// Thread to impersonate (optional)
+    pub thread: usize,
+}
+
+/// PROCESS_SESSION_INFORMATION structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessSessionInformation {
+    /// Session ID
+    pub session_id: u32,
+}
+
+/// PROCESS_FOREGROUND_BACKGROUND structure
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ProcessForegroundBackground {
+    /// TRUE if foreground
+    pub foreground: u8,
 }
 
 /// NtSetInformationProcess - Set process attributes
+///
+/// Parameters:
+/// - process_handle: Handle to the process (use -1 for current)
+/// - process_information_class: Type of information to set
+/// - process_information: Pointer to input data
+/// - process_information_length: Size of input data
 fn sys_set_information_process(
     process_handle: usize,
     process_information_class: usize,
@@ -5557,81 +5669,235 @@ fn sys_set_information_process(
     process_information_length: usize,
     _: usize, _: usize,
 ) -> isize {
-    let pid = if process_handle == 0xFFFFFFFF || process_handle == usize::MAX {
-        // Current process (System process = 4)
-        4u32
+    use crate::ps::EProcess;
+    use core::ptr;
+
+    crate::serial_println!("[SYSCALL] NtSetInformationProcess(handle={:#x}, class={}, buf={:#x}, len={})",
+        process_handle, process_information_class, process_information, process_information_length);
+
+    // Get the process
+    let process_ptr = if process_handle == 0xFFFFFFFF || process_handle == usize::MAX || process_handle == 0 {
+        // Current process - get system process for now
+        unsafe { crate::ps::ps_lookup_process_by_id(4) }
     } else {
+        // Look up by handle
         match unsafe { get_process_id(process_handle) } {
-            Some(p) => p,
-            None => return -1,
+            Some(pid) => unsafe { crate::ps::ps_lookup_process_by_id(pid) },
+            None => return 0xC0000008u32 as isize, // STATUS_INVALID_HANDLE
         }
     };
 
-    crate::serial_println!("[SYSCALL] NtSetInformationProcess(pid={}, class={})",
-        pid, process_information_class);
-
-    if process_information == 0 && process_information_length > 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+    if process_ptr.is_null() {
+        return 0xC0000008u32 as isize; // STATUS_INVALID_HANDLE
     }
 
-    match process_information_class as u32 {
-        set_process_info_class::PROCESS_PRIORITY_CLASS => {
-            if process_information_length < 2 {
-                return -1;
+    // Validate buffer
+    if process_information == 0 && process_information_length > 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    let process = unsafe { &mut *(process_ptr as *mut EProcess) };
+    let info_class = process_information_class as u32;
+
+    match info_class {
+        // ProcessBasePriority = 5
+        ProcessInfoClassSet::ProcessBasePriority => {
+            if process_information_length < core::mem::size_of::<i8>() {
+                return 0xC0000004u32 as isize; // STATUS_INFO_LENGTH_MISMATCH
             }
 
-            let priority_class = unsafe { *(process_information as *const u8) };
-            crate::serial_println!("[SYSCALL] SetInformationProcess: priority class = {}", priority_class);
+            let base_priority = unsafe { *(process_information as *const i8) };
 
-            // TODO: Actually set process priority class
-            // Would modify process->base_priority based on class
-            // Classes: Idle=4, BelowNormal=6, Normal=8, AboveNormal=10, High=13, Realtime=24
+            // Validate priority range (-15 to 15, or 16-31 for realtime)
+            if base_priority < -15 || base_priority > 31 {
+                return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+            }
+
+            process.pcb.base_priority = base_priority;
+            crate::serial_println!("[SYSCALL] SetInformationProcess: base priority = {}", base_priority);
 
             0
         }
-        set_process_info_class::PROCESS_AFFINITY_MASK => {
-            if process_information_length < 8 {
-                return -1;
+
+        // ProcessRaisePriority = 6
+        ProcessInfoClassSet::ProcessRaisePriority => {
+            if process_information_length < core::mem::size_of::<u32>() {
+                return 0xC0000004u32 as isize;
+            }
+
+            let increment = unsafe { *(process_information as *const u32) };
+
+            // Temporarily boost priority (doesn't persist)
+            let new_priority = (process.pcb.base_priority as i32 + increment as i32).min(15) as i8;
+            crate::serial_println!("[SYSCALL] SetInformationProcess: raise priority by {} -> {}",
+                increment, new_priority);
+
+            // In a real implementation, this would boost all threads temporarily
+            0
+        }
+
+        // ProcessExceptionPort = 8
+        ProcessInfoClassSet::ProcessExceptionPort => {
+            if process_information_length < core::mem::size_of::<usize>() {
+                return 0xC0000004u32 as isize;
+            }
+
+            let port_handle = unsafe { *(process_information as *const usize) };
+
+            // TODO: Validate port handle and store
+            process.exception_port = port_handle as *mut u8;
+            crate::serial_println!("[SYSCALL] SetInformationProcess: exception port = {:#x}", port_handle);
+
+            0
+        }
+
+        // ProcessAccessToken = 9
+        ProcessInfoClassSet::ProcessAccessToken => {
+            if process_information_length < core::mem::size_of::<ProcessAccessToken>() {
+                return 0xC0000004u32 as isize;
+            }
+
+            let token_info = unsafe { ptr::read(process_information as *const ProcessAccessToken) };
+
+            // TODO: Validate SeAssignPrimaryTokenPrivilege
+            // TODO: Validate token handle and assign
+            crate::serial_println!("[SYSCALL] SetInformationProcess: access token = {:#x}", token_info.token);
+
+            // For now, just store the token pointer (would need proper validation)
+            process.token = token_info.token as *mut u8;
+
+            0
+        }
+
+        // ProcessDefaultHardErrorMode = 12
+        ProcessInfoClassSet::ProcessDefaultHardErrorMode => {
+            if process_information_length < core::mem::size_of::<u32>() {
+                return 0xC0000004u32 as isize;
+            }
+
+            let error_mode = unsafe { *(process_information as *const u32) };
+            crate::serial_println!("[SYSCALL] SetInformationProcess: hard error mode = {:#x}", error_mode);
+
+            // TODO: Store in process structure
+            0
+        }
+
+        // ProcessPriorityClass = 18
+        ProcessInfoClassSet::ProcessPriorityClass => {
+            if process_information_length < core::mem::size_of::<ProcessPriorityClass>() {
+                return 0xC0000004u32 as isize;
+            }
+
+            let priority_info = unsafe { ptr::read(process_information as *const ProcessPriorityClass) };
+            let new_base_priority = priority_class_to_base_priority(priority_info.priority_class);
+
+            process.pcb.base_priority = new_base_priority;
+            crate::serial_println!("[SYSCALL] SetInformationProcess: priority class {} (foreground={}) -> base {}",
+                priority_info.priority_class, priority_info.foreground, new_base_priority);
+
+            0
+        }
+
+        // ProcessAffinityMask = 21
+        ProcessInfoClassSet::ProcessAffinityMask => {
+            if process_information_length < core::mem::size_of::<u64>() {
+                return 0xC0000004u32 as isize;
             }
 
             let affinity = unsafe { *(process_information as *const u64) };
-            crate::serial_println!("[SYSCALL] SetInformationProcess: affinity = {:#x}", affinity);
 
-            // TODO: Actually set process affinity mask
-            // Would update process->affinity_mask and propagate to threads
+            // Validate affinity (must have at least one processor)
+            if affinity == 0 {
+                return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+            }
+
+            process.pcb.affinity = affinity;
+            crate::serial_println!("[SYSCALL] SetInformationProcess: affinity mask = {:#x}", affinity);
+
+            // TODO: Update all threads in the process to respect new affinity
+            0
+        }
+
+        // ProcessPriorityBoost = 22
+        ProcessInfoClassSet::ProcessPriorityBoost => {
+            if process_information_length < core::mem::size_of::<u32>() {
+                return 0xC0000004u32 as isize;
+            }
+
+            let disable_boost = unsafe { *(process_information as *const u32) };
+            crate::serial_println!("[SYSCALL] SetInformationProcess: priority boost disabled = {}",
+                disable_boost != 0);
+
+            // TODO: Store boost disable flag in process
+            0
+        }
+
+        // ProcessSessionInformation = 24
+        ProcessInfoClassSet::ProcessSessionInformation => {
+            if process_information_length < core::mem::size_of::<ProcessSessionInformation>() {
+                return 0xC0000004u32 as isize;
+            }
+
+            let session_info = unsafe { ptr::read(process_information as *const ProcessSessionInformation) };
+
+            process.session_id = session_info.session_id;
+            crate::serial_println!("[SYSCALL] SetInformationProcess: session ID = {}", session_info.session_id);
 
             0
         }
-        set_process_info_class::PROCESS_BREAK_ON_TERMINATION => {
-            if process_information_length < 4 {
-                return -1;
+
+        // ProcessBreakOnTermination = 29
+        ProcessInfoClassSet::ProcessBreakOnTermination => {
+            if process_information_length < core::mem::size_of::<u32>() {
+                return 0xC0000004u32 as isize;
             }
 
             let break_on_term = unsafe { *(process_information as *const u32) };
+
+            // Set or clear the critical process flag
+            use crate::ps::eprocess::process_flags::PS_PROCESS_FLAGS_SYSTEM;
+            if break_on_term != 0 {
+                process.flags.fetch_or(PS_PROCESS_FLAGS_SYSTEM, core::sync::atomic::Ordering::SeqCst);
+            } else {
+                process.flags.fetch_and(!PS_PROCESS_FLAGS_SYSTEM, core::sync::atomic::Ordering::SeqCst);
+            }
+
             crate::serial_println!("[SYSCALL] SetInformationProcess: break on termination = {}",
                 break_on_term != 0);
 
-            // This is a critical process flag - would cause bugcheck if process terminates
-            // TODO: Store in process flags
+            0
+        }
+
+        // ProcessExecuteFlags = 34 (DEP settings)
+        ProcessInfoClassSet::ProcessExecuteFlags => {
+            if process_information_length < core::mem::size_of::<u32>() {
+                return 0xC0000004u32 as isize;
+            }
+
+            let execute_flags = unsafe { *(process_information as *const u32) };
+            crate::serial_println!("[SYSCALL] SetInformationProcess: execute flags (DEP) = {:#x}",
+                execute_flags);
+
+            // TODO: Store DEP flags in process
+            0
+        }
+
+        // ProcessDebugPort = 7
+        ProcessInfoClassSet::ProcessDebugPort => {
+            if process_information_length < core::mem::size_of::<usize>() {
+                return 0xC0000004u32 as isize;
+            }
+
+            let debug_port = unsafe { *(process_information as *const usize) };
+            process.debug_port = debug_port as *mut u8;
+            crate::serial_println!("[SYSCALL] SetInformationProcess: debug port = {:#x}", debug_port);
 
             0
         }
-        set_process_info_class::PROCESS_EXCEPTION_PORT => {
-            // Set the exception port for the process
-            crate::serial_println!("[SYSCALL] SetInformationProcess: exception port");
-            // TODO: Store port handle in process structure
-            0
-        }
-        set_process_info_class::PROCESS_ACCESS_TOKEN => {
-            // Change process token (requires SeAssignPrimaryTokenPrivilege)
-            crate::serial_println!("[SYSCALL] SetInformationProcess: access token");
-            // TODO: Validate privilege and assign new token
-            0
-        }
+
         _ => {
-            crate::serial_println!("[SYSCALL] NtSetInformationProcess: unsupported class {}",
-                process_information_class);
-            -1 // STATUS_INVALID_INFO_CLASS
+            crate::serial_println!("[SYSCALL] NtSetInformationProcess: unsupported class {}", info_class);
+            0xC0000003u32 as isize // STATUS_INVALID_INFO_CLASS
         }
     }
 }
