@@ -2,70 +2,119 @@
 //!
 //! Implementation of all built-in shell commands.
 
-use crate::serial_println;
 use crate::fs;
-use super::{get_current_dir, set_current_dir};
+use super::{get_current_dir, set_current_dir, shell_write, shell_writeln};
+use core::fmt::Write;
+
+/// Buffer for formatted output
+static mut FMT_BUF: [u8; 512] = [0u8; 512];
+
+/// Formatted print to shell (supports redirection)
+macro_rules! out {
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        unsafe {
+            let mut writer = FmtWriter { pos: 0 };
+            let _ = write!(writer, $($arg)*);
+            let s = core::str::from_utf8_unchecked(&FMT_BUF[..writer.pos]);
+            shell_write(s);
+        }
+    }};
+}
+
+/// Formatted println to shell (supports redirection)
+macro_rules! outln {
+    () => { shell_writeln(""); };
+    ($($arg:tt)*) => {{
+        use core::fmt::Write;
+        unsafe {
+            let mut writer = FmtWriter { pos: 0 };
+            let _ = write!(writer, $($arg)*);
+            let s = core::str::from_utf8_unchecked(&FMT_BUF[..writer.pos]);
+            shell_writeln(s);
+        }
+    }};
+}
+
+/// Helper for formatted writing
+struct FmtWriter {
+    pos: usize,
+}
+
+impl Write for FmtWriter {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        unsafe {
+            for &b in s.as_bytes() {
+                if self.pos < FMT_BUF.len() {
+                    FMT_BUF[self.pos] = b;
+                    self.pos += 1;
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 /// Display help information
 pub fn cmd_help(args: &[&str]) {
     if args.is_empty() {
-        serial_println!("Nostalgia OS Shell Commands:");
-        serial_println!("");
-        serial_println!("  General:");
-        serial_println!("    help [cmd]     Show help (or help for specific command)");
-        serial_println!("    ver            Show version information");
-        serial_println!("    echo [text]    Display text");
-        serial_println!("    cls, clear     Clear the screen");
-        serial_println!("    exit           Exit the shell");
-        serial_println!("");
-        serial_println!("  File System:");
-        serial_println!("    dir, ls [pat]  List directory (supports *, ? wildcards)");
-        serial_println!("    cd [path]      Change directory");
-        serial_println!("    pwd            Print working directory");
-        serial_println!("    type, cat      Display file contents");
-        serial_println!("    mkdir [name]   Create directory");
-        serial_println!("    rmdir [name]   Remove directory");
-        serial_println!("    del, rm [file] Delete file");
-        serial_println!("    copy [s] [d]   Copy file");
-        serial_println!("    ren [old] [new] Rename file");
-        serial_println!("    touch [file]   Create empty file");
-        serial_println!("");
-        serial_println!("  System:");
-        serial_println!("    mem            Show memory usage");
-        serial_println!("    time           Show system time");
-        serial_println!("    ps, tasks      Show running threads");
-        serial_println!("    history        Show command history");
-        serial_println!("    reboot         Restart the system");
-        serial_println!("");
-        serial_println!("  Use UP/DOWN arrows to navigate command history.");
+        outln!("Nostalgia OS Shell Commands:");
+        outln!("");
+        outln!("  General:");
+        outln!("    help [cmd]     Show help (or help for specific command)");
+        outln!("    ver            Show version information");
+        outln!("    echo [text]    Display text");
+        outln!("    cls, clear     Clear the screen");
+        outln!("    exit           Exit the shell");
+        outln!("");
+        outln!("  File System:");
+        outln!("    dir, ls [pat]  List directory (supports *, ? wildcards)");
+        outln!("    cd [path]      Change directory");
+        outln!("    pwd            Print working directory");
+        outln!("    type, cat      Display file contents");
+        outln!("    mkdir [name]   Create directory");
+        outln!("    rmdir [name]   Remove directory");
+        outln!("    del, rm [file] Delete file");
+        outln!("    copy [s] [d]   Copy file");
+        outln!("    ren [old] [new] Rename file");
+        outln!("    touch [file]   Create empty file");
+        outln!("");
+        outln!("  System:");
+        outln!("    mem            Show memory usage");
+        outln!("    time           Show system time");
+        outln!("    ps, tasks      Show running threads");
+        outln!("    history        Show command history");
+        outln!("    reboot         Restart the system");
+        outln!("");
+        outln!("  Use UP/DOWN arrows to navigate command history.");
     } else {
         let topic = args[0];
         if eq_ignore_case(topic, "dir") || eq_ignore_case(topic, "ls") {
-            serial_println!("DIR [path] [pattern]");
-            serial_println!("  Lists files and directories.");
-            serial_println!("  If no path given, lists current directory.");
-            serial_println!("");
-            serial_println!("  Wildcards:");
-            serial_println!("    *      Matches any characters");
-            serial_println!("    ?      Matches single character");
-            serial_println!("");
-            serial_println!("  Examples:");
-            serial_println!("    DIR *.TXT      List all .TXT files");
-            serial_println!("    DIR TEST*.*    List files starting with TEST");
-            serial_println!("    DIR C:\\*.EXE   List .EXE files in C:\\");
+            outln!("DIR [path] [pattern]");
+            outln!("  Lists files and directories.");
+            outln!("  If no path given, lists current directory.");
+            outln!("");
+            outln!("  Wildcards:");
+            outln!("    *      Matches any characters");
+            outln!("    ?      Matches single character");
+            outln!("");
+            outln!("  Examples:");
+            outln!("    DIR *.TXT      List all .TXT files");
+            outln!("    DIR TEST*.*    List files starting with TEST");
+            outln!("    DIR C:\\*.EXE   List .EXE files in C:\\");
         } else if eq_ignore_case(topic, "cd") {
-            serial_println!("CD [path]");
-            serial_println!("  Changes the current directory.");
-            serial_println!("  CD ..    Go to parent directory");
-            serial_println!("  CD \\     Go to root directory");
+            outln!("CD [path]");
+            outln!("  Changes the current directory.");
+            outln!("  CD ..    Go to parent directory");
+            outln!("  CD \\     Go to root directory");
         } else if eq_ignore_case(topic, "type") || eq_ignore_case(topic, "cat") {
-            serial_println!("TYPE <filename>");
-            serial_println!("  Displays the contents of a text file.");
+            outln!("TYPE <filename>");
+            outln!("  Displays the contents of a text file.");
         } else if eq_ignore_case(topic, "copy") || eq_ignore_case(topic, "cp") {
-            serial_println!("COPY <source> <dest>");
-            serial_println!("  Copies a file to a new location.");
+            outln!("COPY <source> <dest>");
+            outln!("  Copies a file to a new location.");
         } else {
-            serial_println!("No help available for '{}'", args[0]);
+            outln!("No help available for '{}'", args[0]);
         }
     }
 }
@@ -199,35 +248,35 @@ fn build_path(dir: &str, filename: &str) -> &'static str {
 
 /// Display version information
 pub fn cmd_version() {
-    serial_println!("");
-    serial_println!("Nostalgia OS [Version 0.1.0]");
-    serial_println!("An NT-style kernel written in Rust");
-    serial_println!("");
-    serial_println!("Kernel build info:");
-    serial_println!("  Architecture: x86_64");
-    serial_println!("  Compiler: rustc (nightly)");
-    serial_println!("");
+    outln!("");
+    outln!("Nostalgia OS [Version 0.1.0]");
+    outln!("An NT-style kernel written in Rust");
+    outln!("");
+    outln!("Kernel build info:");
+    outln!("  Architecture: x86_64");
+    outln!("  Compiler: rustc (nightly)");
+    outln!("");
 }
 
 /// Echo text to the console
 pub fn cmd_echo(args: &[&str]) {
     if args.is_empty() {
-        serial_println!("");
+        outln!("");
     } else {
         for (i, arg) in args.iter().enumerate() {
             if i > 0 {
-                crate::serial_print!(" ");
+                out!(" ");
             }
-            crate::serial_print!("{}", arg);
+            out!("{}", arg);
         }
-        serial_println!("");
+        outln!("");
     }
 }
 
 /// Clear the screen
 pub fn cmd_clear() {
     // ANSI escape sequence to clear screen and move cursor home
-    crate::serial_print!("\x1B[2J\x1B[H");
+    out!("\x1B[2J\x1B[H");
 }
 
 /// List directory contents with optional wildcard pattern
@@ -271,13 +320,13 @@ pub fn cmd_ls(args: &[&str]) {
     // Resolve the directory path
     let full_path = resolve_path(dir_path);
 
-    serial_println!("");
+    outln!("");
     if let Some(pat) = pattern {
-        serial_println!(" Directory of {}  ({})", full_path, pat);
+        outln!(" Directory of {}  ({})", full_path, pat);
     } else {
-        serial_println!(" Directory of {}", full_path);
+        outln!(" Directory of {}", full_path);
     }
-    serial_println!("");
+    outln!("");
 
     let mut offset = 0u32;
     let mut file_count = 0u32;
@@ -319,9 +368,9 @@ pub fn cmd_ls(args: &[&str]) {
 
                     // Format: type  size  name
                     if entry.file_type == fs::FileType::Directory {
-                        serial_println!("{}           {}", type_str, name);
+                        outln!("{}           {}", type_str, name);
                     } else {
-                        serial_println!("{}{:>10}  {}", type_str, entry.size, name);
+                        outln!("{}{:>10}  {}", type_str, entry.size, name);
                     }
                 }
 
@@ -329,27 +378,27 @@ pub fn cmd_ls(args: &[&str]) {
             }
             Err(fs::FsStatus::NoMoreEntries) => break,
             Err(e) => {
-                serial_println!("Error reading directory: {:?}", e);
+                outln!("Error reading directory: {:?}", e);
                 return;
             }
         }
     }
 
     if shown_count == 0 && pattern.is_some() {
-        serial_println!("File Not Found");
+        outln!("File Not Found");
     }
 
-    serial_println!("");
-    serial_println!("     {:>4} File(s)    {:>10} bytes", file_count, total_size);
-    serial_println!("     {:>4} Dir(s)", dir_count);
-    serial_println!("");
+    outln!("");
+    outln!("     {:>4} File(s)    {:>10} bytes", file_count, total_size);
+    outln!("     {:>4} Dir(s)", dir_count);
+    outln!("");
 }
 
 /// Change directory
 pub fn cmd_cd(args: &[&str]) {
     if args.is_empty() {
         // Just print current directory
-        serial_println!("{}", get_current_dir());
+        outln!("{}", get_current_dir());
         return;
     }
 
@@ -411,26 +460,26 @@ pub fn cmd_cd(args: &[&str]) {
             }
         }
         Err(fs::FsStatus::NotFound) => {
-            serial_println!("The system cannot find the path specified.");
+            outln!("The system cannot find the path specified.");
         }
         Err(fs::FsStatus::NotDirectory) => {
-            serial_println!("The directory name is invalid.");
+            outln!("The directory name is invalid.");
         }
         Err(e) => {
-            serial_println!("Error: {:?}", e);
+            outln!("Error: {:?}", e);
         }
     }
 }
 
 /// Print working directory
 pub fn cmd_pwd() {
-    serial_println!("{}", get_current_dir());
+    outln!("{}", get_current_dir());
 }
 
 /// Display file contents
 pub fn cmd_cat(args: &[&str]) {
     if args.is_empty() {
-        serial_println!("Usage: type <filename>");
+        outln!("Usage: type <filename>");
         return;
     }
 
@@ -446,32 +495,32 @@ pub fn cmd_cat(args: &[&str]) {
                         // Print as text, replacing non-printable chars
                         for &byte in &buf[..n] {
                             if byte == b'\n' {
-                                serial_println!("");
+                                outln!("");
                             } else if byte == b'\r' {
                                 // Skip carriage return
                             } else if byte >= 0x20 && byte < 0x7F {
-                                crate::serial_print!("{}", byte as char);
+                                out!("{}", byte as char);
                             } else if byte == b'\t' {
-                                crate::serial_print!("    ");
+                                out!("    ");
                             }
                         }
                     }
                     Err(fs::FsStatus::EndOfFile) => break,
                     Err(e) => {
-                        serial_println!("");
-                        serial_println!("Error reading file: {:?}", e);
+                        outln!("");
+                        outln!("Error reading file: {:?}", e);
                         break;
                     }
                 }
             }
-            serial_println!("");
+            outln!("");
             let _ = fs::close(handle);
         }
         Err(fs::FsStatus::NotFound) => {
-            serial_println!("The system cannot find the file specified.");
+            outln!("The system cannot find the file specified.");
         }
         Err(e) => {
-            serial_println!("Error opening file: {:?}", e);
+            outln!("Error opening file: {:?}", e);
         }
     }
 }
@@ -479,7 +528,7 @@ pub fn cmd_cat(args: &[&str]) {
 /// Create a directory
 pub fn cmd_mkdir(args: &[&str]) {
     if args.is_empty() {
-        serial_println!("Usage: mkdir <dirname>");
+        outln!("Usage: mkdir <dirname>");
         return;
     }
 
@@ -490,10 +539,10 @@ pub fn cmd_mkdir(args: &[&str]) {
             // Success - no output
         }
         Err(fs::FsStatus::AlreadyExists) => {
-            serial_println!("A subdirectory or file {} already exists.", args[0]);
+            outln!("A subdirectory or file {} already exists.", args[0]);
         }
         Err(e) => {
-            serial_println!("Error creating directory: {:?}", e);
+            outln!("Error creating directory: {:?}", e);
         }
     }
 }
@@ -501,7 +550,7 @@ pub fn cmd_mkdir(args: &[&str]) {
 /// Remove a directory
 pub fn cmd_rmdir(args: &[&str]) {
     if args.is_empty() {
-        serial_println!("Usage: rmdir <dirname>");
+        outln!("Usage: rmdir <dirname>");
         return;
     }
 
@@ -512,13 +561,13 @@ pub fn cmd_rmdir(args: &[&str]) {
             // Success - no output
         }
         Err(fs::FsStatus::NotFound) => {
-            serial_println!("The system cannot find the path specified.");
+            outln!("The system cannot find the path specified.");
         }
         Err(fs::FsStatus::DirectoryNotEmpty) => {
-            serial_println!("The directory is not empty.");
+            outln!("The directory is not empty.");
         }
         Err(e) => {
-            serial_println!("Error removing directory: {:?}", e);
+            outln!("Error removing directory: {:?}", e);
         }
     }
 }
@@ -526,8 +575,8 @@ pub fn cmd_rmdir(args: &[&str]) {
 /// Delete a file
 pub fn cmd_del(args: &[&str]) {
     if args.is_empty() {
-        serial_println!("Usage: del <filename>");
-        serial_println!("  Wildcards * and ? are supported.");
+        outln!("Usage: del <filename>");
+        outln!("  Wildcards * and ? are supported.");
         return;
     }
 
@@ -590,7 +639,7 @@ pub fn cmd_del(args: &[&str]) {
         }
 
         if file_count == 0 {
-            serial_println!("Could not find the file specified.");
+            outln!("Could not find the file specified.");
             return;
         }
 
@@ -606,14 +655,14 @@ pub fn cmd_del(args: &[&str]) {
                     deleted_count += 1;
                 }
                 Err(e) => {
-                    serial_println!("Error deleting {}: {:?}", name, e);
+                    outln!("Error deleting {}: {:?}", name, e);
                     error_count += 1;
                 }
             }
         }
 
         if deleted_count > 0 || error_count > 0 {
-            serial_println!("{} file(s) deleted.", deleted_count);
+            outln!("{} file(s) deleted.", deleted_count);
         }
     } else {
         // No wildcards - single file delete
@@ -624,10 +673,10 @@ pub fn cmd_del(args: &[&str]) {
                 // Success - no output (DOS behavior)
             }
             Err(fs::FsStatus::NotFound) => {
-                serial_println!("Could not find the file specified.");
+                outln!("Could not find the file specified.");
             }
             Err(e) => {
-                serial_println!("Error deleting file: {:?}", e);
+                outln!("Error deleting file: {:?}", e);
             }
         }
     }
@@ -636,8 +685,8 @@ pub fn cmd_del(args: &[&str]) {
 /// Copy a file
 pub fn cmd_copy(args: &[&str]) {
     if args.len() < 2 {
-        serial_println!("Usage: copy <source> <dest>");
-        serial_println!("  Wildcards * and ? are supported in source.");
+        outln!("Usage: copy <source> <dest>");
+        outln!("  Wildcards * and ? are supported in source.");
         return;
     }
 
@@ -699,7 +748,7 @@ pub fn cmd_copy(args: &[&str]) {
         }
 
         if file_count == 0 {
-            serial_println!("The system cannot find the file specified.");
+            outln!("The system cannot find the file specified.");
             return;
         }
 
@@ -723,7 +772,7 @@ pub fn cmd_copy(args: &[&str]) {
                 // Single file to non-directory destination
                 &dst_path
             } else {
-                serial_println!("Cannot copy multiple files to a single file.");
+                outln!("Cannot copy multiple files to a single file.");
                 return;
             };
 
@@ -739,12 +788,12 @@ pub fn cmd_copy(args: &[&str]) {
                     total_bytes += bytes as u64;
                 }
                 Err(e) => {
-                    serial_println!("Error copying {}: {:?}", name, e);
+                    outln!("Error copying {}: {:?}", name, e);
                 }
             }
         }
 
-        serial_println!("        {} file(s) copied ({} bytes).", copied_count, total_bytes);
+        outln!("        {} file(s) copied ({} bytes).", copied_count, total_bytes);
     } else {
         // No wildcards - single file copy
         let src_path = resolve_path(src_arg);
@@ -752,13 +801,13 @@ pub fn cmd_copy(args: &[&str]) {
 
         match fs::copy(&src_path, &dst_path) {
             Ok(bytes) => {
-                serial_println!("        1 file(s) copied ({} bytes).", bytes);
+                outln!("        1 file(s) copied ({} bytes).", bytes);
             }
             Err(fs::FsStatus::NotFound) => {
-                serial_println!("The system cannot find the file specified.");
+                outln!("The system cannot find the file specified.");
             }
             Err(e) => {
-                serial_println!("Error copying file: {:?}", e);
+                outln!("Error copying file: {:?}", e);
             }
         }
     }
@@ -767,7 +816,7 @@ pub fn cmd_copy(args: &[&str]) {
 /// Rename a file or directory
 pub fn cmd_rename(args: &[&str]) {
     if args.len() < 2 {
-        serial_println!("Usage: ren <oldname> <newname>");
+        outln!("Usage: ren <oldname> <newname>");
         return;
     }
 
@@ -779,10 +828,10 @@ pub fn cmd_rename(args: &[&str]) {
             // Success - no output
         }
         Err(fs::FsStatus::NotFound) => {
-            serial_println!("The system cannot find the file specified.");
+            outln!("The system cannot find the file specified.");
         }
         Err(e) => {
-            serial_println!("Error renaming: {:?}", e);
+            outln!("Error renaming: {:?}", e);
         }
     }
 }
@@ -790,7 +839,7 @@ pub fn cmd_rename(args: &[&str]) {
 /// Create an empty file
 pub fn cmd_touch(args: &[&str]) {
     if args.is_empty() {
-        serial_println!("Usage: touch <filename>");
+        outln!("Usage: touch <filename>");
         return;
     }
 
@@ -805,31 +854,31 @@ pub fn cmd_touch(args: &[&str]) {
             // File exists - that's OK for touch
         }
         Err(e) => {
-            serial_println!("Error creating file: {:?}", e);
+            outln!("Error creating file: {:?}", e);
         }
     }
 }
 
 /// Show memory usage
 pub fn cmd_mem() {
-    serial_println!("");
-    serial_println!("Memory Status:");
-    serial_println!("");
+    outln!("");
+    outln!("Memory Status:");
+    outln!("");
 
     // Get memory stats from MM
     let stats = crate::mm::mm_get_stats();
 
-    serial_println!("  Physical Memory:");
-    serial_println!("    Total:     {} KB ({} pages)", stats.total_pages * 4, stats.total_pages);
-    serial_println!("    Free:      {} KB ({} pages)", stats.free_pages * 4, stats.free_pages);
-    serial_println!("    Zeroed:    {} KB ({} pages)", stats.zeroed_pages * 4, stats.zeroed_pages);
-    serial_println!("    Active:    {} KB ({} pages)", stats.active_pages * 4, stats.active_pages);
-    serial_println!("");
-    serial_println!("  Memory Totals:");
-    serial_println!("    Total:     {} bytes", stats.total_bytes());
-    serial_println!("    Free:      {} bytes", stats.free_bytes());
-    serial_println!("    Used:      {} bytes", stats.used_bytes());
-    serial_println!("");
+    outln!("  Physical Memory:");
+    outln!("    Total:     {} KB ({} pages)", stats.total_pages * 4, stats.total_pages);
+    outln!("    Free:      {} KB ({} pages)", stats.free_pages * 4, stats.free_pages);
+    outln!("    Zeroed:    {} KB ({} pages)", stats.zeroed_pages * 4, stats.zeroed_pages);
+    outln!("    Active:    {} KB ({} pages)", stats.active_pages * 4, stats.active_pages);
+    outln!("");
+    outln!("  Memory Totals:");
+    outln!("    Total:     {} bytes", stats.total_bytes());
+    outln!("    Free:      {} bytes", stats.free_bytes());
+    outln!("    Used:      {} bytes", stats.used_bytes());
+    outln!("");
 }
 
 /// Show system time (tick count)
@@ -840,31 +889,31 @@ pub fn cmd_time() {
     let minutes = seconds / 60;
     let hours = minutes / 60;
 
-    serial_println!("System uptime: {}:{:02}:{:02}.{:03}",
+    outln!("System uptime: {}:{:02}:{:02}.{:03}",
         hours,
         minutes % 60,
         seconds % 60,
         ms
     );
-    serial_println!("Total ticks: {}", ticks);
+    outln!("Total ticks: {}", ticks);
 }
 
 /// Show running threads
 pub fn cmd_ps() {
-    serial_println!("");
-    serial_println!("  TID  State      Priority  Name");
-    serial_println!("  ---  -----      --------  ----");
+    outln!("");
+    outln!("  TID  State      Priority  Name");
+    outln!("  ---  -----      --------  ----");
 
     // Get thread list from scheduler
     unsafe {
         crate::ke::scheduler::list_threads();
     }
-    serial_println!("");
+    outln!("");
 }
 
 /// Reboot the system
 pub fn cmd_reboot() {
-    serial_println!("Rebooting...");
+    outln!("Rebooting...");
 
     // Use keyboard controller reset
     unsafe {
@@ -886,7 +935,7 @@ static mut PATH_LEN: usize = 0;
 
 /// Resolve a path relative to current directory
 /// Returns a static string reference (not thread-safe, but OK for single shell)
-fn resolve_path(path: &str) -> &'static str {
+pub fn resolve_path(path: &str) -> &'static str {
     unsafe {
         PATH_LEN = 0;
 

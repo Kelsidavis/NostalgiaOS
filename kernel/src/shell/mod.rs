@@ -6,6 +6,7 @@
 //! - Home/End keys to jump to start/end of line
 //! - Command history with up/down arrow navigation
 //! - Tab completion for commands
+//! - Output redirection with > and >>
 //! - Built-in commands (help, echo, clear, ver, etc.)
 //! - File system commands (ls, cd, cat, mkdir, rmdir, rm, type)
 //! - System information commands (mem, time)
@@ -15,6 +16,112 @@ use crate::serial_println;
 use crate::fs;
 
 mod commands;
+
+/// Output redirection state
+static mut REDIRECT_ACTIVE: bool = false;
+static mut REDIRECT_APPEND: bool = false;
+static mut REDIRECT_BUFFER: [u8; 8192] = [0u8; 8192];
+static mut REDIRECT_LEN: usize = 0;
+static mut REDIRECT_PATH: [u8; 128] = [0u8; 128];
+static mut REDIRECT_PATH_LEN: usize = 0;
+
+/// Write to redirect buffer or serial
+pub fn shell_write(s: &str) {
+    unsafe {
+        if REDIRECT_ACTIVE {
+            for &b in s.as_bytes() {
+                if REDIRECT_LEN < REDIRECT_BUFFER.len() {
+                    REDIRECT_BUFFER[REDIRECT_LEN] = b;
+                    REDIRECT_LEN += 1;
+                }
+            }
+        } else {
+            crate::serial_print!("{}", s);
+        }
+    }
+}
+
+/// Write line to redirect buffer or serial
+pub fn shell_writeln(s: &str) {
+    shell_write(s);
+    shell_write("\r\n");
+}
+
+/// Start output redirection
+fn start_redirect(path: &str, append: bool) {
+    unsafe {
+        REDIRECT_ACTIVE = true;
+        REDIRECT_APPEND = append;
+        REDIRECT_LEN = 0;
+
+        let path_bytes = path.as_bytes();
+        let len = path_bytes.len().min(REDIRECT_PATH.len() - 1);
+        REDIRECT_PATH[..len].copy_from_slice(&path_bytes[..len]);
+        REDIRECT_PATH_LEN = len;
+    }
+}
+
+/// End output redirection and write to file
+fn end_redirect() -> Result<(), &'static str> {
+    unsafe {
+        if !REDIRECT_ACTIVE {
+            return Ok(());
+        }
+
+        REDIRECT_ACTIVE = false;
+
+        let path = core::str::from_utf8(&REDIRECT_PATH[..REDIRECT_PATH_LEN])
+            .map_err(|_| "Invalid path")?;
+
+        let resolved = commands::resolve_path(path);
+
+        if REDIRECT_APPEND {
+            // Append mode - read existing content first
+            let mut existing: [u8; 8192] = [0u8; 8192];
+            let existing_len = match fs::open(resolved, 0) {
+                Ok(handle) => {
+                    let len = fs::read(handle, &mut existing).unwrap_or(0);
+                    let _ = fs::close(handle);
+                    len
+                }
+                Err(fs::FsStatus::NotFound) => 0,
+                Err(_) => 0,
+            };
+
+            // Combine existing + new
+            let total_len = existing_len + REDIRECT_LEN;
+            if total_len <= 8192 {
+                // Shift buffer to make room for existing content
+                for i in (0..REDIRECT_LEN).rev() {
+                    if existing_len + i < 8192 {
+                        REDIRECT_BUFFER[existing_len + i] = REDIRECT_BUFFER[i];
+                    }
+                }
+                REDIRECT_BUFFER[..existing_len].copy_from_slice(&existing[..existing_len]);
+                REDIRECT_LEN = total_len;
+            }
+        }
+
+        // Create/overwrite file and write content
+        match fs::create(resolved, 0) {
+            Ok(handle) => {
+                let result = fs::write(handle, &REDIRECT_BUFFER[..REDIRECT_LEN]);
+                let _ = fs::close(handle);
+                match result {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        crate::serial_println!("Error writing to file: {:?}", e);
+                        Err("Write failed")
+                    }
+                }
+            }
+            Err(e) => {
+                crate::serial_println!("Error creating file: {:?}", e);
+                Err("Create failed")
+            }
+        }
+    }
+}
 
 /// Maximum command line length
 const MAX_CMD_LEN: usize = 256;
@@ -831,11 +938,14 @@ impl Shell {
             return;
         }
 
+        // Check for output redirection (>> or >)
+        let (cmd_part, redirect_file, append_mode) = parse_redirect(cmd_str);
+
         // Parse command into arguments
         let mut args: [&str; MAX_ARGS] = [""; MAX_ARGS];
         let mut argc = 0;
 
-        for arg in cmd_str.split_whitespace() {
+        for arg in cmd_part.split_whitespace() {
             if argc < MAX_ARGS {
                 args[argc] = arg;
                 argc += 1;
@@ -844,6 +954,11 @@ impl Shell {
 
         if argc == 0 {
             return;
+        }
+
+        // Set up redirection if needed
+        if let Some(file) = redirect_file {
+            start_redirect(file, append_mode);
         }
 
         // Execute command (case-insensitive)
@@ -896,7 +1011,32 @@ impl Shell {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
         }
+
+        // End redirection and write to file
+        if redirect_file.is_some() {
+            let _ = end_redirect();
+        }
     }
+}
+
+/// Parse command string for output redirection
+/// Returns: (command_part, optional_redirect_file, is_append_mode)
+fn parse_redirect(cmd: &str) -> (&str, Option<&str>, bool) {
+    // Look for >> first (append), then > (overwrite)
+    if let Some(pos) = cmd.find(">>") {
+        let cmd_part = cmd[..pos].trim();
+        let file_part = cmd[pos + 2..].trim();
+        if !file_part.is_empty() {
+            return (cmd_part, Some(file_part), true);
+        }
+    } else if let Some(pos) = cmd.find('>') {
+        let cmd_part = cmd[..pos].trim();
+        let file_part = cmd[pos + 1..].trim();
+        if !file_part.is_empty() {
+            return (cmd_part, Some(file_part), false);
+        }
+    }
+    (cmd, None, false)
 }
 
 /// Case-insensitive string comparison
