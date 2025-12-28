@@ -920,23 +920,88 @@ fn sys_debug_print(
 }
 
 /// NtClose - Close a handle
+///
+/// # Arguments
+/// * `handle` - Handle to close
+///
+/// # Returns
+/// * STATUS_SUCCESS - Handle was successfully closed
+/// * STATUS_INVALID_HANDLE - Handle is invalid or not open
+/// * STATUS_HANDLE_NOT_CLOSABLE - Handle is protected from close
+///
+/// # NT Compatibility
+/// NtClose closes any valid handle type: files, processes, threads,
+/// events, mutexes, semaphores, registry keys, ports, sections, etc.
 fn sys_close(
     handle: usize,
     _: usize, _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
-    crate::serial_println!("[SYSCALL] NtClose(handle={})", handle);
+    // NT status codes
+    const STATUS_SUCCESS: isize = 0;
+    const STATUS_INVALID_HANDLE: isize = 0xC0000008u32 as isize;
+    const STATUS_HANDLE_NOT_CLOSABLE: isize = 0xC0000235u32 as isize;
 
-    // Check if this is a file handle
-    if let Some(fs_handle) = unsafe { get_fs_handle(handle) } {
-        // Close the fs handle
-        let _ = crate::fs::close(fs_handle);
-        // Free the syscall handle mapping
-        unsafe { free_file_handle(handle); }
-        return 0;
+    crate::serial_println!("[SYSCALL] NtClose(handle=0x{:X})", handle);
+
+    // Handle 0 is typically NULL - invalid
+    if handle == 0 {
+        crate::serial_println!("[SYSCALL] NtClose: NULL handle");
+        return STATUS_INVALID_HANDLE;
     }
 
-    // TODO: Handle other handle types via object manager
-    0
+    // Pseudo-handles that cannot be closed
+    // NtCurrentProcess() = 0xFFFFFFFF / -1
+    // NtCurrentThread() = 0xFFFFFFFE / -2
+    if handle == 0xFFFFFFFF || handle == 0xFFFFFFFFFFFFFFFE
+        || handle == 0xFFFFFFFFFFFFFFFD || handle == 0xFFFFFFFFFFFFFFFC {
+        // Pseudo-handles - silently succeed (Windows behavior)
+        crate::serial_println!("[SYSCALL] NtClose: pseudo-handle, returning success");
+        return STATUS_SUCCESS;
+    }
+
+    // Check if this is a file handle (handles >= FILE_HANDLE_BASE)
+    if handle >= FILE_HANDLE_BASE {
+        if let Some(fs_handle) = unsafe { get_fs_handle(handle) } {
+            // Close the fs handle
+            let _ = crate::fs::close(fs_handle);
+            // Free the syscall handle mapping
+            unsafe { free_file_handle(handle); }
+            crate::serial_println!("[SYSCALL] NtClose: closed file handle");
+            return STATUS_SUCCESS;
+        }
+        // Handle in file range but not valid
+        crate::serial_println!("[SYSCALL] NtClose: invalid file handle");
+        return STATUS_INVALID_HANDLE;
+    }
+
+    // Try to close via object manager (for kernel objects)
+    // Convert to Handle type (handles are typically 4-byte aligned multiples)
+    let ob_handle = handle as u32;
+
+    // Attempt to close via object manager
+    let closed = unsafe { crate::ob::ob_close_handle(ob_handle) };
+
+    if closed {
+        crate::serial_println!("[SYSCALL] NtClose: closed object handle via OB");
+        STATUS_SUCCESS
+    } else {
+        // Could be invalid handle or protected handle
+        // Check if handle exists but is protected
+        let object = unsafe {
+            crate::ob::ob_reference_object_by_handle(ob_handle, 0)
+        };
+
+        if !object.is_null() {
+            // Handle exists but couldn't be closed (protected)
+            unsafe { crate::ob::ob_dereference_object(object); }
+            crate::serial_println!("[SYSCALL] NtClose: handle protected from close");
+            STATUS_HANDLE_NOT_CLOSABLE
+        } else {
+            // Handle doesn't exist
+            crate::serial_println!("[SYSCALL] NtClose: invalid handle");
+            STATUS_INVALID_HANDLE
+        }
+    }
 }
 
 /// NtReadFile - Read from a file
