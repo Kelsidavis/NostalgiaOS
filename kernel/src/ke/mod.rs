@@ -58,6 +58,9 @@ pub mod exception;
 // Debug object support
 pub mod debug;
 
+// Bug check (BSOD)
+pub mod bugcheck;
+
 // Re-export key types
 pub use list::ListEntry;
 pub use thread::{KThread, ThreadState};
@@ -132,4 +135,11 @@ pub use debug::{
     dbgk_post_exception_event, dbgk_post_output_debug_string_event,
     dbgk_post_unload_dll_event,
     MAX_DEBUG_OBJECTS, MAX_DEBUG_EVENTS,
+};
+
+// Re-export bugcheck types
+pub use bugcheck::{
+    ke_bugcheck, ke_bugcheck_ex,
+    is_bugcheck_active, get_bugcheck_data,
+    BugCheckData, codes as bugcheck_codes,
 };
