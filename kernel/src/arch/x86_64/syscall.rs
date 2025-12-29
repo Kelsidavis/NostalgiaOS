@@ -10474,13 +10474,15 @@ fn sys_query_information_token(
     return_length: usize,
     _: usize,
 ) -> isize {
+    const STATUS_INVALID_INFO_CLASS: isize = 0xC0000003u32 as isize;
+
     if token_handle == 0 || token_information == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let token_id = match unsafe { get_token_id(token_handle) } {
         Some(t) => t,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtQueryInformationToken(token={}, class={})",
@@ -10609,12 +10611,12 @@ fn sys_duplicate_token(
     new_token_handle_ptr: usize,
 ) -> isize {
     if new_token_handle_ptr == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let token_id = match unsafe { get_token_id(existing_token_handle) } {
         Some(t) => t,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtDuplicateToken(token={}, access={:#x})",
@@ -10632,9 +10634,9 @@ fn sys_duplicate_token(
         Some(h) => {
             unsafe { *(new_token_handle_ptr as *mut usize) = h; }
             crate::serial_println!("[SYSCALL] NtDuplicateToken -> handle {:#x}", h);
-            0
+            STATUS_SUCCESS
         }
-        None => -1,
+        None => STATUS_INSUFFICIENT_RESOURCES,
     }
 }
 
@@ -10649,7 +10651,7 @@ fn sys_adjust_privileges_token(
 ) -> isize {
     let token_id = match unsafe { get_token_id(token_handle) } {
         Some(t) => t,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtAdjustPrivilegesToken(token={}, disable_all={})",
@@ -12009,22 +12011,25 @@ fn sys_set_information_token(
     token_information_length: usize,
     _: usize, _: usize,
 ) -> isize {
+    const STATUS_BUFFER_TOO_SMALL: isize = 0xC0000023u32 as isize;
+    const STATUS_INVALID_INFO_CLASS: isize = 0xC0000003u32 as isize;
+
     let token_id = match unsafe { get_token_id(token_handle) } {
         Some(t) => t,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtSetInformationToken(token={}, class={})",
         token_id, token_information_class);
 
     if token_information == 0 && token_information_length > 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     match token_information_class as u32 {
         set_token_info_class::TOKEN_OWNER => {
             if token_information_length < 8 {
-                return -1;
+                return STATUS_BUFFER_TOO_SMALL;
             }
 
             // TOKEN_OWNER contains a pointer to SID
@@ -12034,11 +12039,11 @@ fn sys_set_information_token(
 
             // TODO: Validate SID and update token owner
 
-            0
+            STATUS_SUCCESS
         }
         set_token_info_class::TOKEN_PRIMARY_GROUP => {
             if token_information_length < 8 {
-                return -1;
+                return STATUS_BUFFER_TOO_SMALL;
             }
 
             let group_sid_ptr = unsafe { *(token_information as *const usize) };
@@ -12047,7 +12052,7 @@ fn sys_set_information_token(
 
             // TODO: Validate SID and update token primary group
 
-            0
+            STATUS_SUCCESS
         }
         set_token_info_class::TOKEN_DEFAULT_DACL => {
             // TOKEN_DEFAULT_DACL contains ACL pointer (can be NULL to remove)
@@ -12055,11 +12060,11 @@ fn sys_set_information_token(
 
             // TODO: Validate ACL and update token default DACL
 
-            0
+            STATUS_SUCCESS
         }
         set_token_info_class::TOKEN_SESSION_ID => {
             if token_information_length < 4 {
-                return -1;
+                return STATUS_BUFFER_TOO_SMALL;
             }
 
             let session_id = unsafe { *(token_information as *const u32) };
@@ -12072,11 +12077,11 @@ fn sys_set_information_token(
                 }
             }
 
-            0
+            STATUS_SUCCESS
         }
         set_token_info_class::TOKEN_ORIGIN => {
             if token_information_length < 8 {
-                return -1;
+                return STATUS_BUFFER_TOO_SMALL;
             }
 
             // TOKEN_ORIGIN contains LUID of originating logon session
@@ -12090,12 +12095,12 @@ fn sys_set_information_token(
                 }
             }
 
-            0
+            STATUS_SUCCESS
         }
         _ => {
             crate::serial_println!("[SYSCALL] NtSetInformationToken: unsupported class {}",
                 token_information_class);
-            -1
+            STATUS_INVALID_INFO_CLASS
         }
     }
 }
@@ -12111,7 +12116,7 @@ fn sys_adjust_groups_token(
 ) -> isize {
     let token_id = match unsafe { get_token_id(token_handle) } {
         Some(t) => t,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtAdjustGroupsToken(token={}, reset={})",
@@ -12125,12 +12130,12 @@ fn sys_adjust_groups_token(
         if return_length != 0 {
             unsafe { *(return_length as *mut usize) = 0; }
         }
-        return 0;
+        return STATUS_SUCCESS;
     }
 
     // new_state points to TOKEN_GROUPS structure
     if new_state == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     // TOKEN_GROUPS structure:
@@ -13230,7 +13235,7 @@ fn sys_raise_exception(
     use crate::ke::exception::{ExceptionRecord, Context, ke_raise_exception};
 
     if exception_record == 0 || context_record == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     let is_first_chance = first_chance != 0;
@@ -13258,7 +13263,7 @@ fn sys_continue(
     use crate::ke::exception::{Context, ke_continue};
 
     if context_record == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     let should_test_alert = test_alert != 0;
@@ -13280,7 +13285,7 @@ fn sys_get_context_thread(
     use crate::ke::exception::{Context, ke_get_context};
 
     if context == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     crate::serial_println!("[SYSCALL] NtGetContextThread(handle={:#x})", thread_handle);
@@ -13322,7 +13327,7 @@ fn sys_set_context_thread(
     use crate::ke::exception::{Context, ke_set_context};
 
     if context == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     crate::serial_println!("[SYSCALL] NtSetContextThread(handle={:#x})", thread_handle);
@@ -13422,7 +13427,7 @@ fn sys_create_process_internal(
     use crate::ps::job::{Job, job_limit_flags};
 
     if process_handle_ptr == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     crate::serial_println!(
@@ -13590,7 +13595,7 @@ fn sys_create_job_object(
     use crate::ps::job::ps_create_job;
 
     if job_handle_ptr == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     crate::serial_println!("[SYSCALL] NtCreateJobObject(access={:#x})", desired_access);
@@ -13763,7 +13768,7 @@ fn sys_query_information_job(
         job_handle, info_class);
 
     if info_buffer == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let job = unsafe {
@@ -13844,7 +13849,7 @@ fn sys_set_information_job(
         job_handle, info_class);
 
     if info_buffer == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let job = unsafe {
