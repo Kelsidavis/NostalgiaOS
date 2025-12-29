@@ -18,6 +18,7 @@ use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
 use crate::ke::{KProcess, ProcessState, list::ListEntry, SpinLock};
 use crate::ob::HandleTable;
+use crate::se::Token;
 use super::cid::ClientId;
 
 /// Maximum length of process image name
@@ -82,7 +83,7 @@ pub struct EProcess {
     pub object_table: *mut HandleTable,
 
     /// Primary access token
-    pub token: *mut u8, // TODO: Should be *mut TOKEN
+    pub token: *mut Token,
 
     /// List entry for global process list
     pub active_process_links: ListEntry,

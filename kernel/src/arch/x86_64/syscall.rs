@@ -10908,11 +10908,11 @@ fn sys_set_information_process(
                         return 0xC000007Au32 as isize; // STATUS_BAD_TOKEN_TYPE
                     }
                 }
-                process.token = token as *mut u8;
+                process.token = token;
                 crate::serial_println!("[SYSCALL] SetInformationProcess: primary token assigned");
             } else {
                 // Allow raw pointer assignment for compatibility
-                process.token = token_info.token as *mut u8;
+                process.token = token_info.token as *mut crate::se::Token;
             }
 
             0
