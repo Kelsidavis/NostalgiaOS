@@ -13678,3 +13678,165 @@ fn show_cid_threads() {
     outln!("");
     outln!("Total: {} threads", count);
 }
+
+// ============================================================================
+// PEB/TEB Viewer
+// ============================================================================
+
+/// PEB viewer command
+pub fn cmd_peb(args: &[&str]) {
+    if args.is_empty() {
+        show_peb_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_peb_stats();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_peb_list();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("peb - Process Environment Block Viewer");
+        outln!("");
+        outln!("Usage: peb [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show PEB pool statistics (default)");
+        outln!("  list   - List all allocated PEBs");
+        outln!("");
+        outln!("PEBs contain process-wide information for user mode.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'peb help' for usage information");
+    }
+}
+
+fn show_peb_stats() {
+    use crate::ps::get_peb_pool_stats;
+
+    let stats = get_peb_pool_stats();
+
+    outln!("PEB Pool Statistics");
+    outln!("===================");
+    outln!("");
+    outln!("PEB Pool:");
+    outln!("  Max PEBs:         {}", stats.max_pebs);
+    outln!("  Allocated:        {}", stats.allocated_count);
+    outln!("  Free:             {}", stats.free_count);
+    outln!("");
+    outln!("LDR Entry Pool:");
+    outln!("  Max Entries:      {}", stats.max_ldr_entries);
+    outln!("  Allocated:        {}", stats.ldr_entries_allocated);
+}
+
+fn show_peb_list() {
+    use crate::ps::ps_get_peb_snapshots;
+
+    outln!("Allocated PEBs");
+    outln!("==============");
+    outln!("");
+
+    let (snapshots, count) = ps_get_peb_snapshots(32);
+
+    if count == 0 {
+        outln!("No PEBs currently allocated");
+        return;
+    }
+
+    outln!("{:<6} {:<18} {:<18} {:<8} {:<10}",
+        "Index", "Address", "ImageBase", "HasLDR", "OS Ver");
+    outln!("-------------------------------------------------------------------");
+
+    for i in 0..count {
+        let peb = &snapshots[i];
+        outln!("{:<6} 0x{:016X} 0x{:016X} {:<8} {}.{}.{}",
+            peb.index,
+            peb.address,
+            peb.image_base,
+            if peb.has_ldr { "Yes" } else { "No" },
+            peb.os_major,
+            peb.os_minor,
+            peb.os_build
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} PEBs", count);
+}
+
+/// TEB viewer command
+pub fn cmd_teb(args: &[&str]) {
+    if args.is_empty() {
+        show_teb_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_teb_stats();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_teb_list();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("teb - Thread Environment Block Viewer");
+        outln!("");
+        outln!("Usage: teb [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show TEB pool statistics (default)");
+        outln!("  list   - List all allocated TEBs");
+        outln!("");
+        outln!("TEBs contain thread-specific information for user mode.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'teb help' for usage information");
+    }
+}
+
+fn show_teb_stats() {
+    use crate::ps::get_teb_pool_stats;
+
+    let stats = get_teb_pool_stats();
+
+    outln!("TEB Pool Statistics");
+    outln!("===================");
+    outln!("");
+    outln!("Max TEBs:     {}", stats.max_tebs);
+    outln!("Allocated:    {}", stats.allocated_count);
+    outln!("Free:         {}", stats.free_count);
+}
+
+fn show_teb_list() {
+    use crate::ps::ps_get_teb_snapshots;
+
+    outln!("Allocated TEBs");
+    outln!("==============");
+    outln!("");
+
+    let (snapshots, count) = ps_get_teb_snapshots(32);
+
+    if count == 0 {
+        outln!("No TEBs currently allocated");
+        return;
+    }
+
+    outln!("{:<6} {:<18} {:<8} {:<8} {:<18} {:<8}",
+        "Index", "Address", "PID", "TID", "StackBase", "LastErr");
+    outln!("------------------------------------------------------------------------");
+
+    for i in 0..count {
+        let teb = &snapshots[i];
+        outln!("{:<6} 0x{:016X} {:<8} {:<8} 0x{:016X} {:<8}",
+            teb.index,
+            teb.address,
+            teb.pid,
+            teb.tid,
+            teb.stack_base,
+            teb.last_error
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} TEBs", count);
+}

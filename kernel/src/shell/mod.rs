@@ -158,11 +158,11 @@ const COMMANDS: &[&str] = &[
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net",
     "ob", "obdir",
-    "pagetable", "pci", "pe", "pfn", "pipes", "pool", "pooltag", "port", "prcb", "ps", "pwd",
+    "pagetable", "pci", "pe", "peb", "pfn", "pipes", "pool", "pooltag", "port", "prcb", "ps", "pwd",
     "quit",
     "ramdisk", "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
     "sc", "sched", "se", "section", "services", "smbios", "stack", "suspend", "sysinfo",
-    "tasks", "time", "timer", "timerq", "touch", "type",
+    "tasks", "teb", "time", "timer", "timerq", "touch", "type",
     "usertest",
     "vad", "veh", "ver", "version", "volumes",
     "waitq", "worker", "wset",
@@ -1235,6 +1235,12 @@ impl Shell {
         // CID table viewer
         } else if eq_ignore_case(cmd, "cid") {
             commands::cmd_cid(&args[1..argc]);
+        // PEB viewer
+        } else if eq_ignore_case(cmd, "peb") {
+            commands::cmd_peb(&args[1..argc]);
+        // TEB viewer
+        } else if eq_ignore_case(cmd, "teb") {
+            commands::cmd_teb(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

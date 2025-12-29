@@ -1086,3 +1086,99 @@ pub unsafe fn create_ldr_entry_for_module(
 
     entry
 }
+
+// ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// PEB pool statistics
+#[derive(Debug, Clone, Copy)]
+pub struct PebPoolStats {
+    /// Maximum PEBs
+    pub max_pebs: usize,
+    /// Allocated PEBs
+    pub allocated_count: usize,
+    /// Free PEBs
+    pub free_count: usize,
+    /// Max LDR entries
+    pub max_ldr_entries: usize,
+    /// Allocated LDR entries
+    pub ldr_entries_allocated: usize,
+}
+
+/// Get PEB pool statistics
+pub fn get_peb_pool_stats() -> PebPoolStats {
+    let peb_bitmap = unsafe { PEB_POOL_BITMAP };
+    let ldr_bitmap = unsafe { LDR_ENTRY_POOL_BITMAP };
+    let peb_count = peb_bitmap.count_ones() as usize;
+    let ldr_count = ldr_bitmap.count_ones() as usize;
+
+    PebPoolStats {
+        max_pebs: crate::ps::MAX_PROCESSES,
+        allocated_count: peb_count,
+        free_count: crate::ps::MAX_PROCESSES - peb_count,
+        max_ldr_entries: MAX_LDR_ENTRIES,
+        ldr_entries_allocated: ldr_count,
+    }
+}
+
+/// PEB snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct PebSnapshot {
+    /// Index in pool
+    pub index: u32,
+    /// Address
+    pub address: u64,
+    /// Image base
+    pub image_base: u64,
+    /// Has LDR data
+    pub has_ldr: bool,
+    /// OS version
+    pub os_major: u32,
+    pub os_minor: u32,
+    pub os_build: u16,
+}
+
+impl PebSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            index: 0,
+            address: 0,
+            image_base: 0,
+            has_ldr: false,
+            os_major: 0,
+            os_minor: 0,
+            os_build: 0,
+        }
+    }
+}
+
+/// Get PEB snapshots
+pub fn ps_get_peb_snapshots(max_count: usize) -> ([PebSnapshot; 32], usize) {
+    let mut snapshots = [PebSnapshot::empty(); 32];
+    let mut count = 0;
+    let limit = max_count.min(32).min(crate::ps::MAX_PROCESSES);
+    let bitmap = unsafe { PEB_POOL_BITMAP };
+
+    for i in 0..crate::ps::MAX_PROCESSES {
+        if count >= limit {
+            break;
+        }
+
+        if (bitmap & (1 << i)) != 0 {
+            let peb = unsafe { &PEB_POOL[i] };
+            snapshots[count] = PebSnapshot {
+                index: i as u32,
+                address: peb as *const Peb as u64,
+                image_base: peb.image_base_address as u64,
+                has_ldr: !peb.ldr.is_null(),
+                os_major: peb.os_major_version,
+                os_minor: peb.os_minor_version,
+                os_build: peb.os_build_number,
+            };
+            count += 1;
+        }
+    }
+
+    (snapshots, count)
+}

@@ -780,3 +780,104 @@ pub unsafe fn init_teb(
 pub fn get_teb_gs_base(teb: *const Teb) -> u64 {
     teb as u64
 }
+
+// ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// TEB pool statistics
+#[derive(Debug, Clone, Copy)]
+pub struct TebPoolStats {
+    /// Maximum TEBs
+    pub max_tebs: usize,
+    /// Allocated TEBs
+    pub allocated_count: usize,
+    /// Free TEBs
+    pub free_count: usize,
+}
+
+/// Get TEB pool statistics
+pub fn get_teb_pool_stats() -> TebPoolStats {
+    let mut teb_count = 0usize;
+    unsafe {
+        for i in 0..4 {
+            teb_count += TEB_POOL_BITMAP[i].count_ones() as usize;
+        }
+    }
+
+    TebPoolStats {
+        max_tebs: crate::ps::MAX_THREADS,
+        allocated_count: teb_count,
+        free_count: crate::ps::MAX_THREADS - teb_count,
+    }
+}
+
+/// TEB snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct TebSnapshot {
+    /// Index in pool
+    pub index: u32,
+    /// Address
+    pub address: u64,
+    /// Process ID
+    pub pid: u32,
+    /// Thread ID
+    pub tid: u32,
+    /// Stack base
+    pub stack_base: u64,
+    /// Stack limit
+    pub stack_limit: u64,
+    /// Last error code
+    pub last_error: u32,
+    /// Has PEB pointer
+    pub has_peb: bool,
+}
+
+impl TebSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            index: 0,
+            address: 0,
+            pid: 0,
+            tid: 0,
+            stack_base: 0,
+            stack_limit: 0,
+            last_error: 0,
+            has_peb: false,
+        }
+    }
+}
+
+/// Get TEB snapshots
+pub fn ps_get_teb_snapshots(max_count: usize) -> ([TebSnapshot; 64], usize) {
+    let mut snapshots = [TebSnapshot::empty(); 64];
+    let mut count = 0;
+    let limit = max_count.min(64).min(crate::ps::MAX_THREADS);
+
+    for i in 0..crate::ps::MAX_THREADS {
+        if count >= limit {
+            break;
+        }
+
+        let bitmap_idx = i / 64;
+        let bit_idx = i % 64;
+        let is_allocated = unsafe { (TEB_POOL_BITMAP[bitmap_idx] & (1 << bit_idx)) != 0 };
+
+        if is_allocated {
+            let teb = unsafe { &TEB_POOL[i] };
+            snapshots[count] = TebSnapshot {
+                index: i as u32,
+                address: teb as *const Teb as u64,
+                pid: teb.client_id.unique_process as u32,
+                tid: teb.client_id.unique_thread as u32,
+                stack_base: teb.nt_tib.stack_base as u64,
+                stack_limit: teb.nt_tib.stack_limit as u64,
+                last_error: teb.last_error_value,
+                has_peb: !teb.process_environment_block.is_null(),
+            };
+            count += 1;
+        }
+    }
+
+    (snapshots, count)
+}

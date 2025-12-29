@@ -96,6 +96,9 @@ pub use peb::{
     allocate_ldr_entry, free_ldr_entry, init_ldr_entry,
     add_ldr_entry_to_lists, create_ldr_entry_for_module,
     MAX_LDR_ENTRIES,
+    // Inspection
+    PebPoolStats, PebSnapshot,
+    get_peb_pool_stats, ps_get_peb_snapshots,
 };
 
 pub use teb::{
@@ -105,6 +108,9 @@ pub use teb::{
     get_last_error, set_last_error,
     // TEB allocation and initialization
     allocate_teb, free_teb, init_teb, get_teb_gs_base,
+    // Inspection
+    TebPoolStats, TebSnapshot,
+    get_teb_pool_stats, ps_get_teb_snapshots,
 };
 
 /// Initialize the Process Manager
