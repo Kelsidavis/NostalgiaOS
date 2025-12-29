@@ -1228,3 +1228,175 @@ pub unsafe fn ke_set_context(context: *const Context) -> i32 {
 
     0 // STATUS_SUCCESS
 }
+
+// =============================================================================
+// Exception History Tracking
+// =============================================================================
+
+/// Maximum number of exceptions to track in history
+pub const EXCEPTION_HISTORY_SIZE: usize = 64;
+
+/// Exception history entry
+#[derive(Clone, Copy)]
+pub struct ExceptionHistoryEntry {
+    /// Exception code
+    pub code: u32,
+    /// Exception address (RIP where exception occurred)
+    pub address: u64,
+    /// Additional info (e.g., fault address for access violation)
+    pub info: u64,
+    /// Stack pointer at time of exception
+    pub rsp: u64,
+    /// Timestamp (TSC value)
+    pub timestamp: u64,
+    /// Exception flags
+    pub flags: u32,
+    /// Was this handled?
+    pub handled: bool,
+    /// First chance or second chance
+    pub first_chance: bool,
+    /// Entry is valid
+    pub valid: bool,
+}
+
+impl ExceptionHistoryEntry {
+    pub const fn new() -> Self {
+        Self {
+            code: 0,
+            address: 0,
+            info: 0,
+            rsp: 0,
+            timestamp: 0,
+            flags: 0,
+            handled: false,
+            first_chance: true,
+            valid: false,
+        }
+    }
+}
+
+/// Exception history buffer
+struct ExceptionHistory {
+    /// Circular buffer of entries
+    entries: [ExceptionHistoryEntry; EXCEPTION_HISTORY_SIZE],
+    /// Index of next entry to write
+    write_index: usize,
+    /// Total exceptions recorded (may wrap)
+    total_count: u64,
+}
+
+impl ExceptionHistory {
+    const fn new() -> Self {
+        Self {
+            entries: [ExceptionHistoryEntry::new(); EXCEPTION_HISTORY_SIZE],
+            write_index: 0,
+            total_count: 0,
+        }
+    }
+}
+
+/// Global exception history
+static EXCEPTION_HISTORY: Mutex<ExceptionHistory> = Mutex::new(ExceptionHistory::new());
+
+/// Record an exception in the history
+pub fn record_exception(
+    code: u32,
+    address: u64,
+    info: u64,
+    rsp: u64,
+    flags: u32,
+    first_chance: bool,
+    handled: bool,
+) {
+    let timestamp = read_tsc();
+
+    let mut history = EXCEPTION_HISTORY.lock();
+    let index = history.write_index;
+
+    history.entries[index] = ExceptionHistoryEntry {
+        code,
+        address,
+        info,
+        rsp,
+        timestamp,
+        flags,
+        handled,
+        first_chance,
+        valid: true,
+    };
+
+    history.write_index = (index + 1) % EXCEPTION_HISTORY_SIZE;
+    history.total_count += 1;
+}
+
+/// Read TSC (Time Stamp Counter)
+#[inline]
+fn read_tsc() -> u64 {
+    unsafe {
+        core::arch::x86_64::_rdtsc()
+    }
+}
+
+/// Get exception history entries
+///
+/// Returns entries from most recent to oldest
+pub fn get_exception_history() -> ([ExceptionHistoryEntry; EXCEPTION_HISTORY_SIZE], usize, u64) {
+    let history = EXCEPTION_HISTORY.lock();
+    (history.entries, history.write_index, history.total_count)
+}
+
+/// Clear exception history
+pub fn clear_exception_history() {
+    let mut history = EXCEPTION_HISTORY.lock();
+    history.entries = [ExceptionHistoryEntry::new(); EXCEPTION_HISTORY_SIZE];
+    history.write_index = 0;
+    history.total_count = 0;
+}
+
+/// Get exception code name
+pub fn exception_code_name(code: u32) -> &'static str {
+    match code {
+        ExceptionCode::EXCEPTION_ACCESS_VIOLATION => "ACCESS_VIOLATION",
+        ExceptionCode::EXCEPTION_ARRAY_BOUNDS_EXCEEDED => "ARRAY_BOUNDS",
+        ExceptionCode::EXCEPTION_BREAKPOINT => "BREAKPOINT",
+        ExceptionCode::EXCEPTION_DATATYPE_MISALIGNMENT => "MISALIGNMENT",
+        ExceptionCode::EXCEPTION_FLT_DENORMAL_OPERAND => "FLT_DENORMAL",
+        ExceptionCode::EXCEPTION_FLT_DIVIDE_BY_ZERO => "FLT_DIV_ZERO",
+        ExceptionCode::EXCEPTION_FLT_INEXACT_RESULT => "FLT_INEXACT",
+        ExceptionCode::EXCEPTION_FLT_INVALID_OPERATION => "FLT_INVALID",
+        ExceptionCode::EXCEPTION_FLT_OVERFLOW => "FLT_OVERFLOW",
+        ExceptionCode::EXCEPTION_FLT_STACK_CHECK => "FLT_STACK",
+        ExceptionCode::EXCEPTION_FLT_UNDERFLOW => "FLT_UNDERFLOW",
+        ExceptionCode::EXCEPTION_ILLEGAL_INSTRUCTION => "ILLEGAL_INSN",
+        ExceptionCode::EXCEPTION_IN_PAGE_ERROR => "IN_PAGE_ERROR",
+        ExceptionCode::EXCEPTION_INT_DIVIDE_BY_ZERO => "INT_DIV_ZERO",
+        ExceptionCode::EXCEPTION_INT_OVERFLOW => "INT_OVERFLOW",
+        ExceptionCode::EXCEPTION_INVALID_DISPOSITION => "INVALID_DISP",
+        ExceptionCode::EXCEPTION_NONCONTINUABLE_EXCEPTION => "NONCONTINUABLE",
+        ExceptionCode::EXCEPTION_PRIV_INSTRUCTION => "PRIV_INSN",
+        ExceptionCode::EXCEPTION_SINGLE_STEP => "SINGLE_STEP",
+        ExceptionCode::EXCEPTION_STACK_OVERFLOW => "STACK_OVERFLOW",
+        // CPU exceptions (interrupt vectors)
+        0x00 => "DIVIDE_ERROR",
+        0x01 => "DEBUG",
+        0x02 => "NMI",
+        0x03 => "BREAKPOINT",
+        0x04 => "OVERFLOW",
+        0x05 => "BOUND_RANGE",
+        0x06 => "INVALID_OPCODE",
+        0x07 => "DEVICE_NOT_AVAIL",
+        0x08 => "DOUBLE_FAULT",
+        0x0A => "INVALID_TSS",
+        0x0B => "SEGMENT_NOT_PRESENT",
+        0x0C => "STACK_FAULT",
+        0x0D => "GENERAL_PROTECTION",
+        0x0E => "PAGE_FAULT",
+        0x10 => "X87_FPU_ERROR",
+        0x11 => "ALIGNMENT_CHECK",
+        0x12 => "MACHINE_CHECK",
+        0x13 => "SIMD_FP",
+        0x14 => "VIRTUALIZATION",
+        0x15 => "CONTROL_PROTECTION",
+        _ => "UNKNOWN",
+    }
+}

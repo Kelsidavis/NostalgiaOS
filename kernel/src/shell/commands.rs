@@ -123,6 +123,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    stack (bt)     Stack trace/backtrace (trace, dump)");
         outln!("    hpet           HPET timer viewer (status, timers)");
         outln!("    smbios (dmi)   SMBIOS/DMI system info (bios, cpu, mem)");
+        outln!("    exception      Exception history viewer (list, stats)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -9386,5 +9387,367 @@ fn show_smbios_type(type_num: u8) {
         }
     } else {
         outln!("SMBIOS not available");
+    }
+}
+
+// ============================================================================
+// Exception History Command
+// ============================================================================
+
+/// Exception history viewer command
+pub fn cmd_exception(args: &[&str]) {
+    if args.is_empty() {
+        show_exception_overview();
+        return;
+    }
+
+    let cmd = args[0];
+    if eq_ignore_case(cmd, "help") {
+        show_exception_help();
+    } else if eq_ignore_case(cmd, "list") || eq_ignore_case(cmd, "history") {
+        let count = if args.len() > 1 {
+            parse_number(args[1]).unwrap_or(20) as usize
+        } else {
+            20
+        };
+        show_exception_list(count);
+    } else if eq_ignore_case(cmd, "detail") || eq_ignore_case(cmd, "show") {
+        if args.len() > 1 {
+            let index = parse_number(args[1]).unwrap_or(0) as usize;
+            show_exception_detail(index);
+        } else {
+            outln!("Usage: exception detail <index>");
+        }
+    } else if eq_ignore_case(cmd, "stats") || eq_ignore_case(cmd, "summary") {
+        show_exception_stats();
+    } else if eq_ignore_case(cmd, "clear") {
+        clear_exception_history();
+        outln!("Exception history cleared");
+    } else if eq_ignore_case(cmd, "test") {
+        if args.len() > 1 {
+            test_exception(args[1]);
+        } else {
+            outln!("Usage: exception test <type>");
+            outln!("  Types: div0, breakpoint, gpf, pagefault");
+        }
+    } else {
+        outln!("Unknown exception command: {}", cmd);
+        show_exception_help();
+    }
+}
+
+fn show_exception_help() {
+    outln!("Exception History Viewer");
+    outln!("");
+    outln!("Usage: exception <command>");
+    outln!("");
+    outln!("Commands:");
+    outln!("  (none)        Show overview/status");
+    outln!("  list [n]      Show last n exceptions (default 20)");
+    outln!("  detail <idx>  Show detailed info for exception #idx");
+    outln!("  stats         Show exception statistics");
+    outln!("  clear         Clear exception history");
+    outln!("  test <type>   Trigger test exception");
+    outln!("");
+    outln!("Test types:");
+    outln!("  div0          Integer divide by zero");
+    outln!("  breakpoint    Software breakpoint (INT 3)");
+    outln!("  gpf           General protection fault");
+    outln!("  pagefault     Page fault (null pointer)");
+}
+
+fn show_exception_overview() {
+    use crate::ke::exception::{get_exception_history, EXCEPTION_HISTORY_SIZE};
+
+    let (entries, write_index, total_count) = get_exception_history();
+
+    outln!("Exception History");
+    outln!("=================");
+    outln!("");
+    outln!("Total exceptions recorded: {}", total_count);
+    outln!("Buffer size: {} entries", EXCEPTION_HISTORY_SIZE);
+    outln!("Current write index: {}", write_index);
+
+    // Count valid entries
+    let valid_count = entries.iter().filter(|e| e.valid).count();
+    outln!("Valid entries in buffer: {}", valid_count);
+
+    if valid_count > 0 {
+        outln!("");
+        outln!("Most recent exceptions:");
+        outln!("------------------------");
+
+        // Show last 5 entries
+        let mut shown = 0;
+        let mut idx = if write_index == 0 { EXCEPTION_HISTORY_SIZE - 1 } else { write_index - 1 };
+        while shown < 5 && shown < valid_count {
+            let entry = &entries[idx];
+            if entry.valid {
+                let code_name = crate::ke::exception::exception_code_name(entry.code);
+                let handled = if entry.handled { "H" } else { "-" };
+                let chance = if entry.first_chance { "1st" } else { "2nd" };
+                outln!("  #{:<2} {:#010x} {:16} {} {} addr={:#x}",
+                    shown, entry.code, code_name, handled, chance, entry.address);
+                shown += 1;
+            }
+            if idx == 0 {
+                idx = EXCEPTION_HISTORY_SIZE - 1;
+            } else {
+                idx -= 1;
+            }
+            if idx == write_index {
+                break;
+            }
+        }
+    }
+
+    outln!("");
+    outln!("Use 'exception list' for full history");
+    outln!("Use 'exception help' for all commands");
+}
+
+fn show_exception_list(count: usize) {
+    use crate::ke::exception::{get_exception_history, EXCEPTION_HISTORY_SIZE};
+
+    let (entries, write_index, total_count) = get_exception_history();
+
+    let valid_count = entries.iter().filter(|e| e.valid).count();
+    let show_count = count.min(valid_count);
+
+    if valid_count == 0 {
+        outln!("No exceptions in history");
+        return;
+    }
+
+    outln!("Exception History (showing {} of {})", show_count, valid_count);
+    outln!("");
+    outln!("{:<4} {:<12} {:<18} {:<3} {:<3} {:<18} {:<18}",
+        "#", "Code", "Type", "H", "Ch", "Address", "Info");
+    outln!("--------------------------------------------------------------------------------");
+
+    let mut shown = 0;
+    let mut idx = if write_index == 0 { EXCEPTION_HISTORY_SIZE - 1 } else { write_index - 1 };
+
+    while shown < show_count {
+        let entry = &entries[idx];
+        if entry.valid {
+            let code_name = crate::ke::exception::exception_code_name(entry.code);
+            let handled = if entry.handled { "Y" } else { "N" };
+            let chance = if entry.first_chance { "1" } else { "2" };
+            outln!("{:<4} {:#010x} {:18} {:3} {:3} {:#018x} {:#018x}",
+                shown, entry.code, code_name, handled, chance, entry.address, entry.info);
+            shown += 1;
+        }
+        if idx == 0 {
+            idx = EXCEPTION_HISTORY_SIZE - 1;
+        } else {
+            idx -= 1;
+        }
+        if idx == write_index {
+            break;
+        }
+    }
+
+    if total_count > EXCEPTION_HISTORY_SIZE as u64 {
+        outln!("");
+        outln!("(History has wrapped; {} older entries lost)",
+            total_count - EXCEPTION_HISTORY_SIZE as u64);
+    }
+}
+
+fn show_exception_detail(index: usize) {
+    use crate::ke::exception::{get_exception_history, EXCEPTION_HISTORY_SIZE};
+
+    let (entries, write_index, _total_count) = get_exception_history();
+
+    // Convert display index to buffer index (most recent = 0)
+    let mut buf_idx = if write_index == 0 { EXCEPTION_HISTORY_SIZE - 1 } else { write_index - 1 };
+    let mut current = 0;
+
+    while current < index {
+        if buf_idx == 0 {
+            buf_idx = EXCEPTION_HISTORY_SIZE - 1;
+        } else {
+            buf_idx -= 1;
+        }
+        if entries[buf_idx].valid {
+            current += 1;
+        }
+        if buf_idx == write_index {
+            outln!("Exception #{} not found", index);
+            return;
+        }
+    }
+
+    let entry = &entries[buf_idx];
+    if !entry.valid {
+        outln!("Exception #{} not found", index);
+        return;
+    }
+
+    let code_name = crate::ke::exception::exception_code_name(entry.code);
+
+    outln!("Exception #{} Details", index);
+    outln!("=====================");
+    outln!("");
+    outln!("Exception Code:   {:#010x} ({})", entry.code, code_name);
+    outln!("Exception Flags:  {:#010x}", entry.flags);
+    outln!("Address (RIP):    {:#018x}", entry.address);
+    outln!("Additional Info:  {:#018x}", entry.info);
+    outln!("Stack Pointer:    {:#018x}", entry.rsp);
+    outln!("Timestamp (TSC):  {}", entry.timestamp);
+    outln!("First Chance:     {}", if entry.first_chance { "Yes" } else { "No" });
+    outln!("Handled:          {}", if entry.handled { "Yes" } else { "No" });
+
+    // Decode flags
+    outln!("");
+    outln!("Flags Decoded:");
+    if entry.flags == 0 {
+        outln!("  CONTINUABLE");
+    }
+    if entry.flags & 0x01 != 0 {
+        outln!("  NONCONTINUABLE");
+    }
+    if entry.flags & 0x02 != 0 {
+        outln!("  UNWINDING");
+    }
+    if entry.flags & 0x04 != 0 {
+        outln!("  EXIT_UNWIND");
+    }
+    if entry.flags & 0x08 != 0 {
+        outln!("  STACK_INVALID");
+    }
+    if entry.flags & 0x10 != 0 {
+        outln!("  NESTED_CALL");
+    }
+
+    // Decode exception-specific info
+    if entry.code == 0xC0000005 || entry.code == 0x0E {
+        // Access violation or page fault
+        outln!("");
+        outln!("Access Violation Details:");
+        let access_type = entry.info & 0xFF;
+        match access_type {
+            0 => outln!("  Type: Read access"),
+            1 => outln!("  Type: Write access"),
+            8 => outln!("  Type: DEP violation"),
+            _ => outln!("  Type: Unknown ({})", access_type),
+        }
+    }
+}
+
+fn show_exception_stats() {
+    use crate::ke::exception::{get_exception_history, EXCEPTION_HISTORY_SIZE, ExceptionCode};
+
+    let (entries, _write_index, total_count) = get_exception_history();
+
+    let valid_count = entries.iter().filter(|e| e.valid).count();
+
+    outln!("Exception Statistics");
+    outln!("====================");
+    outln!("");
+    outln!("Total recorded:    {}", total_count);
+    outln!("In current buffer: {}", valid_count);
+    outln!("Buffer capacity:   {}", EXCEPTION_HISTORY_SIZE);
+
+    if valid_count == 0 {
+        return;
+    }
+
+    // Count by type
+    let mut access_violation = 0u32;
+    let mut breakpoint = 0u32;
+    let mut div_zero = 0u32;
+    let mut page_fault = 0u32;
+    let mut gpf = 0u32;
+    let mut other = 0u32;
+    let mut handled = 0u32;
+    let mut first_chance = 0u32;
+
+    for entry in entries.iter() {
+        if !entry.valid {
+            continue;
+        }
+        match entry.code {
+            c if c == ExceptionCode::EXCEPTION_ACCESS_VIOLATION => access_violation += 1,
+            c if c == ExceptionCode::EXCEPTION_BREAKPOINT || c == 0x03 => breakpoint += 1,
+            c if c == ExceptionCode::EXCEPTION_INT_DIVIDE_BY_ZERO || c == 0x00 => div_zero += 1,
+            0x0E => page_fault += 1,
+            0x0D => gpf += 1,
+            _ => other += 1,
+        }
+        if entry.handled {
+            handled += 1;
+        }
+        if entry.first_chance {
+            first_chance += 1;
+        }
+    }
+
+    outln!("");
+    outln!("By Exception Type:");
+    if access_violation > 0 { outln!("  Access Violation:  {}", access_violation); }
+    if breakpoint > 0 { outln!("  Breakpoint:        {}", breakpoint); }
+    if div_zero > 0 { outln!("  Divide by Zero:    {}", div_zero); }
+    if page_fault > 0 { outln!("  Page Fault:        {}", page_fault); }
+    if gpf > 0 { outln!("  GP Fault:          {}", gpf); }
+    if other > 0 { outln!("  Other:             {}", other); }
+
+    outln!("");
+    outln!("Handling Statistics:");
+    outln!("  Handled:           {} ({:.1}%)", handled,
+        (handled as f64 / valid_count as f64) * 100.0);
+    outln!("  First chance:      {} ({:.1}%)", first_chance,
+        (first_chance as f64 / valid_count as f64) * 100.0);
+}
+
+fn clear_exception_history() {
+    crate::ke::exception::clear_exception_history();
+}
+
+fn test_exception(exc_type: &str) {
+    use crate::ke::exception::record_exception;
+
+    outln!("Generating test exception: {}", exc_type);
+
+    if eq_ignore_case(exc_type, "div0") {
+        // Record first since the actual exception might crash
+        record_exception(0x00, 0, 0, 0, 0, true, false);
+        outln!("  Triggering divide by zero...");
+        unsafe {
+            core::arch::asm!(
+                "xor eax, eax",
+                "xor edx, edx",
+                "div eax",  // Divide by zero
+                options(nomem, nostack)
+            );
+        }
+    } else if eq_ignore_case(exc_type, "breakpoint") || eq_ignore_case(exc_type, "int3") {
+        record_exception(0x03, 0, 0, 0, 0, true, false);
+        outln!("  Triggering breakpoint...");
+        unsafe {
+            core::arch::asm!("int3", options(nomem, nostack));
+        }
+    } else if eq_ignore_case(exc_type, "gpf") {
+        record_exception(0x0D, 0, 0, 0, 0, true, false);
+        outln!("  Triggering general protection fault...");
+        unsafe {
+            // Load invalid segment selector
+            core::arch::asm!(
+                "mov ax, 0xFFFF",
+                "mov ds, ax",
+                options(nomem, nostack)
+            );
+        }
+    } else if eq_ignore_case(exc_type, "pagefault") || eq_ignore_case(exc_type, "pf") {
+        record_exception(0x0E, 0, 0, 0, 0, true, false);
+        outln!("  Triggering page fault (null pointer)...");
+        unsafe {
+            let null_ptr: *mut u8 = core::ptr::null_mut();
+            core::ptr::write_volatile(null_ptr, 0);
+        }
+    } else {
+        outln!("Unknown exception type: {}", exc_type);
+        outln!("Available: div0, breakpoint, gpf, pagefault");
     }
 }

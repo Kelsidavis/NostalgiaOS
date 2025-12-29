@@ -149,7 +149,7 @@ const COMMANDS: &[&str] = &[
     "acpi", "apic",
     "bt",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
-    "debug", "del", "desc", "descriptor", "dir", "dmi", "dump", "echo", "erase", "ex", "exit",
+    "debug", "del", "desc", "descriptor", "dir", "dmi", "dump", "echo", "erase", "ex", "exception", "exit",
     "hal", "help", "history", "hpet",
     "int", "io",
     "ke",
@@ -1137,6 +1137,9 @@ impl Shell {
         // SMBIOS/DMI viewer
         } else if eq_ignore_case(cmd, "smbios") || eq_ignore_case(cmd, "dmi") {
             commands::cmd_smbios(&args[1..argc]);
+        // Exception history viewer
+        } else if eq_ignore_case(cmd, "exception") || eq_ignore_case(cmd, "exc") {
+            commands::cmd_exception(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
