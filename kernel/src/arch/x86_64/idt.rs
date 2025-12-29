@@ -23,6 +23,7 @@ use crate::hal::apic;
 pub mod vector {
     pub const TIMER: u8 = 32;
     pub const KEYBOARD: u8 = 33;
+    pub const TLB_SHOOTDOWN: u8 = 0xFE;
     pub const SPURIOUS: u8 = 0xFF;
 }
 
@@ -74,6 +75,9 @@ static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
 
     // Keyboard interrupt (vector 33) - PS/2 keyboard
     idt[vector::KEYBOARD].set_handler_fn(keyboard_interrupt_handler);
+
+    // TLB shootdown IPI handler (vector 0xFE)
+    idt[vector::TLB_SHOOTDOWN].set_handler_fn(tlb_shootdown_ipi_handler);
 
     // Spurious interrupt handler
     idt[vector::SPURIOUS].set_handler_fn(spurious_interrupt_handler);
@@ -254,6 +258,16 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     unsafe {
         crate::arch::io::outb(0x20, 0x20);
     }
+}
+
+/// TLB shootdown IPI handler (vector 0xFE)
+/// Called when this CPU receives a TLB shootdown request from another CPU
+extern "x86-interrupt" fn tlb_shootdown_ipi_handler(_stack_frame: InterruptStackFrame) {
+    // Call the TLB shootdown handler in mm::tlb
+    unsafe {
+        crate::mm::tlb_shootdown_handler();
+    }
+    // EOI is sent by the handler
 }
 
 /// Spurious interrupt handler (vector 0xFF)

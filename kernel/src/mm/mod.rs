@@ -29,6 +29,7 @@ pub mod address;
 pub mod physical;
 pub mod user;
 pub mod section;
+pub mod tlb;
 
 // Re-export PFN types
 pub use pfn::{
@@ -70,7 +71,9 @@ pub use pte::{
     mm_get_pte,
     mm_virtual_to_physical,
     mm_invalidate_page,
+    mm_invalidate_page_local,
     mm_flush_tlb,
+    mm_flush_tlb_local,
     mm_get_cr3,
     mm_set_cr3,
 };
@@ -207,6 +210,18 @@ pub use section::{
     SECTION_ALLOCATION_GRANULARITY,
 };
 
+// Re-export TLB shootdown types
+pub use tlb::{
+    TlbInvalidationType,
+    TlbShootdownRequest,
+    TLB_SHOOTDOWN_VECTOR,
+    tlb_shootdown_single_page,
+    tlb_shootdown_range,
+    tlb_shootdown_all,
+    tlb_shootdown_handler,
+    get_shootdown_stats,
+};
+
 /// Initialize the Memory Manager
 ///
 /// This initializes all memory management subsystems:
@@ -239,6 +254,9 @@ pub unsafe fn init(boot_info: &crate::BootInfo) {
 
     // Initialize section subsystem
     section::init();
+
+    // Initialize TLB shootdown subsystem
+    tlb::init();
 
     crate::serial_println!("[MM] Memory Manager initialized");
 }

@@ -414,9 +414,12 @@ pub unsafe fn mm_virtual_to_physical(pml4_phys: u64, virt_addr: u64) -> Option<u
     Some(page_phys + offset)
 }
 
-/// Invalidate TLB entry for a virtual address
+/// Invalidate TLB entry for a virtual address (local CPU only)
+///
+/// This only invalidates the TLB on the current CPU. For SMP systems,
+/// use mm_invalidate_page() which performs TLB shootdown across all CPUs.
 #[inline]
-pub fn mm_invalidate_page(virt_addr: u64) {
+pub fn mm_invalidate_page_local(virt_addr: u64) {
     unsafe {
         core::arch::asm!(
             "invlpg [{}]",
@@ -426,14 +429,37 @@ pub fn mm_invalidate_page(virt_addr: u64) {
     }
 }
 
-/// Flush the entire TLB (reload CR3)
+/// Flush the entire TLB (reload CR3) on local CPU only
+///
+/// This only flushes the TLB on the current CPU. For SMP systems,
+/// use mm_flush_tlb() which performs TLB shootdown across all CPUs.
 #[inline]
-pub fn mm_flush_tlb() {
+pub fn mm_flush_tlb_local() {
     unsafe {
         let cr3: u64;
         core::arch::asm!("mov {}, cr3", out(reg) cr3, options(nostack, preserves_flags));
         core::arch::asm!("mov cr3, {}", in(reg) cr3, options(nostack, preserves_flags));
     }
+}
+
+/// Invalidate TLB entry for a virtual address (all CPUs)
+///
+/// In SMP systems, this performs TLB shootdown across all CPUs.
+/// In single-CPU systems, this is equivalent to mm_invalidate_page_local().
+#[inline]
+pub fn mm_invalidate_page(virt_addr: u64) {
+    // Forward to TLB shootdown module which handles both single and multi-CPU cases
+    super::tlb::tlb_shootdown_single_page(virt_addr);
+}
+
+/// Flush the entire TLB (all CPUs)
+///
+/// In SMP systems, this performs TLB shootdown across all CPUs.
+/// In single-CPU systems, this is equivalent to mm_flush_tlb_local().
+#[inline]
+pub fn mm_flush_tlb() {
+    // Forward to TLB shootdown module which handles both single and multi-CPU cases
+    super::tlb::tlb_shootdown_all();
 }
 
 /// Get current CR3 value
