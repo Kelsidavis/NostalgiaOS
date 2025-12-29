@@ -117,6 +117,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    io <cmd>       I/O Manager (block, volumes, pipes)");
         outln!("    ex <cmd>       Executive (worker, callback)");
         outln!("    se <cmd>       Security (sids, privileges, token)");
+        outln!("    hal <cmd>      Hardware Abstraction (time, apic, tick)");
         outln!("    rtl <cmd>      Runtime Library (time, random, crc32)");
         outln!("    ldr <cmd>      Loader (info, modules, dll)");
         outln!("    pe <file>      Parse PE/DLL file headers");
@@ -3705,5 +3706,96 @@ pub fn cmd_io(args: &[&str]) {
         outln!("(Detailed IOCP status not yet implemented)");
     } else {
         outln!("Unknown io command: {}", cmd);
+    }
+}
+
+// ============================================================================
+// Hardware Abstraction Layer (HAL) Command
+// ============================================================================
+
+/// Hardware Abstraction Layer (HAL) shell command
+pub fn cmd_hal(args: &[&str]) {
+    use crate::hal;
+
+    if args.is_empty() {
+        outln!("Hardware Abstraction Layer (HAL) Commands");
+        outln!("");
+        outln!("Usage: hal <command> [args]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  info               Show HAL information");
+        outln!("  time               Show RTC date/time");
+        outln!("  apic               Show APIC status");
+        outln!("  tick               Show system tick count");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "info") {
+        outln!("Hardware Abstraction Layer Information");
+        outln!("");
+        outln!("Components:");
+        outln!("  PIC:    8259 Programmable Interrupt Controller");
+        outln!("  APIC:   Advanced Programmable Interrupt Controller");
+        outln!("  RTC:    Real-Time Clock (CMOS)");
+        outln!("  ATA:    IDE/PATA disk controller");
+        outln!("  ACPI:   Power management (stub)");
+        outln!("");
+        outln!("Interrupt Routing:");
+        outln!("  IRQ 0:  Timer (PIT or APIC timer)");
+        outln!("  IRQ 1:  Keyboard");
+        outln!("  IRQ 8:  RTC");
+        outln!("  IRQ 14: Primary ATA");
+        outln!("  IRQ 15: Secondary ATA");
+    } else if eq_ignore_case(cmd, "time") {
+        outln!("Real-Time Clock");
+        outln!("");
+
+        let dt = hal::rtc::get_datetime();
+        outln!("Current Date/Time:");
+        outln!("  Date:   {:04}-{:02}-{:02}", dt.year, dt.month, dt.day);
+        outln!("  Time:   {:02}:{:02}:{:02}", dt.hour, dt.minute, dt.second);
+        outln!("  Day:    {} (1=Sun)", dt.day_of_week);
+        outln!("");
+
+        let boot_time = hal::rtc::get_boot_time();
+        let system_time = hal::rtc::get_system_time();
+        let uptime = hal::rtc::get_uptime_seconds();
+
+        outln!("Boot time:    {:#x} (FILETIME)", boot_time);
+        outln!("System time:  {:#x} (FILETIME)", system_time);
+        outln!("Uptime:       {} seconds", uptime);
+    } else if eq_ignore_case(cmd, "apic") {
+        outln!("Advanced Programmable Interrupt Controller");
+        outln!("");
+
+        let apic = hal::apic::get();
+        outln!("Local APIC:");
+        outln!("  Base address: {:#x}", apic.base_address());
+        outln!("  APIC ID:      {}", apic.id());
+        outln!("  Version:      {:#x}", apic.version());
+        outln!("");
+
+        let ticks = hal::apic::get_tick_count();
+        outln!("Timer:");
+        outln!("  Tick count:   {}", ticks);
+        outln!("  Current:      {}", apic.timer_current());
+    } else if eq_ignore_case(cmd, "tick") {
+        outln!("System Tick Counter");
+        outln!("");
+
+        let ticks = hal::apic::get_tick_count();
+        let uptime = hal::rtc::get_uptime_seconds();
+
+        outln!("APIC ticks:     {}", ticks);
+        outln!("Uptime:         {} seconds", uptime);
+
+        if uptime > 0 {
+            let ticks_per_sec = ticks / uptime;
+            outln!("Ticks/second:   ~{}", ticks_per_sec);
+        }
+    } else {
+        outln!("Unknown hal command: {}", cmd);
     }
 }

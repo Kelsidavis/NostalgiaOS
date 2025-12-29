@@ -1081,6 +1081,9 @@ impl Shell {
         // I/O Manager
         } else if eq_ignore_case(cmd, "io") {
             commands::cmd_io(&args[1..argc]);
+        // Hardware Abstraction Layer
+        } else if eq_ignore_case(cmd, "hal") {
+            commands::cmd_hal(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
