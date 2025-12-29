@@ -34,6 +34,7 @@ pub mod block;
 pub mod disk;
 pub mod iocp;
 pub mod pipe;
+pub mod ramdisk;
 
 // Re-export main structures and types
 pub use irp::{
@@ -160,6 +161,16 @@ pub use pipe::{
     DEFAULT_BUFFER_SIZE,
 };
 
+pub use ramdisk::{
+    create_ramdisk,
+    create_ramdisk_with_size,
+    destroy_ramdisk,
+    ramdisk_count,
+    DEFAULT_RAMDISK_SIZE,
+    MAX_RAMDISK_SIZE,
+    MAX_RAM_DISKS,
+};
+
 /// Initialize the I/O Manager
 ///
 /// This initializes all I/O subsystems in the correct order:
@@ -204,6 +215,9 @@ pub fn init_storage() {
 
     // Initialize ATA/IDE driver (detects disks)
     crate::hal::ata::init();
+
+    // Initialize RAM disk subsystem
+    ramdisk::init();
 
     // Initialize disk subsystem (scans partitions)
     disk::init();
