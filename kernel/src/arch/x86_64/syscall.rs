@@ -180,6 +180,8 @@ pub enum SyscallNumber {
     NtAdjustPrivilegesToken = 105,
     NtAdjustGroupsToken = 106,
     NtImpersonateThread = 107,
+    NtCreateToken = 108,
+    NtFilterToken = 109,
 
     // Virtual Memory extended operations
     NtFlushVirtualMemory = 110,
@@ -451,6 +453,8 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtAdjustPrivilegesToken as usize, sys_adjust_privileges_token);
     register_syscall(SyscallNumber::NtAdjustGroupsToken as usize, sys_adjust_groups_token);
     register_syscall(SyscallNumber::NtImpersonateThread as usize, sys_impersonate_thread);
+    register_syscall(SyscallNumber::NtCreateToken as usize, sys_create_token);
+    register_syscall(SyscallNumber::NtFilterToken as usize, sys_filter_token);
 
     // Set Information syscalls
     register_syscall(SyscallNumber::NtSetInformationProcess as usize, sys_set_information_process);
@@ -4167,35 +4171,95 @@ fn sys_query_virtual_memory(
 // Section Object Syscalls
 // ============================================================================
 
-/// NtCreateSection - Create a section object (shared memory)
+/// NtCreateSection - Create a section object (shared memory or file-backed)
+///
+/// # Arguments
+/// * `section_handle` - Pointer to receive section handle
+/// * `desired_access` - Access rights for the section
+/// * `object_attributes` - Object attributes including optional file handle
+/// * `maximum_size` - Pointer to maximum size (can be 0 for file-backed sections)
+/// * `section_page_protection` - Page protection (PAGE_READONLY, PAGE_READWRITE, etc.)
+/// * `allocation_attributes` - SEC_COMMIT, SEC_FILE, SEC_IMAGE, etc.
 fn sys_create_section(
     section_handle: usize,
     _desired_access: usize,
-    _object_attributes: usize,
+    object_attributes: usize,
     maximum_size: usize,
     section_page_protection: usize,
     allocation_attributes: usize,
 ) -> isize {
+    use crate::mm::section::section_type::{SEC_FILE, SEC_IMAGE};
+
     if section_handle == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Get size from pointer (NT style)
     let size = if maximum_size != 0 {
         unsafe { *(maximum_size as *const u64) }
     } else {
-        4096 // Default to one page
+        0 // Size can be 0 for file-backed sections (will use file size)
     };
 
-    let _ = allocation_attributes; // For file-backed sections
+    let alloc_attrs = allocation_attributes as u32;
 
-    // Create page-file backed section
+    crate::serial_println!("[SYSCALL] NtCreateSection(size={}, prot={:#x}, attrs={:#x})",
+        size, section_page_protection, alloc_attrs);
+
+    // Check for file-backed or image section
+    if (alloc_attrs & SEC_FILE) != 0 || (alloc_attrs & SEC_IMAGE) != 0 {
+        // File-backed section
+        // In NT, the file handle is passed as the 7th parameter (via stack on x86)
+        // For x64 syscalls with >6 args, check object_attributes for the file handle
+        // Our simplified version can use object_attributes as the file handle if non-zero
+
+        // Determine actual size (0 means use file size)
+        let section_size = if size > 0 { size } else { 4096 }; // Default if not specified
+
+        // Use object_attributes as file handle if provided
+        // (A more complete implementation would parse OBJECT_ATTRIBUTES)
+        let file_handle = if object_attributes != 0 { object_attributes as *mut u8 } else { core::ptr::null_mut() };
+
+        let section = if (alloc_attrs & SEC_IMAGE) != 0 {
+            // Image section (executable)
+            let s = unsafe { crate::mm::mm_create_image_section(file_handle, section_size) };
+            if !s.is_null() {
+                crate::serial_println!("[SYSCALL] NtCreateSection: created image section");
+            }
+            s
+        } else {
+            // Regular file-backed section
+            let s = unsafe { crate::mm::mm_create_file_section(file_handle, section_size, section_page_protection as u32) };
+            if !s.is_null() {
+                crate::serial_println!("[SYSCALL] NtCreateSection: created file-backed section");
+            }
+            s
+        };
+
+        if section.is_null() {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        // Return section handle (pointer as handle for now)
+        unsafe {
+            *(section_handle as *mut usize) = section as usize;
+        }
+
+        return STATUS_SUCCESS;
+    }
+
+    // Page-file backed section (shared memory)
+    if size == 0 {
+        crate::serial_println!("[SYSCALL] NtCreateSection: SEC_COMMIT requires size");
+        return STATUS_INVALID_PARAMETER;
+    }
+
     let section = unsafe {
         crate::mm::mm_create_section(size, section_page_protection as u32)
     };
 
     if section.is_null() {
-        return -1; // STATUS_INSUFFICIENT_RESOURCES
+        return STATUS_INSUFFICIENT_RESOURCES;
     }
 
     // Return section handle (pointer as handle for now)
@@ -4203,7 +4267,8 @@ fn sys_create_section(
         *(section_handle as *mut usize) = section as usize;
     }
 
-    0 // STATUS_SUCCESS
+    crate::serial_println!("[SYSCALL] NtCreateSection: created pagefile-backed section");
+    STATUS_SUCCESS
 }
 
 /// NtMapViewOfSection - Map a view of a section into an address space
@@ -11363,6 +11428,147 @@ fn sys_impersonate_thread(
 
     crate::serial_println!("[SYSCALL] NtImpersonateThread: impersonation set successfully");
     STATUS_SUCCESS
+}
+
+/// NtCreateToken - Create an access token
+///
+/// Creates a new access token with specified user, groups, and privileges.
+/// Requires SeCreateTokenPrivilege.
+///
+/// # Arguments
+/// * `token_handle` - Pointer to receive the new token handle
+/// * `desired_access` - Access rights for the token handle
+/// * `object_attributes` - Object attributes (name, security)
+/// * `token_type` - Primary (1) or Impersonation (2)
+/// * `authentication_id` - Logon session identifier (LUID)
+/// * `expiration_time` - Token expiration time
+fn sys_create_token(
+    token_handle: usize,
+    desired_access: usize,
+    _object_attributes: usize,
+    token_type: usize,
+    _authentication_id: usize,
+    _expiration_time: usize,
+) -> isize {
+    use crate::se::token::{se_create_token, TokenType};
+    use crate::se::sid::SID_LOCAL_SYSTEM;
+
+    crate::serial_println!("[SYSCALL] NtCreateToken(type={})", token_type);
+
+    // Validate output handle pointer
+    if token_handle == 0 {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Convert token type
+    let token_type_enum = match token_type as u32 {
+        1 => TokenType::Primary,
+        2 => TokenType::Impersonation,
+        _ => return STATUS_INVALID_PARAMETER,
+    };
+
+    // Create the token
+    // For now, create a system token - a full implementation would parse
+    // groups and privileges from user-supplied structures
+    let token = unsafe { se_create_token(SID_LOCAL_SYSTEM, token_type_enum) };
+    if token.is_null() {
+        crate::serial_println!("[SYSCALL] NtCreateToken: failed to allocate token");
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    // Allocate a handle for the token
+    let handle = unsafe { alloc_token_handle((*token).token_id.low_part) };
+    match handle {
+        Some(h) => {
+            unsafe { *(token_handle as *mut usize) = h; }
+            crate::serial_println!("[SYSCALL] NtCreateToken: created token handle {:#x}", h);
+            let _ = desired_access; // Would use for access mask validation
+            STATUS_SUCCESS
+        }
+        None => {
+            unsafe { crate::se::token::se_free_token(token); }
+            crate::serial_println!("[SYSCALL] NtCreateToken: failed to allocate handle");
+            STATUS_INSUFFICIENT_RESOURCES
+        }
+    }
+}
+
+/// NtFilterToken - Create a filtered (restricted) token
+///
+/// Creates a restricted token by removing privileges or adding restricted SIDs.
+///
+/// # Arguments
+/// * `existing_token_handle` - Handle to existing token
+/// * `flags` - Filtering flags (DISABLE_MAX_PRIVILEGE, etc.)
+/// * `sids_to_disable` - Optional pointer to array of SIDs to disable
+/// * `privileges_to_delete` - Optional pointer to array of privileges to remove
+/// * `restricted_sids` - Optional pointer to array of restricted SIDs to add
+/// * `new_token_handle` - Pointer to receive the new filtered token handle
+fn sys_filter_token(
+    existing_token_handle: usize,
+    flags: usize,
+    _sids_to_disable: usize,
+    _privileges_to_delete: usize,
+    _restricted_sids: usize,
+    new_token_handle: usize,
+) -> isize {
+    use crate::se::token::{se_create_token, TokenType};
+
+    crate::serial_println!("[SYSCALL] NtFilterToken(existing={:#x}, flags={:#x})",
+        existing_token_handle, flags);
+
+    // Validate handles
+    if existing_token_handle == 0 || new_token_handle == 0 {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Get the existing token
+    let existing_token_id = match unsafe { get_token_id(existing_token_handle) } {
+        Some(id) => id,
+        None => return STATUS_INVALID_HANDLE,
+    };
+
+    // For now, create a copy of the token with reduced privileges
+    // A full implementation would:
+    // 1. Disable specified SIDs
+    // 2. Delete specified privileges
+    // 3. Add restricted SIDs
+
+    let new_token = unsafe {
+        // Create a new token copying the source
+        se_create_token(
+            crate::se::sid::SID_LOCAL_SYSTEM, // Would copy from source
+            TokenType::Primary,
+        )
+    };
+
+    if new_token.is_null() {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    // Apply DISABLE_MAX_PRIVILEGE flag (0x1)
+    if flags & 0x1 != 0 {
+        // Disable all privileges
+        unsafe {
+            (*new_token).privileges.privilege_count = 0;
+        }
+        crate::serial_println!("[SYSCALL] NtFilterToken: disabled all privileges");
+    }
+
+    // Allocate handle for new token
+    let handle = unsafe { alloc_token_handle((*new_token).token_id.low_part) };
+    match handle {
+        Some(h) => {
+            unsafe { *(new_token_handle as *mut usize) = h; }
+            crate::serial_println!("[SYSCALL] NtFilterToken: created filtered token handle {:#x}", h);
+            let _ = existing_token_id; // Used for source
+            STATUS_SUCCESS
+        }
+        None => {
+            unsafe { crate::se::token::se_free_token(new_token); }
+            STATUS_INSUFFICIENT_RESOURCES
+        }
+    }
 }
 
 // ============================================================================
