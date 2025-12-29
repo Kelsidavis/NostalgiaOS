@@ -121,6 +121,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    apic           APIC viewer (lvt, ioapic, isr/irr)");
         outln!("    desc[riptor]   GDT/IDT viewer (gdt, idt, tss)");
         outln!("    stack (bt)     Stack trace/backtrace (trace, dump)");
+        outln!("    hpet           HPET timer viewer (status, timers)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -8528,6 +8529,234 @@ fn show_rsp_info() {
         for i in 0..4u64 {
             let val = core::ptr::read_unaligned((rsp + i * 8) as *const u64);
             outln!("  [RSP+0x{:02X}]: 0x{:016X}", i * 8, val);
+        }
+    }
+}
+
+// ============================================================================
+// HPET (High Precision Event Timer) Viewer
+// ============================================================================
+
+/// HPET viewer for high precision timer diagnostics
+pub fn cmd_hpet(args: &[&str]) {
+    // Standard HPET base address (can vary, normally found via ACPI)
+    // Common addresses: 0xFED00000, 0xFED01000, 0xFED02000, 0xFED03000
+    let hpet_base = 0xFED0_0000u64;
+
+    if args.is_empty() {
+        show_hpet_overview(hpet_base);
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "help") {
+        show_hpet_help();
+    } else if eq_ignore_case(cmd, "status") {
+        show_hpet_overview(hpet_base);
+    } else if eq_ignore_case(cmd, "regs") {
+        show_hpet_registers(hpet_base);
+    } else if eq_ignore_case(cmd, "timers") {
+        show_hpet_timers(hpet_base);
+    } else if eq_ignore_case(cmd, "counter") {
+        show_hpet_counter(hpet_base);
+    } else if eq_ignore_case(cmd, "base") {
+        if args.len() > 1 {
+            if let Some(addr) = parse_number(args[1]) {
+                show_hpet_overview(addr as u64);
+            } else {
+                outln!("Invalid address: {}", args[1]);
+            }
+        } else {
+            outln!("Current HPET base: 0x{:08X}", hpet_base);
+            outln!("Usage: hpet base <address>");
+        }
+    } else {
+        outln!("Unknown hpet command: {}", cmd);
+        show_hpet_help();
+    }
+}
+
+fn show_hpet_help() {
+    outln!("HPET (High Precision Event Timer) Viewer");
+    outln!("");
+    outln!("Usage: hpet [command] [args]");
+    outln!("");
+    outln!("Commands:");
+    outln!("  status       Overview of HPET (default)");
+    outln!("  regs         Show all HPET registers");
+    outln!("  timers       Show timer comparator info");
+    outln!("  counter      Show main counter value");
+    outln!("  base <addr>  Use different HPET base address");
+    outln!("");
+    outln!("Note: Default base is 0xFED00000. Actual address");
+    outln!("      should be obtained from ACPI HPET table.");
+}
+
+unsafe fn hpet_read(base: u64, offset: u64) -> u64 {
+    let addr = (base + offset) as *const u64;
+    core::ptr::read_volatile(addr)
+}
+
+fn show_hpet_overview(base: u64) {
+    outln!("HPET Status (base 0x{:08X})", base);
+    outln!("");
+
+    unsafe {
+        // Read General Capabilities and ID Register (offset 0x00)
+        let caps = hpet_read(base, 0x00);
+
+        // Check if HPET appears valid
+        if caps == 0 || caps == 0xFFFFFFFFFFFFFFFF {
+            outln!("Error: HPET not detected at 0x{:08X}", base);
+            outln!("Try 'hpet base <address>' with correct HPET address.");
+            outln!("Common addresses: 0xFED00000, 0xFED01000");
+            return;
+        }
+
+        let rev_id = (caps & 0xFF) as u8;
+        let num_timers = (((caps >> 8) & 0x1F) + 1) as u8;
+        let count_size = ((caps >> 13) & 1) != 0; // true = 64-bit
+        let legacy_capable = ((caps >> 15) & 1) != 0;
+        let vendor_id = ((caps >> 16) & 0xFFFF) as u16;
+        let period_fs = (caps >> 32) as u32; // Period in femtoseconds
+
+        outln!("Capabilities (0x00): 0x{:016X}", caps);
+        outln!("");
+        outln!("  Revision:      {}", rev_id);
+        outln!("  Vendor ID:     0x{:04X}", vendor_id);
+        outln!("  Num Timers:    {}", num_timers);
+        outln!("  Counter Size:  {}-bit", if count_size { 64 } else { 32 });
+        outln!("  Legacy Route:  {}", if legacy_capable { "Capable" } else { "Not capable" });
+        outln!("");
+
+        // Calculate frequency from period
+        if period_fs > 0 {
+            let freq_hz = 1_000_000_000_000_000u64 / period_fs as u64;
+            let freq_mhz = freq_hz / 1_000_000;
+            outln!("  Period:        {} fs ({} ns)", period_fs, period_fs / 1_000_000);
+            outln!("  Frequency:     ~{} MHz ({} Hz)", freq_mhz, freq_hz);
+        }
+        outln!("");
+
+        // Read General Configuration (offset 0x10)
+        let config = hpet_read(base, 0x10);
+        let enabled = (config & 1) != 0;
+        let legacy_enabled = ((config >> 1) & 1) != 0;
+
+        outln!("Configuration (0x10): 0x{:016X}", config);
+        outln!("  ENABLE_CNF:    {} (main counter {})", enabled as u8,
+               if enabled { "running" } else { "stopped" });
+        outln!("  LEG_RT_CNF:    {} (legacy replacement {})", legacy_enabled as u8,
+               if legacy_enabled { "enabled" } else { "disabled" });
+        outln!("");
+
+        // Read General Interrupt Status (offset 0x20)
+        let int_status = hpet_read(base, 0x20);
+        outln!("Interrupt Status (0x20): 0x{:016X}", int_status);
+
+        // Read Main Counter (offset 0xF0)
+        let counter = hpet_read(base, 0xF0);
+        outln!("");
+        outln!("Main Counter (0xF0): 0x{:016X} ({})", counter, counter);
+
+        if period_fs > 0 && counter > 0 {
+            let ns = (counter as u128 * period_fs as u128) / 1_000_000;
+            let seconds = ns / 1_000_000_000;
+            let ms = (ns % 1_000_000_000) / 1_000_000;
+            outln!("  Uptime:        {}s {}ms", seconds, ms);
+        }
+    }
+}
+
+fn show_hpet_registers(base: u64) {
+    outln!("HPET Registers (base 0x{:08X})", base);
+    outln!("");
+
+    unsafe {
+        let regs = [
+            (0x00, "GCAP_ID", "General Capabilities and ID"),
+            (0x10, "GEN_CONF", "General Configuration"),
+            (0x20, "GINTR_STA", "General Interrupt Status"),
+            (0xF0, "MAIN_CNT", "Main Counter Value"),
+        ];
+
+        for (offset, name, desc) in regs {
+            let val = hpet_read(base, offset);
+            outln!("0x{:03X} {:10}: 0x{:016X}  {}", offset, name, val, desc);
+        }
+    }
+}
+
+fn show_hpet_timers(base: u64) {
+    outln!("HPET Timer Comparators (base 0x{:08X})", base);
+    outln!("");
+
+    unsafe {
+        let caps = hpet_read(base, 0x00);
+        let num_timers = ((caps >> 8) & 0x1F) + 1;
+
+        outln!("Number of timers: {}", num_timers);
+        outln!("");
+
+        for i in 0..num_timers.min(8) {
+            let timer_offset = 0x100 + (i as u64 * 0x20);
+
+            let config = hpet_read(base, timer_offset);
+            let comparator = hpet_read(base, timer_offset + 0x08);
+
+            let int_type = (config >> 1) & 1; // 0=edge, 1=level
+            let int_enabled = (config >> 2) & 1;
+            let periodic = (config >> 3) & 1;
+            let periodic_capable = (config >> 4) & 1;
+            let size_64 = (config >> 5) & 1;
+            let fsb_capable = (config >> 15) & 1;
+            let int_route = (config >> 9) & 0x1F;
+
+            outln!("Timer {}:", i);
+            outln!("  Config (0x{:03X}):     0x{:016X}", timer_offset, config);
+            outln!("  Comparator:          0x{:016X}", comparator);
+            outln!("  Int Enabled:         {}", int_enabled != 0);
+            outln!("  Int Type:            {}", if int_type != 0 { "Level" } else { "Edge" });
+            outln!("  Int Route:           {}", int_route);
+            outln!("  Periodic:            {} (capable: {})", periodic != 0, periodic_capable != 0);
+            outln!("  64-bit:              {}", size_64 != 0);
+            outln!("  FSB Capable:         {}", fsb_capable != 0);
+            outln!("");
+        }
+    }
+}
+
+fn show_hpet_counter(base: u64) {
+    outln!("HPET Main Counter");
+    outln!("");
+
+    unsafe {
+        let caps = hpet_read(base, 0x00);
+        let period_fs = (caps >> 32) as u32;
+        let config = hpet_read(base, 0x10);
+        let enabled = (config & 1) != 0;
+
+        outln!("Counter enabled: {}", enabled);
+        outln!("");
+
+        // Read counter multiple times to show it's ticking
+        outln!("Counter samples (5 reads):");
+        for i in 0..5 {
+            let counter = hpet_read(base, 0xF0);
+            outln!("  #{}: 0x{:016X} ({})", i + 1, counter, counter);
+
+            // Small delay
+            for _ in 0..10000 {
+                core::arch::asm!("nop", options(nomem, nostack));
+            }
+        }
+
+        if period_fs > 0 {
+            let freq_mhz = 1_000_000_000_000_000u64 / period_fs as u64 / 1_000_000;
+            outln!("");
+            outln!("Counter frequency: ~{} MHz", freq_mhz);
+            outln!("Period: {} femtoseconds", period_fs);
         }
     }
 }

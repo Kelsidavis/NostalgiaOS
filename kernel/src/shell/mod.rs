@@ -150,7 +150,7 @@ const COMMANDS: &[&str] = &[
     "bt",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "desc", "descriptor", "dir", "dump", "echo", "erase", "ex", "exit",
-    "hal", "help", "history",
+    "hal", "help", "history", "hpet",
     "int", "io",
     "ke",
     "ldr", "ls",
@@ -1131,6 +1131,9 @@ impl Shell {
         // Stack trace
         } else if eq_ignore_case(cmd, "stack") || eq_ignore_case(cmd, "bt") {
             commands::cmd_stack(&args[1..argc]);
+        // HPET viewer
+        } else if eq_ignore_case(cmd, "hpet") {
+            commands::cmd_hpet(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
