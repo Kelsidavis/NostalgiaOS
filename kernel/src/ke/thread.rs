@@ -117,6 +117,8 @@ pub struct KThread {
     pub priority_decrement: i8,
     /// Saturation (priority boost saturation)
     pub saturation: i8,
+    /// Processor affinity mask (bitmask of allowed processors)
+    pub affinity: u64,
 
     // List entries for queue membership
     /// Entry in ready queue or wait list
@@ -209,6 +211,7 @@ impl KThread {
             quantum: constants::THREAD_QUANTUM,
             priority_decrement: 0,
             saturation: 0,
+            affinity: 1, // Default to processor 0
             wait_list_entry: ListEntry::new(),
             thread_list_entry: ListEntry::new(),
             kernel_stack: ptr::null_mut(),

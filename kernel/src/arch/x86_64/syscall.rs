@@ -9391,8 +9391,12 @@ fn sys_query_information_thread(
             }
 
             unsafe {
-                // For now, single processor affinity
-                *(thread_information as *mut u64) = 1;
+                let affinity = if !ethread.is_null() {
+                    (*ethread).tcb.affinity
+                } else {
+                    1 // Default to processor 0
+                };
+                *(thread_information as *mut u64) = affinity;
             }
 
             STATUS_SUCCESS
@@ -10829,7 +10833,10 @@ fn sys_set_information_thread(
                 return STATUS_INVALID_PARAMETER;
             }
 
-            // TODO: Store affinity mask in thread structure when multi-processor support added
+            // Store affinity mask in thread structure
+            if !ethread.is_null() {
+                unsafe { (*ethread).tcb.affinity = affinity; }
+            }
 
             STATUS_SUCCESS
         }
