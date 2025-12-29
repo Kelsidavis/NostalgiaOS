@@ -149,7 +149,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    mm <cmd>       Memory Manager (stats, pool, vad)");
         outln!("    ob <cmd>       Object Manager (types, dir, handles)");
         outln!("    io <cmd>       I/O Manager (block, volumes, pipes)");
-        outln!("    ex <cmd>       Executive (worker, callback)");
+        outln!("    ex <cmd>       Executive (worker, callback, luid, lookaside)");
         outln!("    se <cmd>       Security (sids, privileges, token)");
         outln!("    hal <cmd>      Hardware Abstraction (time, apic, tick)");
         outln!("    rtl <cmd>      Runtime Library (time, random, crc32)");
@@ -3358,6 +3358,8 @@ pub fn cmd_ex(args: &[&str]) {
         outln!("  info               Show executive information");
         outln!("  worker             Show work queue status");
         outln!("  callback           Show registered callbacks");
+        outln!("  luid               Show LUID allocator status");
+        outln!("  lookaside          Show lookaside list info");
         return;
     }
 
@@ -3403,7 +3405,27 @@ pub fn cmd_ex(args: &[&str]) {
         outln!("  PowerState            - Power state notifications");
         outln!("  ProcessorAdd          - Processor hotplug");
         outln!("");
-        outln!("(Callback registration info not yet implemented)");
+        outln!("(Use 'callback' command for detailed stats)");
+    } else if eq_ignore_case(cmd, "luid") {
+        let stats = ex::get_luid_stats();
+        outln!("LUID Allocator Status");
+        outln!("");
+        outln!("Reserved range:   0 - {}", stats.reserved_count - 1);
+        outln!("Next LUID:        {}", stats.next_luid);
+        outln!("Allocated:        {}", stats.allocated_count);
+        outln!("");
+        outln!("(Use 'luid' command for detailed info)");
+    } else if eq_ignore_case(cmd, "lookaside") {
+        outln!("Lookaside List Configuration");
+        outln!("");
+        outln!("List types:");
+        outln!("  NPagedLookasideList - Non-paged pool cache");
+        outln!("  PagedLookasideList  - Paged pool cache");
+        outln!("");
+        outln!("Configuration:");
+        outln!("  Max depth: 256, Min depth: 4");
+        outln!("");
+        outln!("(Use 'lookaside' command for detailed info)");
     } else {
         outln!("Unknown ex command: {}", cmd);
     }
@@ -13272,4 +13294,194 @@ fn show_callback_list() {
 
     outln!("");
     outln!("Total: {} callback objects", count);
+}
+
+// ============================================================================
+// Worker Queue Viewer
+// ============================================================================
+
+/// Worker queue viewer command
+pub fn cmd_worker(args: &[&str]) {
+    if args.is_empty() {
+        show_worker_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_worker_stats();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("worker - Executive Worker Thread Pool Viewer");
+        outln!("");
+        outln!("Usage: worker [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show worker queue statistics (default)");
+        outln!("");
+        outln!("Worker queues allow drivers to defer work to a thread context.");
+        outln!("Three priority levels: Critical, Delayed, HyperCritical.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'worker help' for usage information");
+    }
+}
+
+fn show_worker_stats() {
+    use crate::ex::get_work_queue_stats;
+
+    let stats = get_work_queue_stats();
+
+    outln!("Executive Worker Queue Statistics");
+    outln!("==================================");
+    outln!("");
+    outln!("Queue Depths:");
+    outln!("  Critical Queue:       {} items", stats.critical_depth);
+    outln!("  Delayed Queue:        {} items", stats.delayed_depth);
+    outln!("  HyperCritical Queue:  {} items", stats.hyper_critical_depth);
+    outln!("");
+    outln!("Total Queued:           {} items", stats.total_queued);
+    outln!("Max Workers Per Queue:  {}", stats.max_workers);
+}
+
+// ============================================================================
+// LUID Viewer
+// ============================================================================
+
+/// LUID viewer command
+pub fn cmd_luid(args: &[&str]) {
+    if args.is_empty() {
+        show_luid_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_luid_stats();
+    } else if eq_ignore_ascii_case(subcmd, "system") {
+        show_system_luids();
+    } else if eq_ignore_ascii_case(subcmd, "priv") || eq_ignore_ascii_case(subcmd, "privileges") {
+        show_privilege_luids();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("luid - Locally Unique Identifier Viewer");
+        outln!("");
+        outln!("Usage: luid [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show LUID allocator statistics (default)");
+        outln!("  system - Show well-known system LUIDs");
+        outln!("  priv   - Show well-known privilege LUIDs");
+        outln!("");
+        outln!("LUIDs are 64-bit identifiers unique since boot.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'luid help' for usage information");
+    }
+}
+
+fn show_luid_stats() {
+    use crate::ex::get_luid_stats;
+
+    let stats = get_luid_stats();
+
+    outln!("LUID Allocator Statistics");
+    outln!("=========================");
+    outln!("");
+    outln!("Reserved LUIDs:         0 - {}", stats.reserved_count - 1);
+    outln!("Next LUID:              {}", stats.next_luid);
+    outln!("Allocated Count:        {}", stats.allocated_count);
+    outln!("");
+    outln!("Well-Known LUIDs:");
+    outln!("  System LUIDs:         {}", stats.system_luid_count);
+    outln!("  Privilege LUIDs:      {}", stats.privilege_luid_count);
+}
+
+fn show_system_luids() {
+    use crate::ex::get_system_luids;
+
+    outln!("Well-Known System LUIDs");
+    outln!("=======================");
+    outln!("");
+    outln!("{:<20} {:<16}", "Name", "Value");
+    outln!("------------------------------------");
+
+    for luid_info in get_system_luids().iter() {
+        outln!("{:<20} 0x{:08X}:{:08X}",
+            luid_info.name,
+            luid_info.luid.high_part,
+            luid_info.luid.low_part
+        );
+    }
+}
+
+fn show_privilege_luids() {
+    use crate::ex::get_privilege_luids;
+
+    outln!("Well-Known Privilege LUIDs");
+    outln!("==========================");
+    outln!("");
+    outln!("{:<24} {:<6}", "Privilege", "Value");
+    outln!("------------------------------");
+
+    for luid_info in get_privilege_luids().iter() {
+        outln!("Se{:<22} {}", luid_info.name, luid_info.luid.low_part);
+    }
+
+    outln!("");
+    outln!("(Privilege values 2-30 are well-known)");
+}
+
+// ============================================================================
+// Lookaside List Viewer
+// ============================================================================
+
+/// Lookaside list info command
+pub fn cmd_lookaside(args: &[&str]) {
+    if args.is_empty() {
+        show_lookaside_info();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "info") {
+        show_lookaside_info();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("lookaside - Lookaside List Information");
+        outln!("");
+        outln!("Usage: lookaside [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  info   - Show lookaside list information (default)");
+        outln!("");
+        outln!("Lookaside lists are high-performance fixed-size allocators.");
+        outln!("They cache freed blocks to avoid pool allocator overhead.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'lookaside help' for usage information");
+    }
+}
+
+fn show_lookaside_info() {
+    outln!("Lookaside List Information");
+    outln!("==========================");
+    outln!("");
+    outln!("Lookaside List Types:");
+    outln!("  NPagedLookasideList - Non-paged pool cache");
+    outln!("  PagedLookasideList  - Paged pool cache");
+    outln!("  LookasideListEx     - Extended lookaside list");
+    outln!("");
+    outln!("Configuration:");
+    outln!("  Maximum Cache Depth:  256 entries");
+    outln!("  Minimum Cache Depth:  4 entries");
+    outln!("  Minimum Block Size:   {} bytes (SListEntry size)", core::mem::size_of::<*mut u8>() * 2);
+    outln!("");
+    outln!("Operation:");
+    outln!("  - Uses lock-free SLIST for cache operations");
+    outln!("  - Falls back to pool allocator on cache miss");
+    outln!("  - Tracks hits/misses for statistics");
+    outln!("");
+    outln!("Note: Individual lookaside list statistics require");
+    outln!("      driver-specific inspection (not globally tracked).");
 }

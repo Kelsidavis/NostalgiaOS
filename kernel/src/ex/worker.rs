@@ -359,6 +359,40 @@ unsafe impl Sync for IoWorkItem {}
 #[allow(non_camel_case_types)]
 pub type IO_WORKITEM = IoWorkItem;
 
+// ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// Work queue statistics
+#[derive(Debug, Clone, Copy)]
+pub struct WorkQueueStats {
+    /// Critical queue depth
+    pub critical_depth: usize,
+    /// Delayed queue depth
+    pub delayed_depth: usize,
+    /// Hyper-critical queue depth
+    pub hyper_critical_depth: usize,
+    /// Total queued items
+    pub total_queued: usize,
+    /// Max workers per queue
+    pub max_workers: usize,
+}
+
+/// Get work queue statistics
+pub fn get_work_queue_stats() -> WorkQueueStats {
+    let critical = ex_get_work_queue_depth(WorkQueueType::CriticalWorkQueue);
+    let delayed = ex_get_work_queue_depth(WorkQueueType::DelayedWorkQueue);
+    let hyper = ex_get_work_queue_depth(WorkQueueType::HyperCriticalWorkQueue);
+
+    WorkQueueStats {
+        critical_depth: critical,
+        delayed_depth: delayed,
+        hyper_critical_depth: hyper,
+        total_queued: critical + delayed + hyper,
+        max_workers: MAX_WORKERS_PER_QUEUE,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

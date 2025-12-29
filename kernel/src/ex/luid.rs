@@ -311,6 +311,82 @@ pub fn luid_init() {
 }
 
 // ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// LUID allocator statistics
+#[derive(Debug, Clone, Copy)]
+pub struct LuidStats {
+    /// Number of reserved LUIDs (0-1000)
+    pub reserved_count: u64,
+    /// Next LUID that will be allocated
+    pub next_luid: u64,
+    /// Total LUIDs allocated so far
+    pub allocated_count: u64,
+    /// Number of well-known privilege LUIDs
+    pub privilege_luid_count: u32,
+    /// Number of well-known system LUIDs
+    pub system_luid_count: u32,
+}
+
+/// Get LUID allocator statistics
+pub fn get_luid_stats() -> LuidStats {
+    let next = LUID_SOURCE.load(Ordering::Relaxed);
+    let allocated = next.saturating_sub(LUID_RESERVED_COUNT);
+
+    LuidStats {
+        reserved_count: LUID_RESERVED_COUNT,
+        next_luid: next,
+        allocated_count: allocated,
+        privilege_luid_count: 29, // SE_CREATE_TOKEN (2) to SE_CREATE_GLOBAL (30)
+        system_luid_count: 6,     // SYSTEM, ANONYMOUS, LOCAL_SERVICE, NETWORK_SERVICE, IUSER, PROTECTED
+    }
+}
+
+/// Well-known LUID information
+#[derive(Debug, Clone, Copy)]
+pub struct WellKnownLuid {
+    /// LUID value
+    pub luid: Luid,
+    /// Name of the LUID
+    pub name: &'static str,
+}
+
+/// Get list of well-known system LUIDs
+pub fn get_system_luids() -> [WellKnownLuid; 6] {
+    [
+        WellKnownLuid { luid: system_luids::SYSTEM_LUID, name: "SYSTEM" },
+        WellKnownLuid { luid: system_luids::ANONYMOUS_LOGON_LUID, name: "ANONYMOUS_LOGON" },
+        WellKnownLuid { luid: system_luids::LOCAL_SERVICE_LUID, name: "LOCAL_SERVICE" },
+        WellKnownLuid { luid: system_luids::NETWORK_SERVICE_LUID, name: "NETWORK_SERVICE" },
+        WellKnownLuid { luid: system_luids::IUSER_LUID, name: "IUSER" },
+        WellKnownLuid { luid: system_luids::PROTECTED_TO_SYSTEM_LUID, name: "PROTECTED_TO_SYSTEM" },
+    ]
+}
+
+/// Get list of well-known privilege LUIDs (first 16)
+pub fn get_privilege_luids() -> [WellKnownLuid; 16] {
+    [
+        WellKnownLuid { luid: privilege_luids::SE_CREATE_TOKEN_PRIVILEGE, name: "CreateToken" },
+        WellKnownLuid { luid: privilege_luids::SE_ASSIGNPRIMARYTOKEN_PRIVILEGE, name: "AssignPrimaryToken" },
+        WellKnownLuid { luid: privilege_luids::SE_LOCK_MEMORY_PRIVILEGE, name: "LockMemory" },
+        WellKnownLuid { luid: privilege_luids::SE_INCREASE_QUOTA_PRIVILEGE, name: "IncreaseQuota" },
+        WellKnownLuid { luid: privilege_luids::SE_MACHINE_ACCOUNT_PRIVILEGE, name: "MachineAccount" },
+        WellKnownLuid { luid: privilege_luids::SE_TCB_PRIVILEGE, name: "Tcb" },
+        WellKnownLuid { luid: privilege_luids::SE_SECURITY_PRIVILEGE, name: "Security" },
+        WellKnownLuid { luid: privilege_luids::SE_TAKE_OWNERSHIP_PRIVILEGE, name: "TakeOwnership" },
+        WellKnownLuid { luid: privilege_luids::SE_LOAD_DRIVER_PRIVILEGE, name: "LoadDriver" },
+        WellKnownLuid { luid: privilege_luids::SE_SYSTEM_PROFILE_PRIVILEGE, name: "SystemProfile" },
+        WellKnownLuid { luid: privilege_luids::SE_SYSTEMTIME_PRIVILEGE, name: "Systemtime" },
+        WellKnownLuid { luid: privilege_luids::SE_PROF_SINGLE_PROCESS_PRIVILEGE, name: "ProfileSingleProcess" },
+        WellKnownLuid { luid: privilege_luids::SE_INC_BASE_PRIORITY_PRIVILEGE, name: "IncreaseBasePriority" },
+        WellKnownLuid { luid: privilege_luids::SE_CREATE_PAGEFILE_PRIVILEGE, name: "CreatePagefile" },
+        WellKnownLuid { luid: privilege_luids::SE_CREATE_PERMANENT_PRIVILEGE, name: "CreatePermanent" },
+        WellKnownLuid { luid: privilege_luids::SE_BACKUP_PRIVILEGE, name: "Backup" },
+    ]
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

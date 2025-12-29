@@ -154,7 +154,7 @@ const COMMANDS: &[&str] = &[
     "hal", "handles", "help", "history", "hpet",
     "int", "io", "iocp", "ioq", "irql", "irqstat",
     "ke", "keyedev",
-    "ldr", "ls",
+    "ldr", "lookaside", "ls", "luid",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net",
     "ob", "obdir",
@@ -165,7 +165,7 @@ const COMMANDS: &[&str] = &[
     "tasks", "time", "timer", "timerq", "touch", "type",
     "usertest",
     "vad", "veh", "ver", "version", "volumes",
-    "waitq", "wset",
+    "waitq", "worker", "wset",
 ];
 
 /// Current working directory
@@ -1220,6 +1220,15 @@ impl Shell {
         // Callback object viewer
         } else if eq_ignore_case(cmd, "callback") {
             commands::cmd_callback(&args[1..argc]);
+        // Worker queue viewer
+        } else if eq_ignore_case(cmd, "worker") {
+            commands::cmd_worker(&args[1..argc]);
+        // LUID viewer
+        } else if eq_ignore_case(cmd, "luid") {
+            commands::cmd_luid(&args[1..argc]);
+        // Lookaside list info
+        } else if eq_ignore_case(cmd, "lookaside") {
+            commands::cmd_lookaside(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
