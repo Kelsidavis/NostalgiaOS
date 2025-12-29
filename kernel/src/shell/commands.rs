@@ -117,6 +117,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    cpufeatures    CPU feature detection (CPUID)");
         outln!("    pagetable      Page table walker (cr3, walk, translate)");
         outln!("    msr            MSR browser (common, syscall, apic)");
+        outln!("    port           I/O port browser (scan, inb/outb)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -6759,4 +6760,612 @@ fn show_msr_list() {
     outln!("  0xC0000102  IA32_KERNEL_GS_BASE (for SWAPGS)");
     outln!("");
     outln!("Use 'msr read <addr>' to read any MSR");
+}
+
+// ============================================================================
+// I/O Port Browser Command
+// ============================================================================
+
+/// I/O port browser for hardware diagnostics
+pub fn cmd_port(args: &[&str]) {
+    if args.is_empty() {
+        show_port_help();
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "help") {
+        show_port_help();
+    } else if eq_ignore_case(cmd, "inb") {
+        // Read byte from port
+        if args.len() < 2 {
+            outln!("Usage: port inb <port>");
+            return;
+        }
+        if let Some(port) = parse_number(args[1]) {
+            if port > 0xFFFF {
+                outln!("Error: Port must be 0-0xFFFF");
+                return;
+            }
+            let val = unsafe { port_read_u8(port as u16) };
+            outln!("Port 0x{:04X}: 0x{:02X} ({})", port, val, val);
+        } else {
+            outln!("Invalid port number: {}", args[1]);
+        }
+    } else if eq_ignore_case(cmd, "inw") {
+        // Read word from port
+        if args.len() < 2 {
+            outln!("Usage: port inw <port>");
+            return;
+        }
+        if let Some(port) = parse_number(args[1]) {
+            if port > 0xFFFF {
+                outln!("Error: Port must be 0-0xFFFF");
+                return;
+            }
+            let val = unsafe { port_read_u16(port as u16) };
+            outln!("Port 0x{:04X}: 0x{:04X} ({})", port, val, val);
+        } else {
+            outln!("Invalid port number: {}", args[1]);
+        }
+    } else if eq_ignore_case(cmd, "ind") {
+        // Read dword from port
+        if args.len() < 2 {
+            outln!("Usage: port ind <port>");
+            return;
+        }
+        if let Some(port) = parse_number(args[1]) {
+            if port > 0xFFFF {
+                outln!("Error: Port must be 0-0xFFFF");
+                return;
+            }
+            let val = unsafe { port_read_u32(port as u16) };
+            outln!("Port 0x{:04X}: 0x{:08X} ({})", port, val, val);
+        } else {
+            outln!("Invalid port number: {}", args[1]);
+        }
+    } else if eq_ignore_case(cmd, "outb") {
+        // Write byte to port
+        if args.len() < 3 {
+            outln!("Usage: port outb <port> <value>");
+            return;
+        }
+        if let (Some(port), Some(val)) = (parse_number(args[1]), parse_number(args[2])) {
+            if port > 0xFFFF {
+                outln!("Error: Port must be 0-0xFFFF");
+                return;
+            }
+            if val > 0xFF {
+                outln!("Error: Value must be 0-0xFF for byte write");
+                return;
+            }
+            unsafe { port_write_u8(port as u16, val as u8) };
+            outln!("Wrote 0x{:02X} to port 0x{:04X}", val, port);
+        } else {
+            outln!("Invalid port or value");
+        }
+    } else if eq_ignore_case(cmd, "outw") {
+        // Write word to port
+        if args.len() < 3 {
+            outln!("Usage: port outw <port> <value>");
+            return;
+        }
+        if let (Some(port), Some(val)) = (parse_number(args[1]), parse_number(args[2])) {
+            if port > 0xFFFF {
+                outln!("Error: Port must be 0-0xFFFF");
+                return;
+            }
+            if val > 0xFFFF {
+                outln!("Error: Value must be 0-0xFFFF for word write");
+                return;
+            }
+            unsafe { port_write_u16(port as u16, val as u16) };
+            outln!("Wrote 0x{:04X} to port 0x{:04X}", val, port);
+        } else {
+            outln!("Invalid port or value");
+        }
+    } else if eq_ignore_case(cmd, "outd") {
+        // Write dword to port
+        if args.len() < 3 {
+            outln!("Usage: port outd <port> <value>");
+            return;
+        }
+        if let (Some(port), Some(val)) = (parse_number(args[1]), parse_number(args[2])) {
+            if port > 0xFFFF {
+                outln!("Error: Port must be 0-0xFFFF");
+                return;
+            }
+            unsafe { port_write_u32(port as u16, val as u32) };
+            outln!("Wrote 0x{:08X} to port 0x{:04X}", val, port);
+        } else {
+            outln!("Invalid port or value");
+        }
+    } else if eq_ignore_case(cmd, "scan") {
+        // Scan a port range
+        if args.len() < 2 {
+            show_port_scan_standard();
+        } else if eq_ignore_case(args[1], "serial") {
+            scan_serial_ports();
+        } else if eq_ignore_case(args[1], "parallel") {
+            scan_parallel_ports();
+        } else if eq_ignore_case(args[1], "pic") {
+            scan_pic_ports();
+        } else if eq_ignore_case(args[1], "pit") {
+            scan_pit_ports();
+        } else if eq_ignore_case(args[1], "cmos") {
+            scan_cmos();
+        } else if eq_ignore_case(args[1], "ps2") {
+            scan_ps2_controller();
+        } else {
+            // Custom range scan
+            if args.len() >= 3 {
+                if let (Some(start), Some(end)) =
+                    (parse_number(args[1]), parse_number(args[2]))
+                {
+                    if start > 0xFFFF || end > 0xFFFF {
+                        outln!("Error: Ports must be 0-0xFFFF");
+                        return;
+                    }
+                    if end < start {
+                        outln!("Error: End port must be >= start port");
+                        return;
+                    }
+                    if end - start > 256 {
+                        outln!("Error: Range too large (max 256 ports)");
+                        return;
+                    }
+                    scan_port_range(start as u16, end as u16);
+                } else {
+                    outln!("Invalid port range");
+                }
+            } else {
+                outln!("Usage: port scan <start> <end>");
+                outln!("   or: port scan serial|parallel|pic|pit|cmos|ps2");
+            }
+        }
+    } else if eq_ignore_case(cmd, "list") {
+        show_port_list();
+    } else {
+        outln!("Unknown port command: {}", cmd);
+        outln!("Use 'port help' for usage");
+    }
+}
+
+fn show_port_help() {
+    outln!("I/O Port Browser");
+    outln!("");
+    outln!("Usage: port <command> [args]");
+    outln!("");
+    outln!("Read commands:");
+    outln!("  inb <port>        Read byte from port");
+    outln!("  inw <port>        Read word (16-bit) from port");
+    outln!("  ind <port>        Read dword (32-bit) from port");
+    outln!("");
+    outln!("Write commands:");
+    outln!("  outb <port> <val> Write byte to port");
+    outln!("  outw <port> <val> Write word to port");
+    outln!("  outd <port> <val> Write dword to port");
+    outln!("");
+    outln!("Scan commands:");
+    outln!("  scan              Scan standard device ports");
+    outln!("  scan serial       Scan COM1-4 ports");
+    outln!("  scan parallel     Scan LPT1-3 ports");
+    outln!("  scan pic          Scan PIC (8259) ports");
+    outln!("  scan pit          Scan PIT (8254) ports");
+    outln!("  scan cmos         Read CMOS/RTC values");
+    outln!("  scan ps2          Scan PS/2 controller");
+    outln!("  scan <start> <end> Scan custom range");
+    outln!("");
+    outln!("Other:");
+    outln!("  list              Show known port assignments");
+}
+
+/// Port I/O helper functions
+unsafe fn port_read_u8(port: u16) -> u8 {
+    let val: u8;
+    core::arch::asm!(
+        "in al, dx",
+        out("al") val,
+        in("dx") port,
+        options(nostack, nomem, preserves_flags)
+    );
+    val
+}
+
+unsafe fn port_read_u16(port: u16) -> u16 {
+    let val: u16;
+    core::arch::asm!(
+        "in ax, dx",
+        out("ax") val,
+        in("dx") port,
+        options(nostack, nomem, preserves_flags)
+    );
+    val
+}
+
+unsafe fn port_read_u32(port: u16) -> u32 {
+    let val: u32;
+    core::arch::asm!(
+        "in eax, dx",
+        out("eax") val,
+        in("dx") port,
+        options(nostack, nomem, preserves_flags)
+    );
+    val
+}
+
+unsafe fn port_write_u8(port: u16, val: u8) {
+    core::arch::asm!(
+        "out dx, al",
+        in("dx") port,
+        in("al") val,
+        options(nostack, nomem, preserves_flags)
+    );
+}
+
+unsafe fn port_write_u16(port: u16, val: u16) {
+    core::arch::asm!(
+        "out dx, ax",
+        in("dx") port,
+        in("ax") val,
+        options(nostack, nomem, preserves_flags)
+    );
+}
+
+unsafe fn port_write_u32(port: u16, val: u32) {
+    core::arch::asm!(
+        "out dx, eax",
+        in("dx") port,
+        in("eax") val,
+        options(nostack, nomem, preserves_flags)
+    );
+}
+
+fn show_port_scan_standard() {
+    outln!("Standard Device Port Scan");
+    outln!("");
+
+    // Serial ports
+    outln!("Serial Ports (COM):");
+    for (name, port) in [("COM1", 0x3F8), ("COM2", 0x2F8), ("COM3", 0x3E8), ("COM4", 0x2E8)] {
+        let iir = unsafe { port_read_u8(port + 2) };
+        let present = iir != 0xFF;
+        outln!(
+            "  {}: 0x{:03X}  {}",
+            name,
+            port,
+            if present { "Present" } else { "Not detected" }
+        );
+    }
+    outln!("");
+
+    // PS/2 controller
+    outln!("PS/2 Controller:");
+    let status = unsafe { port_read_u8(0x64) };
+    outln!("  Status: 0x{:02X}", status);
+    outln!("    Output buffer full: {}", (status & 1) != 0);
+    outln!("    Input buffer full:  {}", (status & 2) != 0);
+    outln!("");
+
+    // PIT
+    outln!("PIT (8254 Timer):");
+    unsafe {
+        port_write_u8(0x43, 0x00); // Latch channel 0
+        let lo = port_read_u8(0x40);
+        let hi = port_read_u8(0x40);
+        let count = (hi as u16) << 8 | lo as u16;
+        outln!("  Channel 0 count: 0x{:04X} ({})", count, count);
+    }
+}
+
+fn scan_serial_ports() {
+    outln!("Serial Port Scan (8250/16550 UART)");
+    outln!("");
+
+    for (name, base) in [("COM1", 0x3F8u16), ("COM2", 0x2F8), ("COM3", 0x3E8), ("COM4", 0x2E8)] {
+        outln!("{}  (base 0x{:03X}):", name, base);
+
+        unsafe {
+            let iir = port_read_u8(base + 2); // Interrupt ID Register
+            if iir == 0xFF {
+                outln!("  Not present");
+                outln!("");
+                continue;
+            }
+
+            let lcr = port_read_u8(base + 3); // Line Control Register
+            let mcr = port_read_u8(base + 4); // Modem Control Register
+            let lsr = port_read_u8(base + 5); // Line Status Register
+            let msr = port_read_u8(base + 6); // Modem Status Register
+
+            // Check for FIFO (16550)
+            let fifo_type = match (iir >> 6) & 3 {
+                0 => "No FIFO (8250)",
+                1 => "FIFO unusable",
+                2 => "FIFO enabled (16550)",
+                3 => "FIFO enabled (16550A)",
+                _ => "Unknown",
+            };
+
+            outln!("  IIR: 0x{:02X}  LCR: 0x{:02X}  MCR: 0x{:02X}", iir, lcr, mcr);
+            outln!("  LSR: 0x{:02X}  MSR: 0x{:02X}", lsr, msr);
+            outln!("  Type: {}", fifo_type);
+
+            // Decode line status
+            outln!("  Status:");
+            outln!("    Data ready:     {}", (lsr & 1) != 0);
+            outln!("    TX empty:       {}", (lsr & 0x20) != 0);
+            outln!("    TX holding:     {}", (lsr & 0x40) != 0);
+        }
+        outln!("");
+    }
+}
+
+fn scan_parallel_ports() {
+    outln!("Parallel Port Scan");
+    outln!("");
+
+    for (name, base) in [("LPT1", 0x378u16), ("LPT2", 0x278), ("LPT3", 0x3BC)] {
+        outln!("{}  (base 0x{:03X}):", name, base);
+
+        unsafe {
+            let data = port_read_u8(base); // Data register
+            let status = port_read_u8(base + 1); // Status register
+            let control = port_read_u8(base + 2); // Control register
+
+            // Check if port exists (reading should not return 0xFF typically)
+            let exists = !(data == 0xFF && status == 0xFF && control == 0xFF);
+
+            if !exists {
+                outln!("  Not detected");
+            } else {
+                outln!("  Data: 0x{:02X}  Status: 0x{:02X}  Control: 0x{:02X}", data, status, control);
+                outln!("  Status bits:");
+                outln!("    Busy:     {}", (status & 0x80) == 0); // Inverted
+                outln!("    Ack:      {}", (status & 0x40) != 0);
+                outln!("    Paper:    {}", (status & 0x20) != 0);
+                outln!("    Select:   {}", (status & 0x10) != 0);
+                outln!("    Error:    {}", (status & 0x08) == 0); // Inverted
+            }
+        }
+        outln!("");
+    }
+}
+
+fn scan_pic_ports() {
+    outln!("PIC (8259) Interrupt Controller");
+    outln!("");
+
+    unsafe {
+        // Master PIC
+        let master_irr = {
+            port_write_u8(0x20, 0x0A); // Read IRR
+            port_read_u8(0x20)
+        };
+        let master_isr = {
+            port_write_u8(0x20, 0x0B); // Read ISR
+            port_read_u8(0x20)
+        };
+        let master_mask = port_read_u8(0x21); // IMR
+
+        outln!("Master PIC (0x20-0x21):");
+        outln!("  IRR (pending):  0b{:08b}", master_irr);
+        outln!("  ISR (in-service): 0b{:08b}", master_isr);
+        outln!("  IMR (masked):   0b{:08b}", master_mask);
+        outln!("");
+
+        // Slave PIC
+        let slave_irr = {
+            port_write_u8(0xA0, 0x0A);
+            port_read_u8(0xA0)
+        };
+        let slave_isr = {
+            port_write_u8(0xA0, 0x0B);
+            port_read_u8(0xA0)
+        };
+        let slave_mask = port_read_u8(0xA1);
+
+        outln!("Slave PIC (0xA0-0xA1):");
+        outln!("  IRR (pending):  0b{:08b}", slave_irr);
+        outln!("  ISR (in-service): 0b{:08b}", slave_isr);
+        outln!("  IMR (masked):   0b{:08b}", slave_mask);
+    }
+}
+
+fn scan_pit_ports() {
+    outln!("PIT (8254) Programmable Interval Timer");
+    outln!("");
+
+    unsafe {
+        // Read all three channels
+        for ch in 0..3u8 {
+            let port = 0x40 + ch as u16;
+
+            // Latch the counter
+            port_write_u8(0x43, ch << 6);
+
+            let lo = port_read_u8(port);
+            let hi = port_read_u8(port);
+            let count = (hi as u16) << 8 | lo as u16;
+
+            outln!(
+                "Channel {}: Count = 0x{:04X} ({})  Port 0x{:02X}",
+                ch,
+                count,
+                count,
+                port
+            );
+        }
+
+        outln!("");
+        outln!("PIT frequency: 1.193182 MHz");
+        outln!("Channel 0: System timer (IRQ 0)");
+        outln!("Channel 1: DRAM refresh (legacy)");
+        outln!("Channel 2: PC speaker");
+    }
+}
+
+fn scan_cmos() {
+    outln!("CMOS/RTC Read");
+    outln!("");
+
+    unsafe {
+        outln!("RTC Time/Date:");
+        let seconds = cmos_read(0x00);
+        let minutes = cmos_read(0x02);
+        let hours = cmos_read(0x04);
+        let day = cmos_read(0x07);
+        let month = cmos_read(0x08);
+        let year = cmos_read(0x09);
+
+        // Check if BCD mode
+        let status_b = cmos_read(0x0B);
+        let bcd_mode = (status_b & 0x04) == 0;
+
+        let (h, m, s, d, mo, y) = if bcd_mode {
+            (
+                bcd_to_bin(hours),
+                bcd_to_bin(minutes),
+                bcd_to_bin(seconds),
+                bcd_to_bin(day),
+                bcd_to_bin(month),
+                bcd_to_bin(year),
+            )
+        } else {
+            (hours, minutes, seconds, day, month, year)
+        };
+
+        outln!("  Time: {:02}:{:02}:{:02}", h, m, s);
+        outln!("  Date: {:02}/{:02}/{:02}", mo, d, y);
+        outln!("  Mode: {}", if bcd_mode { "BCD" } else { "Binary" });
+        outln!("");
+
+        outln!("CMOS Status Registers:");
+        let status_a = cmos_read(0x0A);
+        let status_c = cmos_read(0x0C);
+        let status_d = cmos_read(0x0D);
+
+        outln!("  Status A: 0x{:02X}", status_a);
+        outln!("  Status B: 0x{:02X}", status_b);
+        outln!("  Status C: 0x{:02X}", status_c);
+        outln!("  Status D: 0x{:02X} (battery: {})", status_d, if (status_d & 0x80) != 0 { "OK" } else { "LOW" });
+        outln!("");
+
+        outln!("Equipment byte (0x14): 0x{:02X}", cmos_read(0x14));
+        outln!("Base memory low (0x15): {} KB", cmos_read(0x15) as u16 | ((cmos_read(0x16) as u16) << 8));
+    }
+}
+
+unsafe fn cmos_read(reg: u8) -> u8 {
+    port_write_u8(0x70, reg);
+    // Small delay
+    for _ in 0..10 {
+        core::arch::asm!("nop");
+    }
+    port_read_u8(0x71)
+}
+
+fn bcd_to_bin(bcd: u8) -> u8 {
+    (bcd & 0x0F) + ((bcd >> 4) * 10)
+}
+
+fn scan_ps2_controller() {
+    outln!("PS/2 Controller (8042)");
+    outln!("");
+
+    unsafe {
+        let status = port_read_u8(0x64);
+
+        outln!("Status Register (0x64): 0x{:02X}", status);
+        outln!("  Output buffer full:   {}", (status & 0x01) != 0);
+        outln!("  Input buffer full:    {}", (status & 0x02) != 0);
+        outln!("  System flag:          {}", (status & 0x04) != 0);
+        outln!("  Command/Data:         {}", if (status & 0x08) != 0 { "Command" } else { "Data" });
+        outln!("  Timeout error:        {}", (status & 0x40) != 0);
+        outln!("  Parity error:         {}", (status & 0x80) != 0);
+        outln!("");
+
+        // Try to read controller configuration
+        port_write_u8(0x64, 0x20); // Read config command
+        // Wait for output buffer
+        for _ in 0..1000 {
+            if (port_read_u8(0x64) & 1) != 0 {
+                break;
+            }
+        }
+        if (port_read_u8(0x64) & 1) != 0 {
+            let config = port_read_u8(0x60);
+            outln!("Configuration byte: 0x{:02X}", config);
+            outln!("  Port 1 interrupt:     {}", (config & 0x01) != 0);
+            outln!("  Port 2 interrupt:     {}", (config & 0x02) != 0);
+            outln!("  Port 1 clock:         {}", (config & 0x10) == 0);
+            outln!("  Port 2 clock:         {}", (config & 0x20) == 0);
+            outln!("  Translation:          {}", (config & 0x40) != 0);
+        }
+    }
+}
+
+fn scan_port_range(start: u16, end: u16) {
+    outln!("Port Range Scan: 0x{:04X} - 0x{:04X}", start, end);
+    outln!("");
+
+    let mut col = 0;
+    for port in start..=end {
+        let val = unsafe { port_read_u8(port) };
+        if col == 0 {
+            out!("0x{:04X}:", port);
+        }
+        out!(" {:02X}", val);
+        col += 1;
+        if col >= 16 {
+            outln!("");
+            col = 0;
+        }
+    }
+    if col != 0 {
+        outln!("");
+    }
+}
+
+fn show_port_list() {
+    outln!("Standard PC I/O Port Assignments");
+    outln!("");
+    outln!("DMA Controllers:");
+    outln!("  0x00-0x0F   DMA 1 (channels 0-3)");
+    outln!("  0xC0-0xDF   DMA 2 (channels 4-7)");
+    outln!("");
+    outln!("Interrupt Controllers (8259 PIC):");
+    outln!("  0x20-0x21   Master PIC");
+    outln!("  0xA0-0xA1   Slave PIC");
+    outln!("");
+    outln!("Timer (8254 PIT):");
+    outln!("  0x40-0x43   PIT channels 0-2 + control");
+    outln!("");
+    outln!("Keyboard/PS2 Controller (8042):");
+    outln!("  0x60        Data port");
+    outln!("  0x64        Status/Command port");
+    outln!("");
+    outln!("CMOS/RTC:");
+    outln!("  0x70        Index port");
+    outln!("  0x71        Data port");
+    outln!("");
+    outln!("Serial Ports (8250/16550 UART):");
+    outln!("  0x3F8-0x3FF COM1");
+    outln!("  0x2F8-0x2FF COM2");
+    outln!("  0x3E8-0x3EF COM3");
+    outln!("  0x2E8-0x2EF COM4");
+    outln!("");
+    outln!("Parallel Ports:");
+    outln!("  0x378-0x37F LPT1");
+    outln!("  0x278-0x27F LPT2");
+    outln!("  0x3BC-0x3BF LPT3");
+    outln!("");
+    outln!("VGA:");
+    outln!("  0x3C0-0x3CF VGA registers");
+    outln!("  0x3D4-0x3D5 CRT controller");
+    outln!("");
+    outln!("PCI Configuration:");
+    outln!("  0xCF8       Config address");
+    outln!("  0xCFC       Config data");
 }
