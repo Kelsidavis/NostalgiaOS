@@ -101,6 +101,11 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    power          Show power management status");
         outln!("    shutdown       Shut down the system");
         outln!("");
+        outln!("  Services:");
+        outln!("    services       List/manage services");
+        outln!("    sc <cmd>       Service control (Windows sc.exe)");
+        outln!("    net start/stop Service management (Windows net.exe)");
+        outln!("");
         outln!("  Debugging:");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
@@ -1562,3 +1567,384 @@ fn test_seh_handler(
     ExceptionDisposition::EXCEPTION_CONTINUE_SEARCH
 }
 
+// ============================================================================
+// Service Control Manager Commands
+// ============================================================================
+
+/// List services command
+pub fn cmd_services(args: &[&str]) {
+    use crate::svc::{self, ServiceState, service_type};
+
+    if args.is_empty() {
+        // List all services
+        outln!("");
+        outln!("  SERVICE NAME                  TYPE            STATE           START TYPE");
+        outln!("  ============                  ====            =====           ==========");
+
+        svc::enumerate_services(|svc| {
+            let name = svc.name_str();
+            let type_str = if (svc.service_type & service_type::KERNEL_DRIVER) != 0 {
+                "Kernel"
+            } else if (svc.service_type & service_type::FILE_SYSTEM_DRIVER) != 0 {
+                "FileSystem"
+            } else if (svc.service_type & service_type::WIN32) != 0 {
+                "Win32"
+            } else {
+                "Unknown"
+            };
+
+            let state_str = match svc.state() {
+                ServiceState::Stopped => "Stopped",
+                ServiceState::StartPending => "Starting",
+                ServiceState::StopPending => "Stopping",
+                ServiceState::Running => "Running",
+                ServiceState::ContinuePending => "Continuing",
+                ServiceState::PausePending => "Pausing",
+                ServiceState::Paused => "Paused",
+            };
+
+            let start_str = match svc.start_type {
+                svc::ServiceStartType::BootStart => "Boot",
+                svc::ServiceStartType::SystemStart => "System",
+                svc::ServiceStartType::AutoStart => "Auto",
+                svc::ServiceStartType::DemandStart => "Demand",
+                svc::ServiceStartType::Disabled => "Disabled",
+            };
+
+            outln!("  {:<28} {:<15} {:<15} {}", name, type_str, state_str, start_str);
+            true
+        });
+
+        outln!("");
+        let total = svc::service_count();
+        let running = svc::get_services_by_state(ServiceState::Running);
+        outln!("  {} services ({} running)", total, running);
+        outln!("");
+    } else {
+        match args[0] {
+            "start" => {
+                if args.len() < 2 {
+                    outln!("Usage: services start <service_name>");
+                    return;
+                }
+                let result = svc::scm_start_service(args[1]);
+                if result == 0 {
+                    outln!("Service '{}' started successfully.", args[1]);
+                } else {
+                    outln!("Failed to start service '{}' (error: {:#x})", args[1], result);
+                }
+            }
+            "stop" => {
+                if args.len() < 2 {
+                    outln!("Usage: services stop <service_name>");
+                    return;
+                }
+                let result = svc::scm_stop_service(args[1]);
+                if result == 0 {
+                    outln!("Service '{}' stopped successfully.", args[1]);
+                } else {
+                    outln!("Failed to stop service '{}' (error: {:#x})", args[1], result);
+                }
+            }
+            "query" | "status" => {
+                if args.len() < 2 {
+                    outln!("Usage: services query <service_name>");
+                    return;
+                }
+                match svc::scm_query_service_status(args[1]) {
+                    Some(status) => {
+                        outln!("");
+                        outln!("Service: {}", args[1]);
+                        outln!("  Type:      {:#x}", status.service_type);
+                        outln!("  State:     {}", match status.current_state {
+                            1 => "Stopped",
+                            2 => "Start Pending",
+                            3 => "Stop Pending",
+                            4 => "Running",
+                            5 => "Continue Pending",
+                            6 => "Pause Pending",
+                            7 => "Paused",
+                            _ => "Unknown",
+                        });
+                        outln!("  Controls:  {:#x}", status.controls_accepted);
+                        outln!("");
+                    }
+                    None => {
+                        outln!("Service '{}' not found.", args[1]);
+                    }
+                }
+            }
+            "help" | "/?" => {
+                outln!("Usage: services [command] [service_name]");
+                outln!("");
+                outln!("Commands:");
+                outln!("  (none)           List all services");
+                outln!("  start <name>     Start a service");
+                outln!("  stop <name>      Stop a service");
+                outln!("  query <name>     Query service status");
+                outln!("  help             Show this help");
+            }
+            _ => {
+                outln!("Unknown services command: {}", args[0]);
+                outln!("Use 'services help' for usage.");
+            }
+        }
+    }
+}
+
+/// SC (Service Control) command - Windows sc.exe compatibility
+pub fn cmd_sc(args: &[&str]) {
+    use crate::svc;
+
+    if args.is_empty() {
+        outln!("Usage: sc <command> [service_name] [options]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  query [service]     Query service status");
+        outln!("  queryex [service]   Query extended service status");
+        outln!("  start <service>     Start a service");
+        outln!("  stop <service>      Stop a service");
+        outln!("  pause <service>     Pause a service");
+        outln!("  continue <service>  Continue a paused service");
+        outln!("  config <service>    Change service configuration");
+        outln!("  create <service>    Create a new service");
+        outln!("  delete <service>    Delete a service");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "query") || eq_ignore_case(cmd, "queryex") {
+        if args.len() < 2 {
+            // Query all services
+            cmd_services(&[]);
+        } else {
+            cmd_services(&["query", args[1]]);
+        }
+    } else if eq_ignore_case(cmd, "start") {
+        if args.len() < 2 {
+            outln!("Usage: sc start <service_name>");
+            return;
+        }
+        let result = svc::scm_start_service(args[1]);
+        if result == 0 {
+            outln!("SERVICE_NAME: {}", args[1]);
+            outln!("        STATE: 4  RUNNING");
+        } else {
+            outln!("StartService FAILED {:#x}", result);
+        }
+    } else if eq_ignore_case(cmd, "stop") {
+        if args.len() < 2 {
+            outln!("Usage: sc stop <service_name>");
+            return;
+        }
+        let result = svc::scm_stop_service(args[1]);
+        if result == 0 {
+            outln!("SERVICE_NAME: {}", args[1]);
+            outln!("        STATE: 1  STOPPED");
+        } else {
+            outln!("ControlService FAILED {:#x}", result);
+        }
+    } else if eq_ignore_case(cmd, "pause") {
+        if args.len() < 2 {
+            outln!("Usage: sc pause <service_name>");
+            return;
+        }
+        let result = svc::scm_control_service(args[1], svc::ServiceControl::Pause);
+        if result == 0 {
+            outln!("SERVICE_NAME: {}", args[1]);
+            outln!("        STATE: 7  PAUSED");
+        } else {
+            outln!("ControlService FAILED {:#x}", result);
+        }
+    } else if eq_ignore_case(cmd, "continue") {
+        if args.len() < 2 {
+            outln!("Usage: sc continue <service_name>");
+            return;
+        }
+        let result = svc::scm_control_service(args[1], svc::ServiceControl::Continue);
+        if result == 0 {
+            outln!("SERVICE_NAME: {}", args[1]);
+            outln!("        STATE: 4  RUNNING");
+        } else {
+            outln!("ControlService FAILED {:#x}", result);
+        }
+    } else if eq_ignore_case(cmd, "config") {
+        if args.len() < 3 {
+            outln!("Usage: sc config <service_name> start=<type>");
+            outln!("  Types: boot, system, auto, demand, disabled");
+            return;
+        }
+        // Parse start= option
+        for i in 2..args.len() {
+            if args[i].starts_with("start=") {
+                let start_type = &args[i][6..];
+                let svc_start = match start_type {
+                    "boot" => Some(svc::ServiceStartType::BootStart),
+                    "system" => Some(svc::ServiceStartType::SystemStart),
+                    "auto" => Some(svc::ServiceStartType::AutoStart),
+                    "demand" => Some(svc::ServiceStartType::DemandStart),
+                    "disabled" => Some(svc::ServiceStartType::Disabled),
+                    _ => None,
+                };
+
+                if let Some(st) = svc_start {
+                    let result = svc::scm_change_service_config(
+                        args[1],
+                        None,
+                        Some(st),
+                        None,
+                        None,
+                        None,
+                    );
+                    if result == 0 {
+                        outln!("[SC] ChangeServiceConfig SUCCESS");
+                    } else {
+                        outln!("ChangeServiceConfig FAILED {:#x}", result);
+                    }
+                } else {
+                    outln!("Invalid start type: {}", start_type);
+                }
+                return;
+            }
+        }
+        outln!("No configuration options specified.");
+    } else if eq_ignore_case(cmd, "create") {
+        if args.len() < 3 {
+            outln!("Usage: sc create <service_name> binPath=<path> [start=<type>] [type=<type>]");
+            return;
+        }
+        // Parse options
+        let mut bin_path: Option<&str> = None;
+        let mut start_type = svc::ServiceStartType::DemandStart;
+        let mut svc_type = svc::service_type::WIN32_OWN_PROCESS;
+
+        for i in 2..args.len() {
+            if args[i].starts_with("binPath=") || args[i].starts_with("binpath=") {
+                bin_path = Some(&args[i][8..]);
+            } else if args[i].starts_with("start=") {
+                start_type = match &args[i][6..] {
+                    "boot" => svc::ServiceStartType::BootStart,
+                    "system" => svc::ServiceStartType::SystemStart,
+                    "auto" => svc::ServiceStartType::AutoStart,
+                    "demand" => svc::ServiceStartType::DemandStart,
+                    "disabled" => svc::ServiceStartType::Disabled,
+                    _ => svc::ServiceStartType::DemandStart,
+                };
+            } else if args[i].starts_with("type=") {
+                svc_type = match &args[i][5..] {
+                    "kernel" => svc::service_type::KERNEL_DRIVER,
+                    "filesys" => svc::service_type::FILE_SYSTEM_DRIVER,
+                    "own" => svc::service_type::WIN32_OWN_PROCESS,
+                    "share" => svc::service_type::WIN32_SHARE_PROCESS,
+                    _ => svc::service_type::WIN32_OWN_PROCESS,
+                };
+            }
+        }
+
+        if bin_path.is_none() {
+            outln!("binPath= is required");
+            return;
+        }
+
+        match svc::create_service(
+            args[1],
+            args[1], // display name = service name
+            svc_type,
+            start_type,
+            svc::ServiceErrorControl::Normal,
+            bin_path.unwrap(),
+        ) {
+            Some(_) => outln!("[SC] CreateService SUCCESS"),
+            None => outln!("CreateService FAILED"),
+        }
+    } else if eq_ignore_case(cmd, "delete") {
+        if args.len() < 2 {
+            outln!("Usage: sc delete <service_name>");
+            return;
+        }
+        if svc::delete_service(args[1]) {
+            outln!("[SC] DeleteService SUCCESS");
+        } else {
+            outln!("DeleteService FAILED");
+        }
+    } else {
+        outln!("Unknown sc command: {}", cmd);
+    }
+}
+
+/// NET command - partial Windows net.exe compatibility
+pub fn cmd_net(args: &[&str]) {
+    use crate::svc;
+
+    if args.is_empty() {
+        outln!("Usage: net <command> [options]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  start [service]   Start a service (or list running)");
+        outln!("  stop <service>    Stop a service");
+        outln!("  pause <service>   Pause a service");
+        outln!("  continue <service> Continue a paused service");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "start") {
+        if args.len() < 2 {
+            // List running services
+            outln!("These Windows services are started:");
+            outln!("");
+            svc::enumerate_services(|svc| {
+                if svc.state() == svc::ServiceState::Running {
+                    outln!("   {}", svc.display_name_str());
+                }
+                true
+            });
+            outln!("");
+            outln!("The command completed successfully.");
+        } else {
+            let result = svc::scm_start_service(args[1]);
+            if result == 0 {
+                outln!("The {} service was started successfully.", args[1]);
+            } else {
+                outln!("The {} service could not be started.", args[1]);
+            }
+        }
+    } else if eq_ignore_case(cmd, "stop") {
+        if args.len() < 2 {
+            outln!("Usage: net stop <service_name>");
+            return;
+        }
+        let result = svc::scm_stop_service(args[1]);
+        if result == 0 {
+            outln!("The {} service was stopped successfully.", args[1]);
+        } else {
+            outln!("The {} service could not be stopped.", args[1]);
+        }
+    } else if eq_ignore_case(cmd, "pause") {
+        if args.len() < 2 {
+            outln!("Usage: net pause <service_name>");
+            return;
+        }
+        let result = svc::scm_control_service(args[1], svc::ServiceControl::Pause);
+        if result == 0 {
+            outln!("The {} service was paused successfully.", args[1]);
+        } else {
+            outln!("The {} service could not be paused.", args[1]);
+        }
+    } else if eq_ignore_case(cmd, "continue") {
+        if args.len() < 2 {
+            outln!("Usage: net continue <service_name>");
+            return;
+        }
+        let result = svc::scm_control_service(args[1], svc::ServiceControl::Continue);
+        if result == 0 {
+            outln!("The {} service was continued successfully.", args[1]);
+        } else {
+            outln!("The {} service could not be continued.", args[1]);
+        }
+    } else {
+        outln!("NET: unrecognized command '{}'", cmd);
+    }
+}

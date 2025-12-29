@@ -151,10 +151,11 @@ const COMMANDS: &[&str] = &[
     "help", "history",
     "ls",
     "md", "mem", "memory", "mkdir", "mv",
+    "net",
     "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir",
-    "suspend",
+    "sc", "services", "suspend",
     "tasks", "time", "touch", "type",
     "ver", "version",
 ];
@@ -1044,6 +1045,13 @@ impl Shell {
             commands::cmd_veh(&args[1..argc]);
         } else if eq_ignore_case(cmd, "seh") {
             commands::cmd_seh(&args[1..argc]);
+        // Service commands
+        } else if eq_ignore_case(cmd, "services") {
+            commands::cmd_services(&args[1..argc]);
+        } else if eq_ignore_case(cmd, "sc") {
+            commands::cmd_sc(&args[1..argc]);
+        } else if eq_ignore_case(cmd, "net") {
+            commands::cmd_net(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
