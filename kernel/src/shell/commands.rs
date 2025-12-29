@@ -108,6 +108,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    net start/stop Service management (Windows net.exe)");
         outln!("");
         outln!("  Debugging:");
+        outln!("    debug <cmd>    Kernel debug (bugcheck, break, regs)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -4044,4 +4045,114 @@ pub fn cmd_sysinfo() {
     outln!("");
 
     outln!("============================================================");
+}
+
+// ============================================================================
+// Debug Command
+// ============================================================================
+
+/// Kernel debugging command
+pub fn cmd_debug(args: &[&str]) {
+    use crate::ke;
+
+    if args.is_empty() {
+        outln!("Kernel Debug Commands");
+        outln!("");
+        outln!("Usage: debug <command> [args]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  bugcheck         Test blue screen of death");
+        outln!("  break            Trigger debug break");
+        outln!("  stack            Show current stack pointer");
+        outln!("  regs             Show register state");
+        outln!("  veh              Show VEH handler count");
+        outln!("  seh              Show SEH frame count");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "bugcheck") {
+        outln!("Testing KeBugCheck...");
+        outln!("");
+        outln!("WARNING: This will cause a kernel panic!");
+        outln!("");
+
+        if args.len() > 1 && eq_ignore_case(args[1], "confirm") {
+            outln!("Triggering bugcheck with code 0xDEADBEEF...");
+            unsafe {
+                ke::ke_bugcheck(0xDEADBEEF);
+            }
+        } else {
+            outln!("Use 'debug bugcheck confirm' to actually trigger.");
+        }
+    } else if eq_ignore_case(cmd, "break") {
+        outln!("Triggering debug break (INT 3)...");
+        unsafe {
+            core::arch::asm!("int3");
+        }
+        outln!("Returned from debug break.");
+    } else if eq_ignore_case(cmd, "stack") {
+        let rsp: u64;
+        let rbp: u64;
+        unsafe {
+            core::arch::asm!(
+                "mov {}, rsp",
+                "mov {}, rbp",
+                out(reg) rsp,
+                out(reg) rbp,
+            );
+        }
+        outln!("Stack Pointers:");
+        outln!("  RSP: {:#018x}", rsp);
+        outln!("  RBP: {:#018x}", rbp);
+    } else if eq_ignore_case(cmd, "regs") {
+        let rax: u64;
+        let rbx: u64;
+        let rcx: u64;
+        let rdx: u64;
+        let rsi: u64;
+        let rdi: u64;
+        let r8: u64;
+        let r9: u64;
+
+        unsafe {
+            core::arch::asm!(
+                "mov {}, rax",
+                "mov {}, rbx",
+                "mov {}, rcx",
+                "mov {}, rdx",
+                "mov {}, rsi",
+                "mov {}, rdi",
+                "mov {}, r8",
+                "mov {}, r9",
+                out(reg) rax,
+                out(reg) rbx,
+                out(reg) rcx,
+                out(reg) rdx,
+                out(reg) rsi,
+                out(reg) rdi,
+                out(reg) r8,
+                out(reg) r9,
+            );
+        }
+
+        outln!("General Purpose Registers:");
+        outln!("  RAX: {:#018x}  RBX: {:#018x}", rax, rbx);
+        outln!("  RCX: {:#018x}  RDX: {:#018x}", rcx, rdx);
+        outln!("  RSI: {:#018x}  RDI: {:#018x}", rsi, rdi);
+        outln!("  R8:  {:#018x}  R9:  {:#018x}", r8, r9);
+    } else if eq_ignore_case(cmd, "veh") {
+        let count = ke::rtl_get_vectored_handler_count();
+        outln!("Vectored Exception Handlers:");
+        outln!("  Registered: {}", count);
+        outln!("  Maximum:    {}", ke::MAX_VEH_HANDLERS);
+    } else if eq_ignore_case(cmd, "seh") {
+        let count = ke::rtl_get_seh_frame_count();
+        outln!("Structured Exception Handling:");
+        outln!("  Active frames: {}", count);
+        outln!("  Maximum:       {}", ke::MAX_SEH_FRAMES);
+    } else {
+        outln!("Unknown debug command: {}", cmd);
+    }
 }

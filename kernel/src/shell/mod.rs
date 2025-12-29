@@ -146,19 +146,22 @@ const HISTORY_SIZE: usize = 32;
 
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
-    "cat", "cd", "clear", "cls", "copy", "cp",
-    "del", "dir", "dump", "echo", "erase", "exit",
-    "help", "history",
+    "cat", "cd", "clear", "cls", "copy", "cp", "cpuinfo",
+    "debug", "del", "dir", "dump", "echo", "erase", "ex", "exit",
+    "hal", "help", "history",
+    "io",
+    "ke",
     "ldr", "ls",
-    "md", "mem", "memory", "mkdir", "mv",
+    "md", "mem", "memory", "mkdir", "mm", "mv",
     "net",
+    "ob",
     "pe", "ps", "pwd",
     "quit",
-    "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir",
-    "sc", "services", "suspend",
+    "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
+    "sc", "se", "services", "suspend", "sysinfo",
     "tasks", "time", "touch", "type",
     "usertest",
-    "ver", "version",
+    "veh", "ver", "version",
 ];
 
 /// Current working directory
@@ -1036,7 +1039,7 @@ impl Shell {
         } else if eq_ignore_case(cmd, "resume") {
             commands::cmd_resume(&args[1..argc]);
         // Hardware info commands
-        } else if eq_ignore_case(cmd, "cpuinfo") || eq_ignore_case(cmd, "sysinfo") {
+        } else if eq_ignore_case(cmd, "cpuinfo") {
             commands::cmd_cpuinfo();
         } else if eq_ignore_case(cmd, "power") {
             commands::cmd_power(&args[1..argc]);
@@ -1087,6 +1090,9 @@ impl Shell {
         // System Information
         } else if eq_ignore_case(cmd, "sysinfo") {
             commands::cmd_sysinfo();
+        // Debug commands
+        } else if eq_ignore_case(cmd, "debug") {
+            commands::cmd_debug(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
