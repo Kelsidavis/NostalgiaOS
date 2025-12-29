@@ -46,6 +46,70 @@ pub mod pe;
 pub use pe::*;
 
 use core::ptr;
+use crate::ke::SpinLock;
+
+// ============================================================================
+// DLL Buffer Pool
+// ============================================================================
+
+/// Maximum number of DLLs that can be loaded
+pub const MAX_DLLS: usize = 16;
+
+/// Maximum size of a single DLL (256KB)
+pub const MAX_DLL_SIZE: usize = 0x40000;
+
+/// DLL buffer pool
+static mut DLL_BUFFER_POOL: [[u8; MAX_DLL_SIZE]; MAX_DLLS] = [[0; MAX_DLL_SIZE]; MAX_DLLS];
+
+/// DLL buffer allocation bitmap
+static mut DLL_BUFFER_BITMAP: u16 = 0;
+
+/// DLL buffer pool lock
+static DLL_BUFFER_LOCK: SpinLock<()> = SpinLock::new(());
+
+/// Allocate a DLL buffer
+///
+/// Returns (buffer_ptr, buffer_index) or None if no buffers available
+unsafe fn allocate_dll_buffer(size: usize) -> Option<(*mut u8, usize)> {
+    if size > MAX_DLL_SIZE {
+        crate::serial_println!("[LDR] DLL too large: {} > {}", size, MAX_DLL_SIZE);
+        return None;
+    }
+
+    let _guard = DLL_BUFFER_LOCK.lock();
+
+    for i in 0..MAX_DLLS {
+        if DLL_BUFFER_BITMAP & (1 << i) == 0 {
+            DLL_BUFFER_BITMAP |= 1 << i;
+            let ptr = DLL_BUFFER_POOL[i].as_mut_ptr();
+            // Zero the buffer
+            ptr::write_bytes(ptr, 0, MAX_DLL_SIZE);
+            return Some((ptr, i));
+        }
+    }
+
+    None
+}
+
+/// Free a DLL buffer by index
+unsafe fn free_dll_buffer(index: usize) {
+    if index < MAX_DLLS {
+        let _guard = DLL_BUFFER_LOCK.lock();
+        DLL_BUFFER_BITMAP &= !(1 << index);
+    }
+}
+
+/// Find DLL buffer index from address
+unsafe fn find_dll_buffer_index(addr: *const u8) -> Option<usize> {
+    for i in 0..MAX_DLLS {
+        let start = DLL_BUFFER_POOL[i].as_ptr();
+        let end = start.add(MAX_DLL_SIZE);
+        if addr >= start && addr < end {
+            return Some(i);
+        }
+    }
+    None
+}
 
 /// PE parsing result
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -893,14 +957,16 @@ pub unsafe fn load_executable(
 /// * `process` - Target process
 /// * `file_base` - Pointer to DLL file in memory
 /// * `file_size` - Size of the DLL file
+/// * `name` - DLL name for LDR entry
 ///
 /// # Safety
 /// - file_base must point to a valid PE DLL
 /// - process must be a valid process pointer
 pub unsafe fn load_dll(
-    _process: *mut crate::ps::EProcess,
+    process: *mut crate::ps::EProcess,
     file_base: *const u8,
     _file_size: usize,
+    name: &[u8],
 ) -> Result<LoadedImage, PeError> {
     // Parse PE headers
     let pe_info = parse_pe(file_base)?;
@@ -914,20 +980,209 @@ pub unsafe fn load_dll(
     let image_size = pe_info.size_of_image as usize;
     let preferred_base = pe_info.image_base;
 
-    crate::serial_println!("[LDR] Loading DLL:");
+    crate::serial_println!("[LDR] Loading DLL '{}':", core::str::from_utf8_unchecked(name));
     crate::serial_println!("[LDR]   Preferred base: {:#x}", preferred_base);
     crate::serial_println!("[LDR]   Image size:     {:#x}", image_size);
 
-    // In a full implementation:
-    // 1. Find available address space in process
-    // 2. Allocate and map pages
-    // 3. Copy sections
-    // 4. Process relocations
-    // 5. Process imports
-    // 6. Call DllMain with DLL_PROCESS_ATTACH
+    // Allocate buffer from DLL pool
+    let (load_base, _buffer_idx) = match allocate_dll_buffer(image_size) {
+        Some((ptr, idx)) => (ptr, idx),
+        None => {
+            crate::serial_println!("[LDR] Error: No DLL buffers available");
+            return Err(PeError::OutOfMemory);
+        }
+    };
 
-    // For now, return error as full DLL loading isn't implemented
-    Err(PeError::OutOfMemory)
+    // Copy sections to the load buffer
+    copy_sections(file_base, load_base, &pe_info)?;
+
+    // Process relocations if loaded at different address
+    let actual_base = load_base as u64;
+    if actual_base != preferred_base {
+        if !pe_info.has_relocations {
+            crate::serial_println!("[LDR] Error: DLL requires relocation but has none");
+            free_dll_buffer(_buffer_idx);
+            return Err(PeError::NotRelocatable);
+        }
+        crate::serial_println!("[LDR] Relocating DLL from {:#x} to {:#x}", preferred_base, actual_base);
+        if let Err(e) = process_relocations(load_base, preferred_base, actual_base) {
+            free_dll_buffer(_buffer_idx);
+            return Err(e);
+        }
+    }
+
+    // Calculate entry point (DllMain)
+    let entry_point = if pe_info.entry_point_rva != 0 {
+        actual_base + pe_info.entry_point_rva as u64
+    } else {
+        0
+    };
+
+    // Create LDR entry for this DLL if process has a PEB
+    if !process.is_null() {
+        let peb = (*process).peb;
+        if !peb.is_null() && !(*peb).ldr.is_null() {
+            let ldr_entry = crate::ps::create_ldr_entry_for_module(
+                (*peb).ldr,
+                actual_base,
+                entry_point,
+                pe_info.size_of_image,
+                name,
+                false, // is_exe = false for DLLs
+            );
+            if ldr_entry.is_null() {
+                crate::serial_println!("[LDR] Warning: Failed to create LDR entry for DLL");
+            }
+        }
+    }
+
+    let loaded = LoadedImage {
+        base: actual_base,
+        size: pe_info.size_of_image,
+        entry_point,
+        pe_info,
+    };
+
+    crate::serial_println!("[LDR] DLL loaded at {:#x} (entry={:#x})", actual_base, entry_point);
+
+    Ok(loaded)
+}
+
+/// Unload a DLL from a process
+///
+/// # Safety
+/// - image must have been loaded with load_dll
+pub unsafe fn unload_dll(image: &LoadedImage) -> Result<(), PeError> {
+    let base_ptr = image.base as *const u8;
+
+    // Find and free the DLL buffer
+    if let Some(idx) = find_dll_buffer_index(base_ptr) {
+        free_dll_buffer(idx);
+        crate::serial_println!("[LDR] DLL unloaded from {:#x}", image.base);
+        Ok(())
+    } else {
+        crate::serial_println!("[LDR] Error: DLL not found in buffer pool");
+        Err(PeError::InvalidSection)
+    }
+}
+
+/// Load a DLL and resolve its imports
+///
+/// Extended version that also processes imports using a resolver callback.
+pub unsafe fn load_dll_with_imports(
+    process: *mut crate::ps::EProcess,
+    file_base: *const u8,
+    file_size: usize,
+    name: &[u8],
+    resolver: ImportResolver,
+) -> Result<LoadedImage, PeError> {
+    // First load the DLL
+    let loaded = load_dll(process, file_base, file_size, name)?;
+
+    // Process imports
+    let load_base = loaded.base as *mut u8;
+    if let Err(e) = process_imports(load_base, resolver) {
+        crate::serial_println!("[LDR] Error processing imports for DLL");
+        unload_dll(&loaded)?;
+        return Err(e);
+    }
+
+    Ok(loaded)
+}
+
+// ============================================================================
+// Module Lookup
+// ============================================================================
+
+/// Find a loaded module by name in a process's module list
+///
+/// # Safety
+/// - process must be a valid process pointer
+pub unsafe fn find_module_by_name(
+    process: *mut crate::ps::EProcess,
+    name: &str,
+) -> Option<u64> {
+    if process.is_null() {
+        return None;
+    }
+
+    let peb = (*process).peb;
+    if peb.is_null() {
+        return None;
+    }
+
+    let ldr = (*peb).ldr;
+    if ldr.is_null() {
+        return None;
+    }
+
+    // Walk the InLoadOrderModuleList
+    let list_head = &(*ldr).in_load_order_module_list as *const crate::ps::ListEntry64;
+    let mut current = (*list_head).flink as *const crate::ps::ListEntry64;
+
+    while current != list_head {
+        // The ListEntry64 is the first field of LdrDataTableEntry
+        let entry = current as *const crate::ps::LdrDataTableEntry;
+
+        // Get the BaseDllName from the entry
+        let base_name = &(*entry).base_dll_name;
+        if base_name.length > 0 && !base_name.buffer.is_null() {
+            // Convert wide string to compare (simplified - assumes ASCII)
+            let name_buf = base_name.buffer as *const u16;
+            let name_len = (base_name.length / 2) as usize;
+
+            let mut matches = name_len == name.len();
+            if matches {
+                for i in 0..name_len {
+                    let c = (*name_buf.add(i)) as u8;
+                    let target = name.as_bytes()[i];
+                    // Case-insensitive comparison
+                    if c.to_ascii_lowercase() != target.to_ascii_lowercase() {
+                        matches = false;
+                        break;
+                    }
+                }
+            }
+
+            if matches {
+                return Some((*entry).dll_base as u64);
+            }
+        }
+
+        current = (*current).flink as *const crate::ps::ListEntry64;
+    }
+
+    None
+}
+
+/// Create an import resolver for a process
+///
+/// Returns a resolver function that looks up imports from loaded modules.
+pub fn create_process_import_resolver(
+    process: *mut crate::ps::EProcess,
+) -> impl Fn(&str, &str, u16) -> Option<u64> {
+    move |dll_name: &str, func_name: &str, ordinal: u16| -> Option<u64> {
+        unsafe {
+            // Find the DLL in the process's module list
+            let dll_base = find_module_by_name(process, dll_name)?;
+
+            if !func_name.is_empty() {
+                // Resolve by name
+                find_export_by_name(dll_base as *const u8, func_name)
+            } else {
+                // Resolve by ordinal
+                find_export_by_ordinal(dll_base as *const u8, ordinal)
+            }
+        }
+    }
+}
+
+/// Get the number of loaded DLLs from the buffer pool
+pub fn get_loaded_dll_count() -> usize {
+    unsafe {
+        let _guard = DLL_BUFFER_LOCK.lock();
+        DLL_BUFFER_BITMAP.count_ones() as usize
+    }
 }
 
 // ============================================================================
@@ -937,4 +1192,6 @@ pub unsafe fn load_dll(
 /// Initialize the loader subsystem
 pub fn init() {
     crate::serial_println!("[LDR] Loader subsystem initialized");
+    crate::serial_println!("[LDR]   Max DLLs: {}", MAX_DLLS);
+    crate::serial_println!("[LDR]   Max DLL size: {} KB", MAX_DLL_SIZE / 1024);
 }
