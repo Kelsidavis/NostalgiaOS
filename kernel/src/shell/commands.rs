@@ -112,6 +112,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("  Debugging:");
         outln!("    debug <cmd>    Kernel debug (bugcheck, break, regs)");
         outln!("    int <type>     Trigger interrupts (div0, break, gpf)");
+        outln!("    timer <cmd>    Timer diagnostics (apic, tsc, pit)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -5241,4 +5242,319 @@ pub fn cmd_int(args: &[&str]) {
     } else {
         outln!("Unknown int command: {}", cmd);
     }
+}
+
+// ============================================================================
+// Timer Diagnostics Command
+// ============================================================================
+
+/// Timer diagnostics command
+pub fn cmd_timer(args: &[&str]) {
+    use crate::hal::apic;
+
+    if args.is_empty() || eq_ignore_case(args[0], "status") {
+        show_timer_status();
+    } else if eq_ignore_case(args[0], "apic") {
+        show_apic_timer_status();
+    } else if eq_ignore_case(args[0], "tsc") {
+        show_tsc_info();
+    } else if eq_ignore_case(args[0], "active") {
+        show_active_timers();
+    } else if eq_ignore_case(args[0], "tick") {
+        outln!("Current tick count: {}", apic::get_tick_count());
+    } else if eq_ignore_case(args[0], "pit") {
+        show_pit_status();
+    } else if eq_ignore_case(args[0], "help") {
+        outln!("Timer Diagnostics");
+        outln!("");
+        outln!("Usage: timer [command]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  status     Show timer overview (default)");
+        outln!("  apic       Show APIC timer details");
+        outln!("  tsc        Show TSC (Time Stamp Counter) info");
+        outln!("  active     Show active kernel timers");
+        outln!("  tick       Show current tick count");
+        outln!("  pit        Show PIT (8254) status");
+        outln!("  help       Show this help");
+    } else {
+        outln!("Unknown timer command: {}", args[0]);
+    }
+}
+
+/// Show timer status overview
+fn show_timer_status() {
+    use crate::hal::apic;
+    use crate::ke::timer;
+
+    outln!("Timer Status Overview");
+    outln!("");
+
+    // System tick count
+    let ticks = apic::get_tick_count();
+    outln!("System Ticks:    {}", ticks);
+
+    // Approximate uptime (assuming ~1000 ticks/sec)
+    let seconds = ticks / 1000;
+    let minutes = seconds / 60;
+    let hours = minutes / 60;
+    outln!("Approx Uptime:   {}h {}m {}s", hours, minutes % 60, seconds % 60);
+
+    // Active timers
+    let active = timer::ki_get_active_timer_count();
+    outln!("Active Timers:   {}", active);
+
+    // Next timer delta
+    if let Some(delta) = timer::ki_get_next_timer_delta() {
+        outln!("Next Expiry:     {} ms", delta);
+    } else {
+        outln!("Next Expiry:     (none)");
+    }
+
+    outln!("");
+
+    // TSC
+    let tsc: u64;
+    unsafe {
+        core::arch::asm!(
+            "rdtsc",
+            "shl rdx, 32",
+            "or rax, rdx",
+            out("rax") tsc,
+            out("rdx") _,
+        );
+    }
+    outln!("TSC Value:       {:#018x} ({})", tsc, tsc);
+
+    // APIC info
+    let lapic = apic::get();
+    outln!("APIC Base:       {:#x}", lapic.base_address());
+    outln!("APIC ID:         {}", lapic.id());
+}
+
+/// Show APIC timer details
+fn show_apic_timer_status() {
+    use crate::hal::apic;
+
+    outln!("APIC Timer Status");
+    outln!("");
+
+    let lapic = apic::get();
+
+    outln!("APIC Base:      {:#x}", lapic.base_address());
+    outln!("APIC ID:        {}", lapic.id());
+    outln!("APIC Version:   {:#x}", lapic.version());
+    outln!("");
+
+    // Read timer registers directly
+    let base = lapic.base_address();
+
+    unsafe {
+        let lvt_timer = core::ptr::read_volatile((base + 0x320) as *const u32);
+        let timer_init = core::ptr::read_volatile((base + 0x380) as *const u32);
+        let timer_current = core::ptr::read_volatile((base + 0x390) as *const u32);
+        let timer_divide = core::ptr::read_volatile((base + 0x3E0) as *const u32);
+
+        outln!("LVT Timer:      {:#010x}", lvt_timer);
+        outln!("  Vector:       {}", lvt_timer & 0xFF);
+        outln!("  Masked:       {}", if (lvt_timer & (1 << 16)) != 0 { "Yes" } else { "No" });
+
+        let mode = (lvt_timer >> 17) & 0x3;
+        let mode_str = match mode {
+            0 => "One-shot",
+            1 => "Periodic",
+            2 => "TSC-Deadline",
+            _ => "Reserved",
+        };
+        outln!("  Mode:         {}", mode_str);
+
+        outln!("");
+        outln!("Initial Count:  {}", timer_init);
+        outln!("Current Count:  {}", timer_current);
+
+        let divider = match timer_divide & 0xF {
+            0b0000 => 2,
+            0b0001 => 4,
+            0b0010 => 8,
+            0b0011 => 16,
+            0b1000 => 32,
+            0b1001 => 64,
+            0b1010 => 128,
+            0b1011 => 1,
+            _ => 0,
+        };
+        outln!("Divider:        {} (raw: {:#x})", divider, timer_divide);
+
+        // Calculate frequency if we have enough info
+        if timer_init > 0 && divider > 0 {
+            outln!("");
+            outln!("Timer frequency depends on bus clock (typically 100-200MHz)");
+            outln!("At 100MHz bus with div {}: ~{} Hz interrupt rate",
+                divider, 100_000_000 / (divider * timer_init));
+        }
+    }
+}
+
+/// Show TSC information
+fn show_tsc_info() {
+    outln!("Time Stamp Counter (TSC) Information");
+    outln!("");
+
+    // Read TSC
+    let tsc1: u64;
+    let tsc2: u64;
+
+    unsafe {
+        core::arch::asm!(
+            "rdtsc",
+            "shl rdx, 32",
+            "or rax, rdx",
+            out("rax") tsc1,
+            out("rdx") _,
+        );
+
+        // Small delay
+        for _ in 0..10000 {
+            core::hint::spin_loop();
+        }
+
+        core::arch::asm!(
+            "rdtsc",
+            "shl rdx, 32",
+            "or rax, rdx",
+            out("rax") tsc2,
+            out("rdx") _,
+        );
+    }
+
+    outln!("TSC Value:     {}", tsc1);
+    outln!("TSC (hex):     {:#018x}", tsc1);
+
+    let delta = tsc2.saturating_sub(tsc1);
+    outln!("");
+    outln!("Cycles in ~10k spins: {}", delta);
+
+    // Check CPUID for TSC features
+    let (_, _, ecx, edx): (u32, u32, u32, u32);
+    unsafe {
+        core::arch::asm!(
+            "push rbx",
+            "cpuid",
+            "pop rbx",
+            inout("eax") 1u32 => _,
+            out("ecx") ecx,
+            out("edx") edx,
+        );
+    }
+
+    outln!("");
+    outln!("TSC Features:");
+    outln!("  TSC Available:   {}", if (edx & (1 << 4)) != 0 { "Yes" } else { "No" });
+
+    // Check for invariant TSC (leaf 0x80000007)
+    let (eax_max, _, _, _): (u32, u32, u32, u32);
+    unsafe {
+        core::arch::asm!(
+            "push rbx",
+            "cpuid",
+            "pop rbx",
+            inout("eax") 0x80000000u32 => eax_max,
+            out("ecx") _,
+            out("edx") _,
+        );
+    }
+
+    if eax_max >= 0x80000007 {
+        let (_, _, _, edx_adv): (u32, u32, u32, u32);
+        unsafe {
+            core::arch::asm!(
+                "push rbx",
+                "cpuid",
+                "pop rbx",
+                inout("eax") 0x80000007u32 => _,
+                out("ecx") _,
+                out("edx") edx_adv,
+            );
+        }
+        outln!("  Invariant TSC:   {}", if (edx_adv & (1 << 8)) != 0 { "Yes" } else { "No" });
+    }
+
+    // Check for TSC deadline mode
+    outln!("  TSC-Deadline:    {}", if (ecx & (1 << 24)) != 0 { "Yes" } else { "No" });
+}
+
+/// Show active kernel timers
+fn show_active_timers() {
+    use crate::ke::timer;
+
+    outln!("Active Kernel Timers");
+    outln!("");
+
+    let count = timer::ki_get_active_timer_count();
+    outln!("Active timer count: {}", count);
+
+    if count > 0 {
+        if let Some(delta) = timer::ki_get_next_timer_delta() {
+            outln!("Next timer expires in: {} ms", delta);
+        }
+    }
+
+    outln!("");
+    outln!("Note: Detailed timer list not available without list traversal.");
+    outln!("Timer subsystem tracks timers internally for expiration.");
+}
+
+/// Show PIT (8254) status
+fn show_pit_status() {
+    outln!("PIT (8254) Status");
+    outln!("");
+
+    // Read-back command: latch count and status for all channels
+    // Command: 0xE2 = 11100010
+    //   Bits 7-6: 11 = Read-back command
+    //   Bit 5: 0 = Latch count
+    //   Bit 4: 0 = Latch status
+    //   Bit 3: 1 = Channel 2
+    //   Bit 2: 1 = Channel 1
+    //   Bit 1: 1 = Channel 0
+
+    // Note: In many VM environments, PIT may be partially emulated
+    // We'll read channel 0 which is the main timer
+
+    unsafe {
+        // Read channel 0 counter (ports 0x40, 0x41, 0x42 for channels 0, 1, 2)
+        // Port 0x43 is the mode/command register
+
+        // First, latch the counter for channel 0
+        // Command 0x00 latches channel 0
+        core::arch::asm!(
+            "mov al, 0x00",
+            "out 0x43, al",
+            out("al") _,
+        );
+
+        // Read low byte then high byte
+        let low: u8;
+        let high: u8;
+        core::arch::asm!(
+            "in al, 0x40",
+            out("al") low,
+        );
+        core::arch::asm!(
+            "in al, 0x40",
+            out("al") high,
+        );
+
+        let count = ((high as u16) << 8) | (low as u16);
+        outln!("Channel 0 Count:  {} ({:#06x})", count, count);
+    }
+
+    outln!("");
+    outln!("PIT Base Frequency: 1.193182 MHz");
+    outln!("Port 0x40: Channel 0 (system timer)");
+    outln!("Port 0x41: Channel 1 (DRAM refresh, legacy)");
+    outln!("Port 0x42: Channel 2 (PC speaker)");
+    outln!("Port 0x43: Mode/Command register");
+    outln!("");
+    outln!("Note: Modern systems use APIC timer instead of PIT.");
 }

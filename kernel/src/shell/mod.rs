@@ -160,7 +160,7 @@ const COMMANDS: &[&str] = &[
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
     "sc", "se", "services", "suspend", "sysinfo",
-    "tasks", "time", "touch", "type",
+    "tasks", "time", "timer", "touch", "type",
     "usertest",
     "veh", "ver", "version",
 ];
@@ -1103,6 +1103,9 @@ impl Shell {
         // Interrupt testing
         } else if eq_ignore_case(cmd, "int") {
             commands::cmd_int(&args[1..argc]);
+        // Timer diagnostics
+        } else if eq_ignore_case(cmd, "timer") {
+            commands::cmd_timer(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
