@@ -6242,19 +6242,19 @@ fn sys_create_port(
     _: usize,
 ) -> isize {
     if port_handle_ptr == 0 || object_attributes == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Read port name from object_attributes
     let path_result = unsafe { read_user_path(object_attributes, 260) };
     let (path_buf, path_len) = match path_result {
         Some((buf, len)) => (buf, len),
-        None => return -1,
+        None => return STATUS_INVALID_PARAMETER,
     };
 
     let port_name = match core::str::from_utf8(&path_buf[..path_len]) {
         Ok(s) => s,
-        Err(_) => return -1,
+        Err(_) => return STATUS_INVALID_PARAMETER,
     };
 
     let _ = max_connection_info_length;
@@ -6277,15 +6277,15 @@ fn sys_create_port(
                 Some(h) => {
                     unsafe { *(port_handle_ptr as *mut usize) = h; }
                     crate::serial_println!("[SYSCALL] NtCreatePort -> handle {:#x}", h);
-                    0
+                    STATUS_SUCCESS
                 }
                 None => {
                     unsafe { crate::lpc::lpc_close_port(idx); }
-                    -1
+                    STATUS_INSUFFICIENT_RESOURCES
                 }
             }
         }
-        None => -1,
+        None => STATUS_INSUFFICIENT_RESOURCES,
     }
 }
 
@@ -6298,8 +6298,10 @@ fn sys_connect_port(
     server_view: usize,
     _max_message_length: usize,
 ) -> isize {
+    const STATUS_PORT_CONNECTION_REFUSED: isize = 0xC0000041u32 as isize;
+
     if port_handle_ptr == 0 || port_name_ptr == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let _ = client_view;
@@ -6308,12 +6310,12 @@ fn sys_connect_port(
     let path_result = unsafe { read_user_path(port_name_ptr, 260) };
     let (path_buf, path_len) = match path_result {
         Some((buf, len)) => (buf, len),
-        None => return -1,
+        None => return STATUS_INVALID_PARAMETER,
     };
 
     let port_name = match core::str::from_utf8(&path_buf[..path_len]) {
         Ok(s) => s,
-        Err(_) => return -1,
+        Err(_) => return STATUS_INVALID_PARAMETER,
     };
 
     crate::serial_println!("[SYSCALL] NtConnectPort(name='{}')", port_name);
@@ -6328,15 +6330,15 @@ fn sys_connect_port(
                 Some(h) => {
                     unsafe { *(port_handle_ptr as *mut usize) = h; }
                     crate::serial_println!("[SYSCALL] NtConnectPort -> handle {:#x}", h);
-                    0
+                    STATUS_SUCCESS
                 }
                 None => {
                     unsafe { crate::lpc::lpc_close_port(idx); }
-                    -1
+                    STATUS_INSUFFICIENT_RESOURCES
                 }
             }
         }
-        None => -1,
+        None => STATUS_PORT_CONNECTION_REFUSED,
     }
 }
 
@@ -6347,12 +6349,12 @@ fn sys_listen_port(
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
     if port_handle == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let port_idx = match unsafe { get_lpc_port(port_handle) } {
         Some(idx) => idx,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtListenPort(handle={:#x})", port_handle);
@@ -6390,7 +6392,7 @@ fn sys_accept_connect_port(
     _client_view: usize,
 ) -> isize {
     if port_handle_ptr == 0 || connection_request == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let _ = port_context;
@@ -6430,7 +6432,7 @@ fn sys_accept_connect_port(
 
     let server_port = match server_idx {
         Some(s) => s,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     let comm_port = unsafe {
@@ -6444,15 +6446,15 @@ fn sys_accept_connect_port(
                 Some(h) => {
                     unsafe { *(port_handle_ptr as *mut usize) = h; }
                     crate::serial_println!("[SYSCALL] NtAcceptConnectPort -> handle {:#x}", h);
-                    0
+                    STATUS_SUCCESS
                 }
                 None => {
                     unsafe { crate::lpc::lpc_close_port(idx); }
-                    -1
+                    STATUS_INSUFFICIENT_RESOURCES
                 }
             }
         }
-        None => -1,
+        None => STATUS_INSUFFICIENT_RESOURCES,
     }
 }
 
@@ -6462,13 +6464,15 @@ fn sys_request_port(
     message: usize,
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    const STATUS_LPC_REPLY_LOST: isize = 0xC0000025u32 as isize;
+
     if port_handle == 0 || message == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let port_idx = match unsafe { get_lpc_port(port_handle) } {
         Some(idx) => idx,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     // Read message data (simplified - assume first 256 bytes)
@@ -6481,7 +6485,7 @@ fn sys_request_port(
     let msg = crate::lpc::LpcMessage::datagram(data);
     let result = unsafe { crate::lpc::lpc_send_message(port_idx, &msg) };
 
-    if result.is_some() { 0 } else { -1 }
+    if result.is_some() { STATUS_SUCCESS } else { STATUS_LPC_REPLY_LOST }
 }
 
 /// NtRequestWaitReplyPort - Send request and wait for reply
@@ -6491,13 +6495,15 @@ fn sys_request_wait_reply_port(
     reply_message: usize,
     _: usize, _: usize, _: usize,
 ) -> isize {
+    const STATUS_LPC_REPLY_LOST: isize = 0xC0000025u32 as isize;
+
     if port_handle == 0 || message == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let port_idx = match unsafe { get_lpc_port(port_handle) } {
         Some(idx) => idx,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     // Read message data
@@ -6511,7 +6517,7 @@ fn sys_request_wait_reply_port(
     let msg_id = unsafe { crate::lpc::lpc_send_message(port_idx, &msg) };
 
     if msg_id.is_none() {
-        return -1;
+        return STATUS_LPC_REPLY_LOST;
     }
 
     // Wait for reply (simplified - just check for messages)
@@ -6537,13 +6543,15 @@ fn sys_reply_port(
     reply_message: usize,
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    const STATUS_LPC_REPLY_LOST: isize = 0xC0000025u32 as isize;
+
     if port_handle == 0 || reply_message == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let port_idx = match unsafe { get_lpc_port(port_handle) } {
         Some(idx) => idx,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     // Read reply data and message ID
@@ -6556,7 +6564,7 @@ fn sys_reply_port(
 
     let result = unsafe { crate::lpc::lpc_reply_message(port_idx, msg_id, data) };
 
-    if result { 0 } else { -1 }
+    if result { STATUS_SUCCESS } else { STATUS_LPC_REPLY_LOST }
 }
 
 /// NtReplyWaitReceivePort - Reply and wait for next message
@@ -6570,12 +6578,12 @@ fn sys_reply_wait_receive_port(
     let _ = port_context;
 
     if port_handle == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let port_idx = match unsafe { get_lpc_port(port_handle) } {
         Some(idx) => idx,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtReplyWaitReceivePort(handle={:#x})", port_handle);
@@ -6615,17 +6623,19 @@ fn sys_close_port(
     port_handle: usize,
     _: usize, _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    const STATUS_UNSUCCESSFUL: isize = 0xC0000001u32 as isize;
+
     crate::serial_println!("[SYSCALL] NtClosePort(handle={:#x})", port_handle);
 
     let port_idx = match unsafe { get_lpc_port(port_handle) } {
         Some(idx) => idx,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     let result = unsafe { crate::lpc::lpc_close_port(port_idx) };
     unsafe { free_lpc_handle(port_handle); }
 
-    if result { 0 } else { -1 }
+    if result { STATUS_SUCCESS } else { STATUS_UNSUCCESSFUL }
 }
 
 /// NtQueryInformationPort - Query port information
@@ -6638,12 +6648,12 @@ fn sys_query_information_port(
     _: usize,
 ) -> isize {
     if port_handle == 0 || port_information == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let port_idx = match unsafe { get_lpc_port(port_handle) } {
         Some(idx) => idx,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtQueryInformationPort(handle={:#x})", port_handle);
