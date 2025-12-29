@@ -4069,6 +4069,8 @@ pub fn cmd_debug(args: &[&str]) {
         outln!("  flags            Show RFLAGS register");
         outln!("  gdt              Show GDT base and limit");
         outln!("  idt              Show IDT base and limit");
+        outln!("  peek <addr> [n]  Read n bytes at address (hex dump)");
+        outln!("  cpuid [leaf]     Display CPUID information");
         outln!("  veh              Show VEH handler count");
         outln!("  seh              Show SEH frame count");
         return;
@@ -4259,6 +4261,128 @@ pub fn cmd_debug(args: &[&str]) {
         outln!("Interrupt Descriptor Table:");
         outln!("  Base:  {:#018x}", idtr.base);
         outln!("  Limit: {:#06x} ({} entries)", idtr.limit, (idtr.limit + 1) / 16);
+    } else if eq_ignore_case(cmd, "peek") {
+        if args.len() < 2 {
+            outln!("Usage: debug peek <address> [count]");
+            outln!("  address: hex address to read (e.g., 0x1000)");
+            outln!("  count:   bytes to read (default: 64, max: 256)");
+            return;
+        }
+
+        // Parse address
+        let addr_str = args[1].trim_start_matches("0x").trim_start_matches("0X");
+        let addr = match u64::from_str_radix(addr_str, 16) {
+            Ok(a) => a,
+            Err(_) => {
+                outln!("Error: Invalid address '{}'", args[1]);
+                return;
+            }
+        };
+
+        // Parse count
+        let count = if args.len() > 2 {
+            args[2].parse::<usize>().unwrap_or(64).min(256)
+        } else {
+            64
+        };
+
+        outln!("Memory at {:#018x} ({} bytes):", addr, count);
+        outln!("");
+
+        // Display as hex dump with ASCII
+        let ptr = addr as *const u8;
+        let mut row_offset = 0usize;
+
+        while row_offset < count {
+            // Print address
+            out!("{:016x}  ", addr + row_offset as u64);
+
+            // Print hex bytes
+            let row_end = (row_offset + 16).min(count);
+            for i in row_offset..row_end {
+                let byte = unsafe { core::ptr::read_volatile(ptr.add(i)) };
+                out!("{:02x} ", byte);
+            }
+
+            // Padding if row is incomplete
+            for _ in row_end..(row_offset + 16) {
+                out!("   ");
+            }
+
+            out!(" ");
+
+            // Print ASCII
+            for i in row_offset..row_end {
+                let byte = unsafe { core::ptr::read_volatile(ptr.add(i)) };
+                if byte >= 0x20 && byte < 0x7f {
+                    out!("{}", byte as char);
+                } else {
+                    out!(".");
+                }
+            }
+
+            outln!("");
+            row_offset += 16;
+        }
+    } else if eq_ignore_case(cmd, "cpuid") {
+        let leaf = if args.len() > 1 {
+            let leaf_str = args[1].trim_start_matches("0x").trim_start_matches("0X");
+            u32::from_str_radix(leaf_str, 16).unwrap_or(0)
+        } else {
+            0 // Default to leaf 0
+        };
+
+        let eax: u32;
+        let ebx: u32;
+        let ecx: u32;
+        let edx: u32;
+
+        unsafe {
+            // rbx is reserved by LLVM, so we save/restore it
+            core::arch::asm!(
+                "push rbx",
+                "cpuid",
+                "mov {ebx_out:e}, ebx",
+                "pop rbx",
+                inout("eax") leaf => eax,
+                ebx_out = out(reg) ebx,
+                inout("ecx") 0u32 => ecx,
+                out("edx") edx,
+            );
+        }
+
+        outln!("CPUID Leaf {:#x}:", leaf);
+        outln!("  EAX: {:#010x}", eax);
+        outln!("  EBX: {:#010x}", ebx);
+        outln!("  ECX: {:#010x}", ecx);
+        outln!("  EDX: {:#010x}", edx);
+
+        // Decode common leaves
+        if leaf == 0 {
+            // Vendor string
+            let mut vendor = [0u8; 12];
+            vendor[0..4].copy_from_slice(&ebx.to_le_bytes());
+            vendor[4..8].copy_from_slice(&edx.to_le_bytes());
+            vendor[8..12].copy_from_slice(&ecx.to_le_bytes());
+            let vendor_str = core::str::from_utf8(&vendor).unwrap_or("?");
+            outln!("");
+            outln!("  Vendor: {}", vendor_str);
+            outln!("  Max Basic Leaf: {}", eax);
+        } else if leaf == 1 {
+            // Feature flags
+            outln!("");
+            outln!("  Family: {}", ((eax >> 8) & 0xF) + ((eax >> 20) & 0xFF));
+            outln!("  Model: {}", ((eax >> 4) & 0xF) + (((eax >> 16) & 0xF) << 4));
+            outln!("  Stepping: {}", eax & 0xF);
+            outln!("");
+            outln!("  Features (EDX):");
+            outln!("    FPU={} VME={} DE={} PSE={} TSC={} MSR={} PAE={} MCE={}",
+                (edx >> 0) & 1, (edx >> 1) & 1, (edx >> 2) & 1, (edx >> 3) & 1,
+                (edx >> 4) & 1, (edx >> 5) & 1, (edx >> 6) & 1, (edx >> 7) & 1);
+            outln!("    CX8={} APIC={} SEP={} MTRR={} PGE={} MCA={} CMOV={} PAT={}",
+                (edx >> 8) & 1, (edx >> 9) & 1, (edx >> 11) & 1, (edx >> 12) & 1,
+                (edx >> 13) & 1, (edx >> 14) & 1, (edx >> 15) & 1, (edx >> 16) & 1);
+        }
     } else if eq_ignore_case(cmd, "veh") {
         let count = ke::rtl_get_vectored_handler_count();
         outln!("Vectored Exception Handlers:");
