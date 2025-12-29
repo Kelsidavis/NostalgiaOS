@@ -88,9 +88,16 @@ pub use wait::{
 
 // Re-export exception types
 pub use exception::{
-    Context, ExceptionRecord, M128A, LegacyFloatingSaveArea,
+    Context, ExceptionRecord, ExceptionPointers, M128A, LegacyFloatingSaveArea,
     ke_raise_exception, ke_continue, ke_get_context, ke_set_context,
-    ContextFlags, ExceptionCode, ExceptionFlags, EXCEPTION_MAXIMUM_PARAMETERS,
+    ContextFlags, ExceptionCode, ExceptionFlags, ExceptionDisposition,
+    EXCEPTION_MAXIMUM_PARAMETERS, MAX_VEH_HANDLERS,
+    // VEH functions
+    VectoredExceptionHandler,
+    rtl_add_vectored_exception_handler,
+    rtl_remove_vectored_exception_handler,
+    rtl_call_vectored_exception_handlers,
+    rtl_get_vectored_handler_count,
 };
 
 // Re-export debug types
@@ -103,5 +110,10 @@ pub use debug::{
     dbgk_attach_process, dbgk_detach_process, dbgk_queue_debug_event,
     dbgk_wait_for_debug_event, dbgk_continue_debug_event,
     dbgk_generate_initial_events,
+    // Individual event posting functions
+    dbgk_post_create_thread_event, dbgk_post_load_dll_event,
+    dbgk_post_exit_thread_event, dbgk_post_exit_process_event,
+    dbgk_post_exception_event, dbgk_post_output_debug_string_event,
+    dbgk_post_unload_dll_event,
     MAX_DEBUG_OBJECTS, MAX_DEBUG_EVENTS,
 };

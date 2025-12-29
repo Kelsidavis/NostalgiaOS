@@ -101,6 +101,9 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    power          Show power management status");
         outln!("    shutdown       Shut down the system");
         outln!("");
+        outln!("  Debugging:");
+        outln!("    veh            Vectored Exception Handler info/test");
+        outln!("");
         outln!("  Use UP/DOWN arrows to navigate command history.");
     } else {
         let topic = args[0];
@@ -881,6 +884,22 @@ pub fn cmd_mem() {
 
 /// Show system time (tick count)
 pub fn cmd_time() {
+    // Get current date/time from RTC
+    let dt = crate::hal::rtc::get_datetime();
+    let day_names = ["", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    let day_name = if dt.day_of_week >= 1 && dt.day_of_week <= 7 {
+        day_names[dt.day_of_week as usize]
+    } else {
+        "???"
+    };
+
+    outln!("Current time: {} {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        day_name,
+        dt.year, dt.month, dt.day,
+        dt.hour, dt.minute, dt.second
+    );
+
+    // Get uptime from tick counter
     let ticks = crate::hal::apic::get_tick_count();
     let seconds = ticks / 1000;
     let ms = ticks % 1000;
@@ -893,7 +912,6 @@ pub fn cmd_time() {
         seconds % 60,
         ms
     );
-    outln!("Total ticks: {}", ticks);
 }
 
 /// Show running threads
@@ -1301,5 +1319,149 @@ pub fn cmd_shutdown() {
             outln!("Shutdown failed: error {}", e);
         }
     }
+}
+
+/// VEH (Vectored Exception Handler) information and testing
+///
+/// Usage: veh [add|remove|list|test]
+pub fn cmd_veh(args: &[&str]) {
+    use crate::ke::{
+        rtl_add_vectored_exception_handler,
+        rtl_remove_vectored_exception_handler,
+        rtl_get_vectored_handler_count,
+        MAX_VEH_HANDLERS,
+    };
+
+    if args.is_empty() {
+        // Show VEH status
+        outln!("Vectored Exception Handler (VEH) Status");
+        outln!("========================================");
+        outln!("Registered handlers: {}/{}", rtl_get_vectored_handler_count(), MAX_VEH_HANDLERS);
+        outln!();
+        outln!("Commands:");
+        outln!("  veh add     - Add a test VEH handler");
+        outln!("  veh remove  - Remove all test handlers");
+        outln!("  veh list    - List handler info");
+        outln!("  veh test    - Test exception dispatch");
+        return;
+    }
+
+    match args[0] {
+        "add" => {
+            // Add a test VEH handler
+            let handle = rtl_add_vectored_exception_handler(0, test_veh_handler);
+            if handle != 0 {
+                outln!("Added VEH handler with handle: {:#x}", handle);
+                outln!("Total handlers: {}", rtl_get_vectored_handler_count());
+            } else {
+                outln!("Failed to add VEH handler (list full?)");
+            }
+        }
+        "addfirst" => {
+            // Add as first handler
+            let handle = rtl_add_vectored_exception_handler(1, test_veh_handler_first);
+            if handle != 0 {
+                outln!("Added FIRST VEH handler with handle: {:#x}", handle);
+                outln!("Total handlers: {}", rtl_get_vectored_handler_count());
+            } else {
+                outln!("Failed to add VEH handler (list full?)");
+            }
+        }
+        "remove" => {
+            if args.len() > 1 {
+                // Remove specific handler by handle
+                if let Some(handle) = parse_number(args[1]) {
+                    let handle = handle as u64;
+                    if rtl_remove_vectored_exception_handler(handle) != 0 {
+                        outln!("Removed VEH handler {:#x}", handle);
+                    } else {
+                        outln!("Handler {:#x} not found", handle);
+                    }
+                } else {
+                    outln!("Invalid handle: {}", args[1]);
+                }
+            } else {
+                outln!("Usage: veh remove <handle>");
+            }
+        }
+        "list" => {
+            outln!("VEH Handler List");
+            outln!("================");
+            outln!("Registered handlers: {}/{}", rtl_get_vectored_handler_count(), MAX_VEH_HANDLERS);
+            outln!();
+            outln!("VEH dispatch order:");
+            outln!("  1. Vectored Exception Handlers (first chance)");
+            outln!("  2. Structured Exception Handlers (SEH)");
+            outln!("  3. Unhandled Exception Filter");
+            outln!("  4. Second Chance (process termination)");
+        }
+        "test" => {
+            outln!("Testing VEH exception dispatch...");
+            outln!("Active handlers: {}", rtl_get_vectored_handler_count());
+            outln!();
+
+            // Create a test exception
+            use crate::ke::{ExceptionRecord, Context, ke_raise_exception};
+
+            let record = ExceptionRecord::breakpoint(0x1234 as *mut u8);
+            let mut context = Context::new();
+
+            outln!("Raising test breakpoint exception...");
+            let result = unsafe {
+                ke_raise_exception(&record, &mut context, true)
+            };
+            outln!("ke_raise_exception returned: {}", result);
+
+            outln!();
+            outln!("VEH test complete.");
+        }
+        _ => {
+            outln!("Unknown VEH command: {}", args[0]);
+            outln!("Use: veh add, veh remove <handle>, veh list, veh test");
+        }
+    }
+}
+
+/// Test VEH handler - logs exceptions but continues search
+fn test_veh_handler(exception_info: *mut crate::ke::ExceptionPointers) -> i32 {
+    use crate::ke::ExceptionDisposition;
+
+    unsafe {
+        if !exception_info.is_null() {
+            let info = &*exception_info;
+            if !info.exception_record.is_null() {
+                let record = &*info.exception_record;
+                crate::serial_println!(
+                    "[VEH-TEST] Exception code={:#x} addr={:p}",
+                    record.exception_code,
+                    record.exception_address
+                );
+            }
+        }
+    }
+
+    // Continue search - let other handlers process
+    ExceptionDisposition::EXCEPTION_CONTINUE_SEARCH
+}
+
+/// Test VEH handler that marks itself as first and continues execution
+fn test_veh_handler_first(exception_info: *mut crate::ke::ExceptionPointers) -> i32 {
+    use crate::ke::ExceptionDisposition;
+
+    unsafe {
+        if !exception_info.is_null() {
+            let info = &*exception_info;
+            if !info.exception_record.is_null() {
+                let record = &*info.exception_record;
+                crate::serial_println!(
+                    "[VEH-FIRST] Handling exception code={:#x} - CONTINUE_EXECUTION",
+                    record.exception_code
+                );
+            }
+        }
+    }
+
+    // Handle the exception - stop search and continue execution
+    ExceptionDisposition::EXCEPTION_CONTINUE_EXECUTION
 }
 

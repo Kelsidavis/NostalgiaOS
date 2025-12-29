@@ -3,13 +3,23 @@
 //! Implements NT-compatible exception handling structures and functions:
 //! - CONTEXT structure for x86-64 (full CPU state)
 //! - EXCEPTION_RECORD structure
+//! - EXCEPTION_POINTERS structure for VEH
+//! - Vectored Exception Handler (VEH) framework
 //! - NtRaiseException / NtContinue support
 //!
 //! # NT Compatibility
 //! This module provides the same structures used by NT's Structured Exception
 //! Handling (SEH) mechanism, allowing user-mode exception handlers to work.
+//!
+//! # Vectored Exception Handling
+//!
+//! VEH provides a way to register exception handlers that are called before
+//! the frame-based SEH dispatch. Handlers return:
+//! - EXCEPTION_CONTINUE_EXECUTION (-1): Exception handled, resume execution
+//! - EXCEPTION_CONTINUE_SEARCH (0): Pass to next handler/SEH chain
 
 use core::ptr;
+use spin::Mutex;
 
 /// Context flags indicating which parts of CONTEXT are valid
 #[allow(non_snake_case)]
@@ -102,6 +112,17 @@ pub mod ExceptionFlags {
     pub const EXCEPTION_TARGET_UNWIND: u32 = 0x20;
     /// Collided unwind
     pub const EXCEPTION_COLLIDED_UNWIND: u32 = 0x40;
+}
+
+/// VEH handler return values
+#[allow(non_snake_case)]
+pub mod ExceptionDisposition {
+    /// Handler processed the exception; continue execution
+    pub const EXCEPTION_CONTINUE_EXECUTION: i32 = -1;
+    /// Handler didn't process; continue search
+    pub const EXCEPTION_CONTINUE_SEARCH: i32 = 0;
+    /// Execute the exception handler (for SEH)
+    pub const EXCEPTION_EXECUTE_HANDLER: i32 = 1;
 }
 
 /// Maximum number of exception parameters
@@ -392,9 +413,233 @@ impl Default for ExceptionRecord {
     }
 }
 
+// Make ExceptionRecord safe to send between threads
+unsafe impl Send for ExceptionRecord {}
+unsafe impl Sync for ExceptionRecord {}
+
+/// Exception pointers structure for VEH
+///
+/// This structure is passed to vectored exception handlers and contains
+/// pointers to both the exception record and the thread context.
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct ExceptionPointers {
+    /// Pointer to the exception record
+    pub exception_record: *mut ExceptionRecord,
+    /// Pointer to the thread context at the time of exception
+    pub context_record: *mut Context,
+}
+
+impl ExceptionPointers {
+    pub const fn new() -> Self {
+        Self {
+            exception_record: ptr::null_mut(),
+            context_record: ptr::null_mut(),
+        }
+    }
+
+    /// Create from references
+    pub fn from_refs(record: &mut ExceptionRecord, context: &mut Context) -> Self {
+        Self {
+            exception_record: record as *mut ExceptionRecord,
+            context_record: context as *mut Context,
+        }
+    }
+}
+
+impl Default for ExceptionPointers {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// Make ExceptionPointers safe to send
+unsafe impl Send for ExceptionPointers {}
+unsafe impl Sync for ExceptionPointers {}
+
+// =============================================================================
+// Vectored Exception Handler (VEH) Framework
+// =============================================================================
+
+/// Maximum number of VEH handlers that can be registered
+pub const MAX_VEH_HANDLERS: usize = 32;
+
+/// Type for vectored exception handler function
+///
+/// The handler receives a pointer to EXCEPTION_POINTERS and returns:
+/// - EXCEPTION_CONTINUE_EXECUTION (-1): Exception handled, resume
+/// - EXCEPTION_CONTINUE_SEARCH (0): Pass to next handler
+pub type VectoredExceptionHandler = fn(*mut ExceptionPointers) -> i32;
+
+/// Entry in the vectored exception handler list
+#[derive(Clone, Copy)]
+struct VehEntry {
+    /// The handler function (None if slot is free)
+    handler: Option<VectoredExceptionHandler>,
+    /// Unique identifier for this entry (used as handle)
+    id: u64,
+}
+
+impl VehEntry {
+    const fn empty() -> Self {
+        Self {
+            handler: None,
+            id: 0,
+        }
+    }
+}
+
+/// VEH list state
+struct VehList {
+    /// Handler entries (ordered - first to call is at index 0)
+    entries: [VehEntry; MAX_VEH_HANDLERS],
+    /// Number of active handlers
+    count: usize,
+}
+
+impl VehList {
+    const fn new() -> Self {
+        Self {
+            entries: [VehEntry::empty(); MAX_VEH_HANDLERS],
+            count: 0,
+        }
+    }
+}
+
+/// Global vectored exception handler list
+static VEH_LIST: Mutex<VehList> = Mutex::new(VehList::new());
+
+/// Next VEH entry ID
+static VEH_NEXT_ID: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(1);
+
+/// Add a vectored exception handler
+///
+/// # Arguments
+/// * `first_handler` - If non-zero, add as first handler; otherwise add as last
+/// * `handler` - The handler function to call on exceptions
+///
+/// # Returns
+/// A handle that can be used to remove the handler, or 0 on failure
+pub fn rtl_add_vectored_exception_handler(
+    first_handler: u32,
+    handler: VectoredExceptionHandler,
+) -> u64 {
+    let mut list = VEH_LIST.lock();
+
+    // Check if we have room
+    if list.count >= MAX_VEH_HANDLERS {
+        return 0; // No room
+    }
+
+    let id = VEH_NEXT_ID.fetch_add(1, core::sync::atomic::Ordering::SeqCst);
+    let entry = VehEntry {
+        handler: Some(handler),
+        id,
+    };
+
+    let count = list.count;
+    if first_handler != 0 {
+        // Insert at the beginning - shift existing entries right
+        for i in (1..=count).rev() {
+            list.entries[i] = list.entries[i - 1];
+        }
+        list.entries[0] = entry;
+    } else {
+        // Insert at the end
+        list.entries[count] = entry;
+    }
+
+    list.count += 1;
+    id
+}
+
+/// Remove a vectored exception handler
+///
+/// # Arguments
+/// * `handle` - The handle returned from rtl_add_vectored_exception_handler
+///
+/// # Returns
+/// Non-zero if successful, zero if handler not found
+pub fn rtl_remove_vectored_exception_handler(handle: u64) -> u32 {
+    let mut list = VEH_LIST.lock();
+    let count = list.count;
+
+    // Find the entry with this handle
+    for i in 0..count {
+        if list.entries[i].id == handle {
+            // Found it - shift remaining entries left
+            for j in i..(count - 1) {
+                list.entries[j] = list.entries[j + 1];
+            }
+            // Clear the last slot
+            list.entries[count - 1] = VehEntry::empty();
+            list.count -= 1;
+            return 1; // TRUE
+        }
+    }
+
+    0 // FALSE - not found
+}
+
+/// Call all vectored exception handlers
+///
+/// This is called before frame-based SEH dispatch to give VEH handlers
+/// a chance to handle the exception.
+///
+/// # Arguments
+/// * `exception_record` - The exception that occurred
+/// * `context` - The thread context at the time of exception
+///
+/// # Returns
+/// true if a handler returned EXCEPTION_CONTINUE_EXECUTION
+/// false if all handlers returned EXCEPTION_CONTINUE_SEARCH
+pub fn rtl_call_vectored_exception_handlers(
+    exception_record: *mut ExceptionRecord,
+    context: *mut Context,
+) -> bool {
+    let list = VEH_LIST.lock();
+
+    if list.count == 0 {
+        return false;
+    }
+
+    // Create exception pointers structure
+    let mut exception_info = ExceptionPointers {
+        exception_record,
+        context_record: context,
+    };
+
+    // Call each handler in order
+    for i in 0..list.count {
+        if let Some(handler) = list.entries[i].handler {
+            let result = handler(&mut exception_info);
+            if result == ExceptionDisposition::EXCEPTION_CONTINUE_EXECUTION {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+/// Get the number of registered VEH handlers
+pub fn rtl_get_vectored_handler_count() -> usize {
+    VEH_LIST.lock().count
+}
+
+// =============================================================================
+// Exception Dispatch Functions
+// =============================================================================
+
 /// Raise an exception in the current thread
 ///
 /// This is the kernel implementation of NtRaiseException.
+///
+/// The exception dispatch order is:
+/// 1. Vectored Exception Handlers (VEH) - global, first chance only
+/// 2. Structured Exception Handlers (SEH) - frame-based
+/// 3. Unhandled exception filter
+/// 4. Second chance (usually terminates process)
 ///
 /// # Arguments
 /// * `exception_record` - The exception to raise
@@ -419,8 +664,7 @@ pub unsafe fn ke_raise_exception(
         return 0xC0000025u32 as i32; // STATUS_NONCONTINUABLE_EXCEPTION
     }
 
-    // TODO: Dispatch to user-mode exception handler chain
-    // For now, we just log the exception
+    // Log the exception for debugging
     crate::serial_println!(
         "Exception: code={:#x} addr={:p} first_chance={}",
         record.exception_code,
@@ -428,10 +672,36 @@ pub unsafe fn ke_raise_exception(
         first_chance
     );
 
+    // First chance exception handling
+    if first_chance {
+        // Step 1: Call Vectored Exception Handlers (VEH)
+        // VEH handlers are called before frame-based SEH
+        if rtl_call_vectored_exception_handlers(
+            exception_record as *mut ExceptionRecord,
+            context,
+        ) {
+            // A VEH handler returned EXCEPTION_CONTINUE_EXECUTION
+            crate::serial_println!("VEH handler handled exception, continuing execution");
+            return 0; // STATUS_SUCCESS
+        }
+
+        // Step 2: Would dispatch to frame-based SEH here
+        // TODO: Implement SEH chain walking and dispatch
+
+        // Step 3: Would call unhandled exception filter here
+        // TODO: Implement unhandled exception filter
+    }
+
     // If first chance handling fails, this becomes a second chance exception
     // which typically results in process termination
+    if !first_chance {
+        crate::serial_println!(
+            "Second chance exception not handled - process would be terminated"
+        );
+        // In a real implementation, we would terminate the process here
+    }
 
-    0 // STATUS_SUCCESS (exception was handled)
+    0 // STATUS_SUCCESS (exception was handled or logged)
 }
 
 /// Continue execution from an exception

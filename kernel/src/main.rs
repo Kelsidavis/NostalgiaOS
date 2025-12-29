@@ -322,6 +322,11 @@ fn phase1_init(boot_info: &BootInfo) {
         kprintln!("  ACPI not available");
     }
 
+    // Initialize RTC (real-time clock)
+    kprintln!("  Initializing RTC...");
+    hal::rtc::init();
+    kprintln!("  RTC initialized");
+
     // Initialize power manager
     kprintln!("  Initializing power manager...");
     po::init();

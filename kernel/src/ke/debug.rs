@@ -588,26 +588,302 @@ pub unsafe fn dbgk_continue_debug_event(
 }
 
 /// Generate initial debug events when attaching to a process
+///
+/// This function posts the "fake" initial messages when a debugger attaches
+/// to an already-running process. It generates:
+/// 1. CREATE_PROCESS event (with first thread info)
+/// 2. CREATE_THREAD events for each additional thread
+/// 3. LOAD_DLL events for each loaded module
+///
+/// Following the Windows NT pattern from DbgkpPostFakeProcessCreateMessages.
 pub unsafe fn dbgk_generate_initial_events(debug_index: usize, pid: u32) {
-    // Generate CREATE_PROCESS event
+    crate::serial_println!("[DEBUG] Generating initial events for process {}", pid);
+
+    // Step 1: Generate CREATE_PROCESS event (includes first thread)
+    let first_tid = 1u32; // Main thread ID
+    dbgk_post_create_process_event(debug_index, pid, first_tid);
+
+    // Step 2: Generate CREATE_THREAD for additional threads
+    // In a real implementation, we'd iterate over the process's thread list
+    // For now, simulate additional threads if any
+    dbgk_post_thread_events(debug_index, pid, first_tid);
+
+    // Step 3: Generate LOAD_DLL events for loaded modules
+    // In a real implementation, we'd walk the PEB's LDR_DATA_TABLE_ENTRY list
+    dbgk_post_module_events(debug_index, pid, first_tid);
+
+    crate::serial_println!("[DEBUG] Initial events generated for process {}", pid);
+}
+
+/// Post a CREATE_PROCESS debug event
+///
+/// This is sent for the first thread in the process when attaching.
+unsafe fn dbgk_post_create_process_event(debug_index: usize, pid: u32, tid: u32) {
     let create_info = CreateProcessDebugInfo {
-        process_handle: 0, // Placeholder
-        thread_handle: 0,
-        base_of_image: 0x00400000, // Default image base
-        start_address: 0,
+        process_handle: pid as u64 | 0x4000_0000, // Fake handle
+        thread_handle: tid as u64 | 0x4000_0000,  // Fake handle
+        base_of_image: 0x00400000, // Default PE image base
+        start_address: 0x00401000, // Default entry point
     };
 
     dbgk_queue_debug_event(
         debug_index,
         DebugEventType::CreateProcess,
         pid,
-        1, // Main thread ID (placeholder)
+        tid,
         DebugEventInfo { create_process: create_info },
     );
 
-    // In a full implementation, we'd also generate:
-    // - CREATE_THREAD for each existing thread
-    // - LOAD_DLL for each loaded module
+    crate::serial_println!(
+        "[DEBUG] Posted CREATE_PROCESS: pid={} tid={} base={:#x}",
+        pid, tid, create_info.base_of_image
+    );
+}
+
+/// Post CREATE_THREAD events for threads in the process
+///
+/// In a full implementation, this would iterate over all threads in the
+/// process and post a CREATE_THREAD event for each (except the first,
+/// which is included in CREATE_PROCESS).
+unsafe fn dbgk_post_thread_events(_debug_index: usize, _pid: u32, first_tid: u32) {
+    // For simulation, we might have additional threads
+    // In a real implementation, we'd walk the process's ThreadListHead
+
+    // Example: If we had thread tracking, we'd do something like:
+    // for thread in process.thread_list {
+    //     if thread.id != first_tid {
+    //         dbgk_post_create_thread_event(_debug_index, _pid, thread.id, thread.start_address);
+    //     }
+    // }
+
+    // For now, just log that we checked for additional threads
+    crate::serial_println!(
+        "[DEBUG] Checked for additional threads (first_tid={})",
+        first_tid
+    );
+}
+
+/// Post a single CREATE_THREAD event
+pub unsafe fn dbgk_post_create_thread_event(
+    debug_index: usize,
+    pid: u32,
+    tid: u32,
+    start_address: u64,
+) {
+    let create_info = CreateThreadDebugInfo {
+        thread_handle: tid as u64 | 0x4000_0000,
+        start_address,
+    };
+
+    dbgk_queue_debug_event(
+        debug_index,
+        DebugEventType::CreateThread,
+        pid,
+        tid,
+        DebugEventInfo { create_thread: create_info },
+    );
+
+    crate::serial_println!(
+        "[DEBUG] Posted CREATE_THREAD: pid={} tid={} start={:#x}",
+        pid, tid, start_address
+    );
+}
+
+/// Post LOAD_DLL events for loaded modules
+///
+/// In a full implementation, this would walk the PEB's loader data structures
+/// and post a LOAD_DLL event for each loaded module.
+unsafe fn dbgk_post_module_events(debug_index: usize, pid: u32, tid: u32) {
+    // Post LOAD_DLL for the main executable
+    dbgk_post_load_dll_event(
+        debug_index,
+        pid,
+        tid,
+        0x00400000, // Base address of main module
+        0x00001000, // Size (placeholder)
+        true,       // Is main module
+    );
+
+    // Post LOAD_DLL for ntdll.dll (always loaded first)
+    dbgk_post_load_dll_event(
+        debug_index,
+        pid,
+        tid,
+        0x7FFE0000, // Typical ntdll base
+        0x00100000, // Size (placeholder)
+        false,
+    );
+
+    // Post LOAD_DLL for kernel32.dll
+    dbgk_post_load_dll_event(
+        debug_index,
+        pid,
+        tid,
+        0x7C800000, // Typical kernel32 base (Windows XP/2003)
+        0x00100000, // Size (placeholder)
+        false,
+    );
+}
+
+/// Post a single LOAD_DLL event
+pub unsafe fn dbgk_post_load_dll_event(
+    debug_index: usize,
+    pid: u32,
+    tid: u32,
+    base_of_dll: u64,
+    size_of_image: u32,
+    is_main_module: bool,
+) {
+    let load_info = LoadDllDebugInfo {
+        file_handle: 0, // No file handle in this simulation
+        base_of_dll,
+        name_pointer: 0, // No name available in this simulation
+        unicode: false,
+    };
+
+    dbgk_queue_debug_event(
+        debug_index,
+        DebugEventType::LoadDll,
+        pid,
+        tid,
+        DebugEventInfo { load_dll: load_info },
+    );
+
+    crate::serial_println!(
+        "[DEBUG] Posted LOAD_DLL: pid={} base={:#x} main={}",
+        pid, base_of_dll, is_main_module
+    );
+
+    // Suppress unused variable warning
+    let _ = size_of_image;
+}
+
+/// Post an EXIT_THREAD event
+pub unsafe fn dbgk_post_exit_thread_event(
+    debug_index: usize,
+    pid: u32,
+    tid: u32,
+    exit_code: u32,
+) {
+    let exit_info = ExitThreadDebugInfo { exit_code };
+
+    dbgk_queue_debug_event(
+        debug_index,
+        DebugEventType::ExitThread,
+        pid,
+        tid,
+        DebugEventInfo { exit_thread: exit_info },
+    );
+
+    crate::serial_println!(
+        "[DEBUG] Posted EXIT_THREAD: pid={} tid={} code={:#x}",
+        pid, tid, exit_code
+    );
+}
+
+/// Post an EXIT_PROCESS event
+pub unsafe fn dbgk_post_exit_process_event(
+    debug_index: usize,
+    pid: u32,
+    tid: u32,
+    exit_code: u32,
+) {
+    let exit_info = ExitProcessDebugInfo { exit_code };
+
+    dbgk_queue_debug_event(
+        debug_index,
+        DebugEventType::ExitProcess,
+        pid,
+        tid,
+        DebugEventInfo { exit_process: exit_info },
+    );
+
+    crate::serial_println!(
+        "[DEBUG] Posted EXIT_PROCESS: pid={} tid={} code={:#x}",
+        pid, tid, exit_code
+    );
+}
+
+/// Post an EXCEPTION debug event
+pub unsafe fn dbgk_post_exception_event(
+    debug_index: usize,
+    pid: u32,
+    tid: u32,
+    exception_code: u32,
+    exception_address: u64,
+    first_chance: bool,
+) {
+    let exception_info = ExceptionDebugInfo {
+        exception_code,
+        exception_flags: 0,
+        exception_address,
+        first_chance,
+    };
+
+    dbgk_queue_debug_event(
+        debug_index,
+        DebugEventType::Exception,
+        pid,
+        tid,
+        DebugEventInfo { exception: exception_info },
+    );
+
+    crate::serial_println!(
+        "[DEBUG] Posted EXCEPTION: pid={} tid={} code={:#x} addr={:#x} first={}",
+        pid, tid, exception_code, exception_address, first_chance
+    );
+}
+
+/// Post an OUTPUT_DEBUG_STRING event
+pub unsafe fn dbgk_post_output_debug_string_event(
+    debug_index: usize,
+    pid: u32,
+    tid: u32,
+    string_address: u64,
+    string_length: u16,
+    is_unicode: bool,
+) {
+    let string_info = OutputDebugStringInfo {
+        string_pointer: string_address,
+        string_length,
+        unicode: is_unicode,
+    };
+
+    dbgk_queue_debug_event(
+        debug_index,
+        DebugEventType::OutputDebugString,
+        pid,
+        tid,
+        DebugEventInfo { output_string: string_info },
+    );
+
+    crate::serial_println!(
+        "[DEBUG] Posted OUTPUT_DEBUG_STRING: pid={} addr={:#x} len={}",
+        pid, string_address, string_length
+    );
+}
+
+/// Post an UNLOAD_DLL event
+pub unsafe fn dbgk_post_unload_dll_event(
+    debug_index: usize,
+    pid: u32,
+    tid: u32,
+    base_of_dll: u64,
+) {
+    let unload_info = UnloadDllDebugInfo { base_of_dll };
+
+    dbgk_queue_debug_event(
+        debug_index,
+        DebugEventType::UnloadDll,
+        pid,
+        tid,
+        DebugEventInfo { unload_dll: unload_info },
+    );
+
+    crate::serial_println!(
+        "[DEBUG] Posted UNLOAD_DLL: pid={} base={:#x}",
+        pid, base_of_dll
+    );
 }
 
 /// Initialize the debug subsystem

@@ -32,6 +32,7 @@ pub mod apic;
 pub mod ata;
 pub mod keyboard;
 pub mod pic;
+pub mod rtc;
 
 // TODO: Future submodules
 // pub mod interrupt;
