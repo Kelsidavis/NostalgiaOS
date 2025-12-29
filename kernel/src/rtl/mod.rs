@@ -36,6 +36,7 @@ pub mod checksum;
 pub mod image;
 pub mod random;
 pub mod string;
+pub mod time;
 // pub mod heap;   // TODO: User-mode heap
 // pub mod splay;  // TODO: Splay trees
 
@@ -46,3 +47,4 @@ pub use checksum::*;
 pub use image::*;
 pub use random::*;
 pub use string::*;
+pub use time::*;
