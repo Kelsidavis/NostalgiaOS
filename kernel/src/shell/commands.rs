@@ -2398,8 +2398,9 @@ pub fn cmd_ldr(args: &[&str]) {
         outln!("");
         outln!("Commands:");
         outln!("  info               Show loader status");
-        outln!("  modules            List loaded modules");
+        outln!("  modules [pid]      List loaded modules for process");
         outln!("  load <addr>        Load PE executable at address");
+        outln!("  dll <pid> <addr>   Load DLL into process");
         outln!("  parse <addr>       Parse PE at address (don't load)");
         return;
     }
@@ -2409,21 +2410,155 @@ pub fn cmd_ldr(args: &[&str]) {
     if eq_ignore_case(cmd, "info") {
         outln!("Loader Information:");
         outln!("");
-        outln!("  Subsystem:  Active");
-        outln!("  Features:   PE32/PE32+ parsing");
-        outln!("              Section copying");
-        outln!("              Base relocations");
-        outln!("              Import resolution (basic)");
-        outln!("              Export lookup");
+        outln!("  Subsystem:    Active");
+        outln!("  DLL Pool:     {}/{} slots used", ldr::get_loaded_dll_count(), ldr::MAX_DLLS);
+        outln!("  Max DLL Size: {} KB", ldr::MAX_DLL_SIZE / 1024);
         outln!("");
-        outln!("Note: Full user-mode loading requires user page tables.");
+        outln!("  Features:");
+        outln!("    - PE32/PE32+ parsing");
+        outln!("    - Section copying");
+        outln!("    - Base relocations");
+        outln!("    - Import resolution");
+        outln!("    - Export lookup");
+        outln!("    - LDR module tracking");
+        outln!("    - DLL loading");
     } else if eq_ignore_case(cmd, "modules") {
-        outln!("Loaded Modules:");
+        // Get process - use PID from args or default to system process
+        let process: *mut crate::ps::EProcess = if args.len() > 1 {
+            let pid = args[1].parse::<u32>().unwrap_or(0);
+            unsafe { crate::ps::ps_lookup_process_by_id(pid) as *mut crate::ps::EProcess }
+        } else {
+            unsafe { crate::ps::get_system_process() }
+        };
+
+        if process.is_null() {
+            outln!("Process not found");
+            return;
+        }
+
+        unsafe {
+            let pid = (*process).unique_process_id;
+            outln!("Modules for Process {} ({}):", pid,
+                core::str::from_utf8_unchecked((*process).image_name()));
+            outln!("");
+
+            let peb = (*process).peb;
+            if peb.is_null() {
+                outln!("  (No PEB - kernel process)");
+                return;
+            }
+
+            let ldr_data = (*peb).ldr;
+            if ldr_data.is_null() {
+                outln!("  (No LDR data)");
+                return;
+            }
+
+            outln!("{:<16} {:<10} {:<12} Name", "Base", "Size", "Entry");
+            outln!("------------------------------------------------------------");
+
+            // Walk the InLoadOrderModuleList
+            let list_head = &(*ldr_data).in_load_order_module_list as *const crate::ps::ListEntry64;
+            let mut current = (*list_head).flink as *const crate::ps::ListEntry64;
+            let mut count = 0;
+
+            while current != list_head && count < 32 {
+                let entry = current as *const crate::ps::LdrDataTableEntry;
+
+                let base = (*entry).dll_base as u64;
+                let size = (*entry).size_of_image;
+                let entry_point = (*entry).entry_point as u64;
+
+                // Get module name - need buffer outside of conditionals for lifetime
+                let mut name_buf_local = [0u8; 32];
+                let base_name = &(*entry).base_dll_name;
+                let name_len = if base_name.length > 0 && !base_name.buffer.is_null() {
+                    let name_buf = base_name.buffer as *const u16;
+                    let len = ((base_name.length / 2) as usize).min(31);
+                    for i in 0..len {
+                        name_buf_local[i] = (*name_buf.add(i)) as u8;
+                    }
+                    len
+                } else {
+                    let unknown = b"<unknown>";
+                    name_buf_local[..unknown.len()].copy_from_slice(unknown);
+                    unknown.len()
+                };
+                let name = core::str::from_utf8(&name_buf_local[..name_len]).unwrap_or("?");
+
+                outln!("{:#016x} {:#010x} {:#012x} {}", base, size, entry_point, name);
+
+                current = (*current).flink as *const crate::ps::ListEntry64;
+                count += 1;
+            }
+
+            if count == 0 {
+                outln!("  (No modules loaded)");
+            } else {
+                outln!("");
+                outln!("Total: {} module(s)", count);
+            }
+        }
+    } else if eq_ignore_case(cmd, "dll") {
+        if args.len() < 3 {
+            outln!("Usage: ldr dll <pid> <address> [name]");
+            outln!("");
+            outln!("Loads a DLL from the given memory address into the specified process.");
+            return;
+        }
+
+        let pid = args[1].parse::<u32>().unwrap_or(0);
+        let addr = parse_hex_address(args[2]);
+        let name = if args.len() > 3 { args[3].as_bytes() } else { b"loaded.dll" };
+
+        if addr == 0 {
+            outln!("Invalid address: {}", args[2]);
+            return;
+        }
+
+        let process = unsafe {
+            crate::ps::ps_lookup_process_by_id(pid) as *mut crate::ps::EProcess
+        };
+        if process.is_null() {
+            outln!("Process {} not found", pid);
+            return;
+        }
+
+        outln!("Loading DLL from {:#x} into process {}...", addr, pid);
         outln!("");
-        // In a full implementation, we'd iterate the PEB's loader data
-        outln!("  (Module tracking not yet implemented)");
-        outln!("");
-        outln!("Hint: Use 'ps' to see processes and 'pe info <addr>' to analyze PEs.");
+
+        unsafe {
+            let base = addr as *const u8;
+            match ldr::parse_pe(base) {
+                Ok(info) => {
+                    if !info.is_dll {
+                        outln!("Error: Not a DLL (is_dll=false)");
+                        return;
+                    }
+
+                    outln!("DLL validated:");
+                    outln!("  Type:    {}", if info.is_64bit { "PE32+" } else { "PE32" });
+                    outln!("  Size:    {:#x}", info.size_of_image);
+                    outln!("  Entry:   {:#x}", info.entry_point_rva);
+                    outln!("");
+
+                    match ldr::load_dll(process, base, info.size_of_image as usize, name) {
+                        Ok(loaded) => {
+                            outln!("DLL loaded successfully!");
+                            outln!("  Base:    {:#x}", loaded.base);
+                            outln!("  Size:    {:#x}", loaded.size);
+                            outln!("  Entry:   {:#x}", loaded.entry_point);
+                        }
+                        Err(e) => {
+                            outln!("Load failed: {:?}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    outln!("Invalid PE: {:?}", e);
+                }
+            }
+        }
     } else if eq_ignore_case(cmd, "load") {
         if args.len() < 2 {
             outln!("Usage: ldr load <address>");
