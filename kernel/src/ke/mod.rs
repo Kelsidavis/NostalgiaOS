@@ -61,6 +61,9 @@ pub mod debug;
 // Bug check (BSOD)
 pub mod bugcheck;
 
+// Device queue
+pub mod device_queue;
+
 // Re-export key types
 pub use list::ListEntry;
 pub use thread::{KThread, ThreadState};
@@ -142,4 +145,12 @@ pub use bugcheck::{
     ke_bugcheck, ke_bugcheck_ex,
     is_bugcheck_active, get_bugcheck_data,
     BugCheckData, codes as bugcheck_codes,
+};
+
+// Re-export device queue types
+pub use device_queue::{
+    KDeviceQueue, KDeviceQueueEntry, DEVICE_QUEUE_OBJECT,
+    ke_initialize_device_queue, ke_insert_device_queue,
+    ke_insert_by_key_device_queue, ke_remove_device_queue,
+    ke_remove_by_key_device_queue, ke_remove_entry_device_queue,
 };

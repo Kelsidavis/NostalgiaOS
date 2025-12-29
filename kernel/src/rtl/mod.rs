@@ -32,6 +32,7 @@
 
 pub mod avl;
 pub mod bitmap;
+pub mod random;
 pub mod string;
 // pub mod heap;   // TODO: User-mode heap
 // pub mod splay;  // TODO: Splay trees
@@ -39,4 +40,5 @@ pub mod string;
 // Re-exports for convenience
 pub use avl::*;
 pub use bitmap::*;
+pub use random::*;
 pub use string::*;
