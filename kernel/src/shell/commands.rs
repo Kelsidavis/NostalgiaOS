@@ -130,6 +130,8 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    timerq         Kernel timer queue viewer (stats, list)");
         outln!("    dpcq           DPC queue viewer (stats, list, pending)");
         outln!("    obdir          Object Manager namespace viewer (types, tree)");
+        outln!("    handles        System handle table viewer (stats, list)");
+        outln!("    prcb           PRCB viewer (threads, ready, ipi)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -10985,5 +10987,246 @@ fn show_ob_tree() {
         } else {
             outln!("+-- {} <{}>", name, type_name);
         }
+    }
+}
+
+// ============================================================================
+// Handle Table Viewer Command
+// ============================================================================
+
+/// Handle table viewer command
+pub fn cmd_handles(args: &[&str]) {
+    let subcmd = if args.is_empty() { "stats" } else { args[0] };
+
+    if eq_ignore_case(subcmd, "help") || eq_ignore_case(subcmd, "?") {
+        outln!("HANDLES - System Handle Table Viewer");
+        outln!("");
+        outln!("Commands:");
+        outln!("  handles            Show handle statistics (default)");
+        outln!("  handles stats      Show handle table statistics");
+        outln!("  handles list       List all open handles");
+        outln!("  handles help       Show this help");
+        return;
+    }
+
+    if eq_ignore_case(subcmd, "stats") {
+        show_handle_stats();
+    } else if eq_ignore_case(subcmd, "list") {
+        show_handle_list();
+    } else {
+        outln!("Unknown handles command: {}", subcmd);
+        outln!("Use 'handles help' for usage");
+    }
+}
+
+fn show_handle_stats() {
+    use crate::ob::{ob_get_handle_stats, handle_attributes};
+
+    outln!("System Handle Table Statistics");
+    outln!("==============================");
+    outln!("");
+
+    let stats = ob_get_handle_stats();
+
+    outln!("Handle Count:      {}", stats.handle_count);
+    outln!("Max Handles:       {}", stats.max_handles);
+    outln!("Next Hint:         {:#x}", stats.next_handle_hint);
+    outln!("");
+    outln!("Usage:             {:.1}%",
+        (stats.handle_count as f64 / stats.max_handles as f64) * 100.0);
+}
+
+fn show_handle_list() {
+    use crate::ob::{ob_get_handle_snapshots, ob_get_handle_stats, handle_attributes};
+
+    let stats = ob_get_handle_stats();
+    let (handles, count) = ob_get_handle_snapshots(32);
+
+    outln!("System Handle Table ({} handles)", stats.handle_count);
+    outln!("============================================");
+    outln!("");
+
+    if count == 0 {
+        outln!("No handles in use");
+        return;
+    }
+
+    outln!("{:<8} {:<18} {:<12} {:<10} {:<20}",
+        "Handle", "Object", "Type", "Access", "Name");
+    outln!("--------------------------------------------------------------------------------");
+
+    for i in 0..count {
+        let h = &handles[i];
+        let type_name = core::str::from_utf8(&h.type_name[..h.type_name_length as usize]).unwrap_or("?");
+        let obj_name = if h.object_name_length > 0 {
+            core::str::from_utf8(&h.object_name[..h.object_name_length as usize]).unwrap_or("-")
+        } else {
+            "-"
+        };
+
+        outln!("{:#08x} {:#018x} {:<12} {:#010x} {:<20}",
+            h.handle, h.object_address, type_name, h.access_mask, obj_name);
+    }
+
+    if count < stats.handle_count as usize {
+        outln!("");
+        outln!("... showing {} of {} handles", count, stats.handle_count);
+    }
+}
+
+// ============================================================================
+// PRCB Viewer Command
+// ============================================================================
+
+/// PRCB viewer command
+pub fn cmd_prcb(args: &[&str]) {
+    let subcmd = if args.is_empty() { "stats" } else { args[0] };
+
+    if eq_ignore_case(subcmd, "help") || eq_ignore_case(subcmd, "?") {
+        outln!("PRCB - Processor Control Block Viewer");
+        outln!("");
+        outln!("Commands:");
+        outln!("  prcb               Show current PRCB info (default)");
+        outln!("  prcb stats         Show PRCB statistics");
+        outln!("  prcb threads       Show thread pointers");
+        outln!("  prcb ready         Show ready queue summary");
+        outln!("  prcb ipi           Show IPI state");
+        outln!("  prcb help          Show this help");
+        return;
+    }
+
+    if eq_ignore_case(subcmd, "stats") {
+        show_prcb_stats();
+    } else if eq_ignore_case(subcmd, "threads") {
+        show_prcb_threads();
+    } else if eq_ignore_case(subcmd, "ready") {
+        show_prcb_ready();
+    } else if eq_ignore_case(subcmd, "ipi") {
+        show_prcb_ipi();
+    } else {
+        outln!("Unknown prcb command: {}", subcmd);
+        outln!("Use 'prcb help' for usage");
+    }
+}
+
+fn show_prcb_stats() {
+    use crate::ke::prcb::{get_current_prcb, ke_get_current_processor_number,
+                          get_active_cpu_count, ke_get_active_processors};
+
+    let prcb = get_current_prcb();
+    let cpu_num = ke_get_current_processor_number();
+    let active_cpus = get_active_cpu_count();
+    let active_mask = ke_get_active_processors();
+
+    outln!("Processor Control Block (PRCB)");
+    outln!("==============================");
+    outln!("");
+
+    outln!("Processor Identification:");
+    outln!("  Current CPU:      {}", cpu_num);
+    outln!("  Set Member:       {:#018x}", prcb.set_member);
+    outln!("  Active CPUs:      {}", active_cpus);
+    outln!("  Active Mask:      {:#018x}", active_mask);
+
+    outln!("");
+    outln!("Scheduling Statistics:");
+    outln!("  Context Switches: {}", prcb.context_switches);
+    outln!("  Ready Summary:    {:#010x}", prcb.ready_summary);
+    outln!("  Quantum End:      {}", if prcb.quantum_end { "Yes" } else { "No" });
+
+    outln!("");
+    outln!("DPC State:");
+    outln!("  Queue Depth:      {}", prcb.dpc_queue_depth);
+    outln!("  DPC Pending:      {}", if prcb.dpc_pending { "Yes" } else { "No" });
+
+    outln!("");
+    outln!("Freeze State:");
+    outln!("  Frozen:           {}", if prcb.frozen { "Yes" } else { "No" });
+    outln!("  Freeze Requested: {}", if prcb.freeze_requested { "Yes" } else { "No" });
+}
+
+fn show_prcb_threads() {
+    use crate::ke::prcb::get_current_prcb;
+
+    let prcb = get_current_prcb();
+
+    outln!("PRCB Thread Pointers");
+    outln!("====================");
+    outln!("");
+
+    if prcb.current_thread.is_null() {
+        outln!("Current Thread:   NULL");
+    } else {
+        outln!("Current Thread:   {:#018x}", prcb.current_thread as u64);
+    }
+
+    if prcb.next_thread.is_null() {
+        outln!("Next Thread:      NULL");
+    } else {
+        outln!("Next Thread:      {:#018x}", prcb.next_thread as u64);
+    }
+
+    if prcb.idle_thread.is_null() {
+        outln!("Idle Thread:      NULL");
+    } else {
+        outln!("Idle Thread:      {:#018x}", prcb.idle_thread as u64);
+    }
+}
+
+fn show_prcb_ready() {
+    use crate::ke::prcb::get_current_prcb;
+    use crate::ke::thread::constants::MAXIMUM_PRIORITY;
+
+    let prcb = get_current_prcb();
+
+    outln!("Ready Queue Summary");
+    outln!("===================");
+    outln!("");
+
+    outln!("Ready Summary: {:#010x}", prcb.ready_summary);
+    outln!("");
+
+    if prcb.ready_summary == 0 {
+        outln!("No ready threads (all queues empty)");
+        return;
+    }
+
+    outln!("Non-empty priority levels:");
+    for pri in (0..MAXIMUM_PRIORITY).rev() {
+        if (prcb.ready_summary & (1 << pri)) != 0 {
+            outln!("  Priority {:>2}: READY", pri);
+        }
+    }
+
+    if let Some(highest) = prcb.find_highest_ready_priority() {
+        outln!("");
+        outln!("Highest ready priority: {}", highest);
+    }
+}
+
+fn show_prcb_ipi() {
+    use crate::ke::prcb::get_current_prcb;
+    use core::sync::atomic::Ordering;
+
+    let prcb = get_current_prcb();
+
+    outln!("IPI State");
+    outln!("=========");
+    outln!("");
+
+    let request_summary = prcb.request_summary.load(Ordering::Relaxed);
+    let target_set = prcb.target_set.load(Ordering::Relaxed);
+    let packet_barrier = prcb.packet_barrier.load(Ordering::Relaxed);
+    let worker = prcb.worker_routine.load(Ordering::Relaxed);
+
+    outln!("Request Summary:  {:#018x}", request_summary);
+    outln!("Target Set:       {:#018x}", target_set);
+    outln!("Packet Barrier:   {:#018x}", packet_barrier);
+    outln!("Worker Routine:   {:#018x}", worker);
+
+    outln!("");
+    outln!("Current Packet:");
+    for (i, p) in prcb.current_packet.iter().enumerate() {
+        outln!("  Param[{}]:       {:#018x}", i, p.load(Ordering::Relaxed));
     }
 }

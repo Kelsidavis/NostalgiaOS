@@ -48,6 +48,7 @@ pub use handle::{
     INVALID_HANDLE_VALUE, NULL_HANDLE, HANDLE_INCREMENT, MAX_HANDLES,
     ob_create_handle, ob_close_handle, ob_reference_object_by_handle,
     ob_dereference_object, get_system_handle_table, init_system_handle_table,
+    HandleEntrySnapshot, HandleTableStats, ob_get_handle_stats, ob_get_handle_snapshots,
 };
 pub use directory::{
     ObjectDirectory, DirectoryEntry, MAX_DIRECTORY_ENTRIES,

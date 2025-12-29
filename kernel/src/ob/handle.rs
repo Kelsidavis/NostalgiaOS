@@ -557,3 +557,116 @@ pub unsafe fn init_system_handle_table() {
     SYSTEM_HANDLE_TABLE.init(crate::ke::process::get_system_process_mut());
     crate::serial_println!("[OB] System handle table initialized");
 }
+
+// ============================================================================
+// Handle Table Inspection (for debugging)
+// ============================================================================
+
+/// Snapshot of a handle entry for debugging
+#[derive(Debug, Clone, Copy)]
+pub struct HandleEntrySnapshot {
+    /// The handle value
+    pub handle: Handle,
+    /// Object address
+    pub object_address: u64,
+    /// Access mask
+    pub access_mask: u32,
+    /// Handle attributes
+    pub attributes: u32,
+    /// Object type name
+    pub type_name: [u8; 32],
+    /// Type name length
+    pub type_name_length: u8,
+    /// Object name (if named)
+    pub object_name: [u8; 64],
+    /// Object name length
+    pub object_name_length: u8,
+}
+
+/// Handle table statistics
+#[derive(Debug, Clone, Copy)]
+pub struct HandleTableStats {
+    /// Number of handles in use
+    pub handle_count: u32,
+    /// Maximum handles
+    pub max_handles: usize,
+    /// Next handle hint
+    pub next_handle_hint: u32,
+}
+
+/// Get system handle table statistics
+pub fn ob_get_handle_stats() -> HandleTableStats {
+    unsafe {
+        HandleTableStats {
+            handle_count: SYSTEM_HANDLE_TABLE.count(),
+            max_handles: MAX_HANDLES,
+            next_handle_hint: SYSTEM_HANDLE_TABLE.next_handle_hint,
+        }
+    }
+}
+
+/// Get snapshots of handles in the system handle table
+pub fn ob_get_handle_snapshots(max_count: usize) -> ([HandleEntrySnapshot; 32], usize) {
+    let mut snapshots = [HandleEntrySnapshot {
+        handle: 0,
+        object_address: 0,
+        access_mask: 0,
+        attributes: 0,
+        type_name: [0; 32],
+        type_name_length: 0,
+        object_name: [0; 64],
+        object_name_length: 0,
+    }; 32];
+
+    let max_count = max_count.min(32);
+    let mut count = 0;
+
+    unsafe {
+        for i in 1..MAX_HANDLES {
+            if count >= max_count {
+                break;
+            }
+
+            let entry = &SYSTEM_HANDLE_TABLE.entries[i];
+            if !entry.is_used() {
+                continue;
+            }
+
+            let handle = (i as Handle) * HANDLE_INCREMENT;
+            let header = ObjectHeader::from_body(entry.object);
+
+            // Get type name
+            let mut type_name = [0u8; 32];
+            let mut type_name_len = 0u8;
+            if let Some(obj_type) = (*header).get_type() {
+                let len = (obj_type.name_length as usize).min(31);
+                type_name[..len].copy_from_slice(&obj_type.name[..len]);
+                type_name_len = len as u8;
+            }
+
+            // Get object name
+            let mut object_name = [0u8; 64];
+            let mut object_name_len = 0u8;
+            if let Some(name) = (*header).get_name() {
+                let len = name.len().min(63);
+                object_name[..len].copy_from_slice(&name[..len]);
+                object_name_len = len as u8;
+            }
+
+            snapshots[count] = HandleEntrySnapshot {
+                handle,
+                object_address: entry.object as u64,
+                access_mask: entry.access_mask,
+                attributes: entry.attributes,
+                type_name,
+                type_name_length: type_name_len,
+                object_name,
+                object_name_length: object_name_len,
+            };
+
+            count += 1;
+        }
+    }
+
+    (snapshots, count)
+}

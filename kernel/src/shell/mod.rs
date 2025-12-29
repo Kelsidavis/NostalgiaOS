@@ -150,14 +150,14 @@ const COMMANDS: &[&str] = &[
     "bt",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "desc", "descriptor", "dir", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
-    "hal", "help", "history", "hpet",
+    "hal", "handles", "help", "history", "hpet",
     "int", "io", "irqstat",
     "ke",
     "ldr", "ls",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net",
     "ob", "obdir",
-    "pagetable", "pci", "pe", "pfn", "pool", "port", "ps", "pwd",
+    "pagetable", "pci", "pe", "pfn", "pool", "port", "prcb", "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
     "sc", "se", "services", "smbios", "stack", "suspend", "sysinfo",
@@ -1158,6 +1158,12 @@ impl Shell {
         // Object Manager directory viewer
         } else if eq_ignore_case(cmd, "obdir") {
             commands::cmd_obdir(&args[1..argc]);
+        // Handle table viewer
+        } else if eq_ignore_case(cmd, "handles") {
+            commands::cmd_handles(&args[1..argc]);
+        // PRCB viewer
+        } else if eq_ignore_case(cmd, "prcb") {
+            commands::cmd_prcb(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
