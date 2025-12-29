@@ -818,39 +818,42 @@ pub unsafe fn load_executable(
     // Calculate entry point
     let entry_point = actual_base + pe_info.entry_point_rva as u64;
 
-    // For now, create a kernel-mode representation of the process
-    // In a full implementation, we'd create user-mode page tables
+    // Calculate user stack address (would be in user space in full implementation)
+    static mut STACK_BUFFER: [u8; 0x20000] = [0; 0x20000]; // 128KB stack
+    let user_stack = STACK_BUFFER.as_ptr().add(STACK_BUFFER.len()) as u64;
+
+    crate::serial_println!("[LDR] Creating process and initial thread:");
+    crate::serial_println!("[LDR]   Image base:   {:#x}", actual_base);
+    crate::serial_println!("[LDR]   Image size:   {:#x}", pe_info.size_of_image);
+    crate::serial_println!("[LDR]   Entry point:  {:#x}", entry_point);
+    crate::serial_println!("[LDR]   Stack:        {:#x}", user_stack);
+    crate::serial_println!("[LDR]   Subsystem:    {}", pe_info.subsystem);
+
+    // Create user-mode process with PEB/TEB initialization
     let system_process = crate::ps::get_system_process();
-    let process = crate::ps::ps_create_process(system_process, name, 8);
+    let (process, thread) = crate::ps::ps_create_user_process_ex(
+        system_process,
+        name,
+        entry_point,
+        user_stack,
+        0, // CR3 - using kernel page tables for now
+        actual_base,
+        pe_info.size_of_image,
+        pe_info.subsystem,
+    );
+
     if process.is_null() {
+        return Err(PeError::OutOfMemory);
+    }
+
+    if thread.is_null() {
+        // TODO: Clean up process
         return Err(PeError::OutOfMemory);
     }
 
     // Set up process image information
     // Note: This uses kernel addresses for now
     (*process).section_object = file_base as *mut u8;
-
-    // Calculate user stack address (would be in user space in full implementation)
-    let stack_size = pe_info.stack_commit.max(0x10000) as usize; // At least 64KB
-    static mut STACK_BUFFER: [u8; 0x20000] = [0; 0x20000]; // 128KB stack
-    let user_stack = STACK_BUFFER.as_ptr().add(STACK_BUFFER.len()) as u64;
-
-    crate::serial_println!("[LDR] Creating initial thread:");
-    crate::serial_println!("[LDR]   Entry point: {:#x}", entry_point);
-    crate::serial_println!("[LDR]   Stack:       {:#x}", user_stack);
-
-    // Create user-mode thread
-    let thread = crate::ps::ps_create_user_thread(
-        process,
-        entry_point,
-        user_stack,
-        8, // Normal priority
-    );
-
-    if thread.is_null() {
-        // TODO: Clean up process
-        return Err(PeError::OutOfMemory);
-    }
 
     let loaded = LoadedImage {
         base: actual_base,
