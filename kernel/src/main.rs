@@ -80,6 +80,7 @@ pub mod ps;
 pub mod rtl;
 pub mod se;
 pub mod shell;
+pub mod svc;
 
 mod framebuffer;
 mod serial;
@@ -399,6 +400,11 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing debugger support...");
     dbgk::dbgk_initialize();
     kprintln!("  Debugger support initialized");
+
+    // Initialize Service Control Manager
+    kprintln!("  Initializing Service Control Manager...");
+    svc::scm_initialize();
+    kprintln!("  Service Control Manager initialized");
 
     // Test file system by reading C:\TEST.TXT
     test_file_read();
