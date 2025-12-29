@@ -147,6 +147,7 @@ const HISTORY_SIZE: usize = 32;
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
     "acpi", "apic",
+    "bt",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "desc", "descriptor", "dir", "dump", "echo", "erase", "ex", "exit",
     "hal", "help", "history",
@@ -159,7 +160,7 @@ const COMMANDS: &[&str] = &[
     "pagetable", "pci", "pe", "port", "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
-    "sc", "se", "services", "suspend", "sysinfo",
+    "sc", "se", "services", "stack", "suspend", "sysinfo",
     "tasks", "time", "timer", "touch", "type",
     "usertest",
     "veh", "ver", "version",
@@ -1127,6 +1128,9 @@ impl Shell {
         // Descriptor table viewer
         } else if eq_ignore_case(cmd, "descriptor") || eq_ignore_case(cmd, "desc") {
             commands::cmd_descriptor(&args[1..argc]);
+        // Stack trace
+        } else if eq_ignore_case(cmd, "stack") || eq_ignore_case(cmd, "bt") {
+            commands::cmd_stack(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

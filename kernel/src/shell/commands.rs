@@ -120,6 +120,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    port           I/O port browser (scan, inb/outb)");
         outln!("    apic           APIC viewer (lvt, ioapic, isr/irr)");
         outln!("    desc[riptor]   GDT/IDT viewer (gdt, idt, tss)");
+        outln!("    stack (bt)     Stack trace/backtrace (trace, dump)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -8273,5 +8274,260 @@ fn show_current_selectors() {
         outln!("Note: In 64-bit mode, CS/SS define privilege level;");
         outln!("      DS/ES/FS/GS bases are ignored except for FS/GS");
         outln!("      which use MSRs for their base addresses.");
+    }
+}
+
+// ============================================================================
+// Stack Trace Command
+// ============================================================================
+
+/// Stack trace / backtrace for debugging
+pub fn cmd_stack(args: &[&str]) {
+    if args.is_empty() {
+        show_stack_trace(16);
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "help") {
+        show_stack_help();
+    } else if eq_ignore_case(cmd, "trace") {
+        let depth = if args.len() > 1 {
+            parse_number(args[1]).unwrap_or(16)
+        } else {
+            16
+        };
+        show_stack_trace(depth);
+    } else if eq_ignore_case(cmd, "regs") {
+        show_stack_registers();
+    } else if eq_ignore_case(cmd, "dump") {
+        let count = if args.len() > 1 {
+            parse_number(args[1]).unwrap_or(32)
+        } else {
+            32
+        };
+        dump_stack(count);
+    } else if eq_ignore_case(cmd, "rsp") || eq_ignore_case(cmd, "sp") {
+        show_rsp_info();
+    } else {
+        // Assume it's a depth number for trace
+        if let Some(depth) = parse_number(cmd) {
+            show_stack_trace(depth);
+        } else {
+            outln!("Unknown stack command: {}", cmd);
+            show_stack_help();
+        }
+    }
+}
+
+fn show_stack_help() {
+    outln!("Stack Trace");
+    outln!("");
+    outln!("Usage: stack [command] [args]");
+    outln!("");
+    outln!("Commands:");
+    outln!("  trace [depth]    Show call stack backtrace (default)");
+    outln!("  <number>         Same as 'trace <number>'");
+    outln!("  regs             Show RSP/RBP and stack-related registers");
+    outln!("  dump [count]     Hex dump from current RSP");
+    outln!("  rsp              Show RSP pointer info");
+    outln!("");
+    outln!("Examples:");
+    outln!("  stack            Show backtrace (16 frames)");
+    outln!("  stack 32         Show 32 stack frames");
+    outln!("  stack dump 64    Dump 64 bytes from stack");
+}
+
+fn show_stack_trace(max_depth: usize) {
+    outln!("Stack Trace (Backtrace)");
+    outln!("");
+
+    unsafe {
+        let mut rbp: u64;
+        let mut rsp: u64;
+        let rip: u64;
+
+        core::arch::asm!(
+            "mov {}, rbp",
+            "mov {}, rsp",
+            out(reg) rbp,
+            out(reg) rsp,
+            options(nostack)
+        );
+
+        // Get approximate RIP (will be in the function that called us)
+        core::arch::asm!(
+            "lea {}, [rip]",
+            out(reg) rip,
+            options(nostack)
+        );
+
+        outln!("Current state:");
+        outln!("  RIP: 0x{:016X}", rip);
+        outln!("  RSP: 0x{:016X}", rsp);
+        outln!("  RBP: 0x{:016X}", rbp);
+        outln!("");
+
+        outln!("Call Stack (walking RBP chain):");
+        outln!("  #  Return Address     Frame Pointer");
+        outln!("  -  ----------------   ----------------");
+
+        let mut frame_count = 0;
+
+        // Walk the RBP chain
+        while rbp != 0 && frame_count < max_depth {
+            // Validate RBP is in a reasonable range
+            if rbp < 0x1000 || rbp > 0xFFFF_FFFF_FFFF_0000 {
+                outln!("  (invalid frame pointer: 0x{:016X})", rbp);
+                break;
+            }
+
+            // Check alignment (RBP should be 8-byte aligned)
+            if (rbp & 7) != 0 {
+                outln!("  (unaligned frame pointer: 0x{:016X})", rbp);
+                break;
+            }
+
+            // Read the saved RBP and return address
+            let saved_rbp = core::ptr::read_unaligned(rbp as *const u64);
+            let return_addr = core::ptr::read_unaligned((rbp + 8) as *const u64);
+
+            outln!("{:3}  0x{:016X}   0x{:016X}", frame_count, return_addr, rbp);
+
+            // Move to next frame
+            rbp = saved_rbp;
+            frame_count += 1;
+
+            // Safety check - frame should go up in memory
+            if saved_rbp != 0 && saved_rbp <= rbp && saved_rbp != rbp {
+                outln!("  (stack frame corruption detected)");
+                break;
+            }
+        }
+
+        if frame_count == 0 {
+            outln!("  (no valid frames found - frame pointer may be omitted)");
+        } else if rbp == 0 {
+            outln!("");
+            outln!("(end of stack - reached NULL frame pointer)");
+        } else if frame_count >= max_depth {
+            outln!("");
+            outln!("(truncated at {} frames)", max_depth);
+        }
+
+        outln!("");
+        outln!("Note: Addresses are return addresses (inside calling functions).");
+        outln!("      Frame pointer omission (-fomit-frame-pointer) may cause issues.");
+    }
+}
+
+fn show_stack_registers() {
+    outln!("Stack-Related Registers");
+    outln!("");
+
+    unsafe {
+        let rsp: u64;
+        let rbp: u64;
+        let rflags: u64;
+
+        core::arch::asm!(
+            "mov {}, rsp",
+            "mov {}, rbp",
+            "pushfq",
+            "pop {}",
+            out(reg) rsp,
+            out(reg) rbp,
+            out(reg) rflags,
+            options(nostack)
+        );
+
+        outln!("RSP (Stack Pointer):    0x{:016X}", rsp);
+        outln!("RBP (Base Pointer):     0x{:016X}", rbp);
+        outln!("");
+
+        // Check stack size (distance from RSP to RBP)
+        if rbp > rsp {
+            outln!("Current frame size:     {} bytes (0x{:X})", rbp - rsp, rbp - rsp);
+        }
+
+        outln!("");
+        outln!("RFLAGS: 0x{:016X}", rflags);
+        outln!("  CF={}  ZF={}  SF={}  OF={}  IF={}  DF={}",
+               rflags & 1,
+               (rflags >> 6) & 1,
+               (rflags >> 7) & 1,
+               (rflags >> 11) & 1,
+               (rflags >> 9) & 1,
+               (rflags >> 10) & 1
+        );
+    }
+}
+
+fn dump_stack(count: usize) {
+    outln!("Stack Dump");
+    outln!("");
+
+    unsafe {
+        let rsp: u64;
+        core::arch::asm!("mov {}, rsp", out(reg) rsp, options(nostack));
+
+        outln!("RSP: 0x{:016X}", rsp);
+        outln!("");
+
+        let max_count = count.min(256); // Limit to 256 bytes
+        let mut offset = 0usize;
+
+        while offset < max_count {
+            let addr = rsp + offset as u64;
+            out!("0x{:016X}:", addr);
+
+            // Print 8 bytes per line (one qword at a time)
+            for i in 0..2 {
+                if offset + i * 8 < max_count {
+                    let val = core::ptr::read_unaligned((addr + (i * 8) as u64) as *const u64);
+                    out!(" {:016X}", val);
+                }
+            }
+            outln!("");
+            offset += 16;
+        }
+    }
+}
+
+fn show_rsp_info() {
+    outln!("Stack Pointer Information");
+    outln!("");
+
+    unsafe {
+        let rsp: u64;
+        core::arch::asm!("mov {}, rsp", out(reg) rsp, options(nostack));
+
+        outln!("RSP: 0x{:016X}", rsp);
+        outln!("");
+
+        // Try to determine which stack we're on
+        // Kernel stacks are typically in high memory
+        if rsp >= 0xFFFF_8000_0000_0000 {
+            outln!("Location: Kernel space (higher half)");
+        } else if rsp >= 0x7FFF_0000_0000 {
+            outln!("Location: User space stack region");
+        } else {
+            outln!("Location: Unknown/low memory");
+        }
+
+        // Check alignment
+        outln!("");
+        outln!("Alignment:");
+        outln!("  8-byte aligned:  {}", (rsp & 7) == 0);
+        outln!("  16-byte aligned: {}", (rsp & 15) == 0);
+
+        // Read a few values from the stack
+        outln!("");
+        outln!("Stack preview (first 4 qwords):");
+        for i in 0..4u64 {
+            let val = core::ptr::read_unaligned((rsp + i * 8) as *const u64);
+            outln!("  [RSP+0x{:02X}]: 0x{:016X}", i * 8, val);
+        }
     }
 }
