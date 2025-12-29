@@ -14988,12 +14988,16 @@ fn sys_access_check(
     security_descriptor: usize,
     client_token: usize,
     desired_access: usize,
-    _generic_mapping: usize,
+    generic_mapping_ptr: usize,
     _privilege_set: usize,
     granted_access: usize,
 ) -> isize {
+    use crate::se::access::{se_access_check, GenericMapping};
+    use crate::se::descriptor::SimpleSecurityDescriptor;
+    use crate::se::token::{TOKEN_POOL, TOKEN_POOL_BITMAP, MAX_TOKENS};
+
     crate::serial_println!(
-        "[SYSCALL] NtAccessCheck(sd={:#x}, token={}, access={:#x})",
+        "[SYSCALL] NtAccessCheck(sd={:#x}, token={:#x}, access={:#x})",
         security_descriptor, client_token, desired_access
     );
 
@@ -15001,24 +15005,76 @@ fn sys_access_check(
         return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
     }
 
-    // For now, grant all requested access
-    // A real implementation would:
-    // 1. Parse the security descriptor
-    // 2. Get the token's SIDs and privileges
-    // 3. Walk the DACL checking ACEs
-    // 4. Compute granted access
+    // Get the token from handle
+    let token_id = match unsafe { get_token_id(client_token) } {
+        Some(id) => id,
+        None => {
+            crate::serial_println!("[SYSCALL] NtAccessCheck: invalid token handle");
+            return STATUS_INVALID_HANDLE;
+        }
+    };
 
-    unsafe {
-        // Write granted access
-        core::ptr::write(granted_access as *mut u32, desired_access as u32);
+    // Find the token in the pool
+    let token = unsafe {
+        let mut found: *const crate::se::token::Token = core::ptr::null();
+        for i in 0..MAX_TOKENS {
+            if TOKEN_POOL_BITMAP & (1 << i) != 0 && TOKEN_POOL[i].token_id.low_part == token_id {
+                found = &TOKEN_POOL[i];
+                break;
+            }
+        }
+        if found.is_null() {
+            // Fall back to system token
+            crate::se::token::se_get_system_token()
+        } else {
+            found as *mut crate::se::token::Token
+        }
+    };
 
-        // Write access status (TRUE = access granted)
-        let access_status = (granted_access as usize + 4) as *mut u32;
-        core::ptr::write(access_status, 1); // TRUE
+    // Parse generic mapping if provided
+    let mapping = if generic_mapping_ptr != 0 {
+        unsafe {
+            GenericMapping {
+                generic_read: *((generic_mapping_ptr) as *const u32),
+                generic_write: *((generic_mapping_ptr + 4) as *const u32),
+                generic_execute: *((generic_mapping_ptr + 8) as *const u32),
+                generic_all: *((generic_mapping_ptr + 12) as *const u32),
+            }
+        }
+    } else {
+        GenericMapping::new()
+    };
+
+    // For now, create a permissive security descriptor
+    // A full implementation would parse the user-provided SECURITY_DESCRIPTOR structure
+    // TODO: Parse security_descriptor pointer into SimpleSecurityDescriptor
+    let sd = SimpleSecurityDescriptor::new();
+
+    // Perform the access check
+    match se_access_check(unsafe { &*token }, &sd, desired_access as u32, &mapping) {
+        Ok(access) => {
+            unsafe {
+                // Write granted access
+                core::ptr::write(granted_access as *mut u32, access);
+                // Write access status (TRUE = access granted)
+                let access_status = (granted_access as usize + 4) as *mut u32;
+                core::ptr::write(access_status, 1); // TRUE
+            }
+            crate::serial_println!("[SYSCALL] NtAccessCheck: granted access {:#x}", access);
+            STATUS_SUCCESS
+        }
+        Err(_) => {
+            unsafe {
+                // Write zero granted access
+                core::ptr::write(granted_access as *mut u32, 0);
+                // Write access status (FALSE = access denied)
+                let access_status = (granted_access as usize + 4) as *mut u32;
+                core::ptr::write(access_status, 0); // FALSE
+            }
+            crate::serial_println!("[SYSCALL] NtAccessCheck: access denied");
+            0xC0000022u32 as isize // STATUS_ACCESS_DENIED
+        }
     }
-
-    crate::serial_println!("[SYSCALL] NtAccessCheck: granting access {:#x}", desired_access);
-    0 // STATUS_SUCCESS
 }
 
 /// NtPrivilegeCheck - Check if token has required privileges
@@ -15030,8 +15086,11 @@ fn sys_privilege_check(
     _arg5: usize,
     _arg6: usize,
 ) -> isize {
+    use crate::se::token::{TOKEN_POOL, TOKEN_POOL_BITMAP, MAX_TOKENS};
+    use crate::se::privilege::Luid;
+
     crate::serial_println!(
-        "[SYSCALL] NtPrivilegeCheck(token={}, privs={:#x})",
+        "[SYSCALL] NtPrivilegeCheck(token={:#x}, privs={:#x})",
         client_token, required_privileges
     );
 
@@ -15039,14 +15098,61 @@ fn sys_privilege_check(
         return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
     }
 
-    // For now, always return success (privileges held)
-    // A real implementation would check the token's privilege set
-    unsafe {
-        core::ptr::write(result as *mut u32, 1); // TRUE - privileges held
+    // Get the token from handle
+    let token_id = match unsafe { get_token_id(client_token) } {
+        Some(id) => id,
+        None => {
+            crate::serial_println!("[SYSCALL] NtPrivilegeCheck: invalid token handle");
+            return STATUS_INVALID_HANDLE;
+        }
+    };
+
+    // Find the token in the pool
+    let token = unsafe {
+        let mut found: *const crate::se::token::Token = core::ptr::null();
+        for i in 0..MAX_TOKENS {
+            if TOKEN_POOL_BITMAP & (1 << i) != 0 && TOKEN_POOL[i].token_id.low_part == token_id {
+                found = &TOKEN_POOL[i];
+                break;
+            }
+        }
+        if found.is_null() {
+            crate::se::token::se_get_system_token()
+        } else {
+            found as *mut crate::se::token::Token
+        }
+    };
+
+    // Parse PRIVILEGE_SET structure:
+    // PrivilegeCount: u32
+    // Control: u32
+    // Privilege[]: array of LUID_AND_ATTRIBUTES (LUID: u64, Attributes: u32)
+    let priv_count = unsafe { *(required_privileges as *const u32) };
+    let _control = unsafe { *((required_privileges + 4) as *const u32) };
+
+    let mut all_held = true;
+
+    for i in 0..priv_count as usize {
+        let priv_ptr = required_privileges + 8 + (i * 12); // Each entry is 12 bytes
+        let luid_low = unsafe { *(priv_ptr as *const u32) };
+        let luid_high = unsafe { *((priv_ptr + 4) as *const i32) };
+        let luid = Luid::new(luid_low, luid_high);
+
+        // Check if token has this privilege enabled
+        let held = unsafe { (*token).is_privilege_enabled(luid) };
+        if !held {
+            all_held = false;
+            crate::serial_println!("[SYSCALL] NtPrivilegeCheck: missing privilege LUID({},{})",
+                luid_low, luid_high);
+        }
     }
 
-    crate::serial_println!("[SYSCALL] NtPrivilegeCheck: privileges granted");
-    0 // STATUS_SUCCESS
+    unsafe {
+        core::ptr::write(result as *mut u32, if all_held { 1 } else { 0 });
+    }
+
+    crate::serial_println!("[SYSCALL] NtPrivilegeCheck: result={}", all_held);
+    STATUS_SUCCESS
 }
 
 /// NtAccessCheckAndAuditAlarm - Access check with audit generation

@@ -402,13 +402,13 @@ unsafe impl Send for Token {}
 pub const MAX_TOKENS: usize = 64;
 
 /// Token pool
-static mut TOKEN_POOL: [Token; MAX_TOKENS] = {
+pub static mut TOKEN_POOL: [Token; MAX_TOKENS] = {
     const INIT: Token = Token::new();
     [INIT; MAX_TOKENS]
 };
 
 /// Token pool bitmap
-static mut TOKEN_POOL_BITMAP: u64 = 0;
+pub static mut TOKEN_POOL_BITMAP: u64 = 0;
 
 /// Token pool lock
 static TOKEN_POOL_LOCK: SpinLock<()> = SpinLock::new(());
