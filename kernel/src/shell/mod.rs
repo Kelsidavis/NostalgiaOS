@@ -1060,6 +1060,9 @@ impl Shell {
             commands::cmd_dump(&args[1..argc]);
         } else if eq_ignore_case(cmd, "ldr") {
             commands::cmd_ldr(&args[1..argc]);
+        // RTL (Runtime Library)
+        } else if eq_ignore_case(cmd, "rtl") {
+            commands::cmd_rtl(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

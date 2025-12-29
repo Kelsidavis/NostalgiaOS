@@ -2829,3 +2829,154 @@ fn cmd_usertest_peb() {
     outln!("");
     outln!("Windows Server 2003 version: 5.2.3790");
 }
+
+// ============================================================================
+// RTL (Runtime Library) Command
+// ============================================================================
+
+/// Runtime Library test command
+pub fn cmd_rtl(args: &[&str]) {
+    use crate::rtl;
+
+    if args.is_empty() {
+        outln!("RTL (Runtime Library) Commands");
+        outln!("");
+        outln!("Usage: rtl <command> [args]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  info               Show RTL module info");
+        outln!("  time               Show current time");
+        outln!("  random [count]     Generate random numbers");
+        outln!("  crc32 <addr> <len> Calculate CRC32 of memory");
+        outln!("  image <addr>       Show PE image info using RTL functions");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "info") {
+        outln!("RTL (Runtime Library) Information");
+        outln!("");
+        outln!("Available modules:");
+        outln!("  avl       - AVL tree implementation");
+        outln!("  bitmap    - Bit manipulation (RtlBitmap)");
+        outln!("  checksum  - CRC32, checksums");
+        outln!("  image     - PE image helpers (RtlImageNtHeader, etc.)");
+        outln!("  memory    - Memory functions (RtlCopyMemory, etc.)");
+        outln!("  random    - Random number generation");
+        outln!("  string    - Unicode/ANSI string handling");
+        outln!("  time      - Time conversion (RtlTimeToTimeFields)");
+        outln!("");
+        outln!("Constants:");
+        outln!("  TICKS_PER_SECOND:     {}", rtl::TICKS_PER_SECOND);
+        outln!("  TICKS_PER_DAY:        {}", rtl::TICKS_PER_DAY);
+        outln!("  TICKS_1601_TO_1970:   {}", rtl::TICKS_1601_TO_1970);
+    } else if eq_ignore_case(cmd, "time") {
+        // Get current system time
+        let nt_time = rtl::rtl_get_system_time();
+
+        let mut tf = rtl::TimeFields::new();
+        unsafe {
+            rtl::rtl_time_to_time_fields(nt_time, &mut tf);
+        }
+
+        outln!("System Time:");
+        outln!("");
+        outln!("  NT Time:    {}", nt_time);
+        outln!("  Unix Time:  {}", rtl::nt_time_to_unix_time(nt_time));
+        outln!("  Date/Time:  {}", tf);
+        outln!("");
+        outln!("  Year:       {}", tf.year);
+        outln!("  Month:      {}", tf.month);
+        outln!("  Day:        {}", tf.day);
+        outln!("  Hour:       {}", tf.hour);
+        outln!("  Minute:     {}", tf.minute);
+        outln!("  Second:     {}", tf.second);
+        outln!("  Weekday:    {} (0=Sun)", tf.weekday);
+    } else if eq_ignore_case(cmd, "random") {
+        let count = if args.len() > 1 {
+            args[1].parse::<usize>().unwrap_or(5)
+        } else {
+            5
+        };
+
+        outln!("Random Numbers (count={}):", count);
+        outln!("");
+
+        for i in 0..count.min(20) {
+            let r = rtl::kernel_random();
+            outln!("  [{}] {:#010x} ({})", i, r, r);
+        }
+
+        if count > 20 {
+            outln!("  ... (showing first 20 of {})", count);
+        }
+    } else if eq_ignore_case(cmd, "crc32") {
+        if args.len() < 3 {
+            outln!("Usage: rtl crc32 <address> <length>");
+            return;
+        }
+
+        let addr = parse_hex_address(args[1]);
+        let len = args[2].parse::<usize>().unwrap_or(0);
+
+        if addr == 0 || len == 0 {
+            outln!("Invalid address or length");
+            return;
+        }
+
+        unsafe {
+            let ptr = addr as *const u8;
+            let data = core::slice::from_raw_parts(ptr, len);
+            let crc = rtl::rtl_compute_crc32(0, data);
+            outln!("CRC32 of {:#x} ({} bytes): {:#010x}", addr, len, crc);
+        }
+    } else if eq_ignore_case(cmd, "image") {
+        if args.len() < 2 {
+            outln!("Usage: rtl image <address>");
+            return;
+        }
+
+        let addr = parse_hex_address(args[1]);
+        if addr == 0 {
+            outln!("Invalid address");
+            return;
+        }
+
+        unsafe {
+            let base = addr as *const u8;
+
+            // Get NT header
+            let nt_header = rtl::rtl_image_nt_header(base);
+            if nt_header.is_null() {
+                outln!("Invalid PE image at {:#x}", addr);
+                return;
+            }
+
+            outln!("PE Image at {:#x}:", addr);
+            outln!("");
+            outln!("  NT Header:    {:p}", nt_header);
+            outln!("  Entry Point:  {:#x}", rtl::rtl_image_entry_point(base));
+            outln!("  Image Size:   {:#x}", rtl::rtl_image_size(base));
+            outln!("  Is DLL:       {}", rtl::rtl_image_is_dll(base));
+            outln!("  Subsystem:    {}", rtl::rtl_image_subsystem(base));
+
+            // Check data directories
+            let mut export_size: u32 = 0;
+            let export_dir = rtl::rtl_image_export_directory(base, &mut export_size);
+            outln!("");
+            outln!("Data Directories:");
+            outln!("  Export:      {:p} (size={:#x})", export_dir, export_size);
+
+            let mut import_size: u32 = 0;
+            let import_dir = rtl::rtl_image_import_directory(base, &mut import_size);
+            outln!("  Import:      {:p} (size={:#x})", import_dir, import_size);
+
+            let mut reloc_size: u32 = 0;
+            let reloc_dir = rtl::rtl_image_relocation_directory(base, &mut reloc_size);
+            outln!("  Relocation:  {:p} (size={:#x})", reloc_dir, reloc_size);
+        }
+    } else {
+        outln!("Unknown rtl command: {}", cmd);
+    }
+}
