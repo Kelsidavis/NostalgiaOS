@@ -110,12 +110,18 @@ pub use token::{
     TokenElevationType,
     TokenSource,
     TokenStatistics,
+    TokenPoolStats,
+    TokenSnapshot,
     TOKEN_MAX_GROUPS,
     MAX_TOKENS,
     se_create_token,
     se_free_token,
     se_create_system_token,
     se_get_system_token,
+    get_token_stats,
+    se_get_token_snapshots,
+    token_type_name,
+    impersonation_level_name,
 };
 
 // Re-export access check types

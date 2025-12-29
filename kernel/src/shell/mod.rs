@@ -164,7 +164,7 @@ const COMMANDS: &[&str] = &[
     "sc", "sched", "se", "services", "smbios", "stack", "suspend", "sysinfo",
     "tasks", "time", "timer", "timerq", "touch", "type",
     "usertest",
-    "veh", "ver", "version", "volumes",
+    "vad", "veh", "ver", "version", "volumes",
     "waitq",
 ];
 
@@ -1205,6 +1205,9 @@ impl Shell {
         // Block device viewer
         } else if eq_ignore_case(cmd, "blocks") {
             commands::cmd_blocks(&args[1..argc]);
+        // VAD viewer
+        } else if eq_ignore_case(cmd, "vad") {
+            commands::cmd_vad(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

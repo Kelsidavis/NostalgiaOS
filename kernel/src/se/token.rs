@@ -563,3 +563,148 @@ pub fn init() {
     }
     crate::serial_println!("[SE] Token subsystem initialized ({} tokens available)", MAX_TOKENS);
 }
+
+// ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// Token pool statistics
+#[derive(Debug, Clone, Copy)]
+pub struct TokenPoolStats {
+    /// Maximum tokens
+    pub max_tokens: usize,
+    /// Allocated tokens
+    pub allocated_tokens: usize,
+    /// Free tokens
+    pub free_tokens: usize,
+    /// Primary tokens
+    pub primary_tokens: usize,
+    /// Impersonation tokens
+    pub impersonation_tokens: usize,
+}
+
+/// Token snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct TokenSnapshot {
+    /// Token address
+    pub address: u64,
+    /// Token ID
+    pub token_id_low: u32,
+    /// Token type
+    pub token_type: TokenType,
+    /// Impersonation level
+    pub impersonation_level: SecurityImpersonationLevel,
+    /// Elevation type
+    pub elevation_type: TokenElevationType,
+    /// Is elevated
+    pub is_elevated: bool,
+    /// Group count
+    pub group_count: u8,
+    /// Privilege count
+    pub privilege_count: u32,
+    /// Reference count
+    pub ref_count: u32,
+    /// Session ID
+    pub session_id: u32,
+}
+
+impl TokenSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            address: 0,
+            token_id_low: 0,
+            token_type: TokenType::Primary,
+            impersonation_level: SecurityImpersonationLevel::Impersonation,
+            elevation_type: TokenElevationType::Default,
+            is_elevated: false,
+            group_count: 0,
+            privilege_count: 0,
+            ref_count: 0,
+            session_id: 0,
+        }
+    }
+}
+
+/// Get token pool statistics
+pub fn get_token_stats() -> TokenPoolStats {
+    let mut stats = TokenPoolStats {
+        max_tokens: MAX_TOKENS,
+        allocated_tokens: 0,
+        free_tokens: 0,
+        primary_tokens: 0,
+        impersonation_tokens: 0,
+    };
+
+    unsafe {
+        let _guard = TOKEN_POOL_LOCK.lock();
+
+        for i in 0..MAX_TOKENS {
+            if TOKEN_POOL_BITMAP & (1 << i) != 0 {
+                stats.allocated_tokens += 1;
+                match TOKEN_POOL[i].token_type {
+                    TokenType::Primary => stats.primary_tokens += 1,
+                    TokenType::Impersonation => stats.impersonation_tokens += 1,
+                }
+            }
+        }
+        stats.free_tokens = MAX_TOKENS - stats.allocated_tokens;
+    }
+
+    stats
+}
+
+/// Get snapshots of all allocated tokens
+pub fn se_get_token_snapshots(max_count: usize) -> ([TokenSnapshot; 32], usize) {
+    let mut snapshots = [TokenSnapshot::empty(); 32];
+    let mut count = 0;
+
+    let limit = max_count.min(32).min(MAX_TOKENS);
+
+    unsafe {
+        let _guard = TOKEN_POOL_LOCK.lock();
+
+        for i in 0..MAX_TOKENS {
+            if count >= limit {
+                break;
+            }
+
+            if TOKEN_POOL_BITMAP & (1 << i) != 0 {
+                let token = &TOKEN_POOL[i];
+                let snap = &mut snapshots[count];
+
+                snap.address = token as *const Token as u64;
+                snap.token_id_low = token.token_id.low_part;
+                snap.token_type = token.token_type;
+                snap.impersonation_level = token.impersonation_level;
+                snap.elevation_type = token.elevation_type;
+                snap.is_elevated = token.is_elevated;
+                snap.group_count = token.group_count;
+                snap.privilege_count = token.privileges.privilege_count;
+                snap.ref_count = token.reference_count.load(Ordering::Relaxed);
+                snap.session_id = token.session_id;
+
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get token type name
+pub fn token_type_name(token_type: TokenType) -> &'static str {
+    match token_type {
+        TokenType::Primary => "Primary",
+        TokenType::Impersonation => "Impersonation",
+    }
+}
+
+/// Get impersonation level name
+pub fn impersonation_level_name(level: SecurityImpersonationLevel) -> &'static str {
+    match level {
+        SecurityImpersonationLevel::Anonymous => "Anonymous",
+        SecurityImpersonationLevel::Identification => "Identification",
+        SecurityImpersonationLevel::Impersonation => "Impersonation",
+        SecurityImpersonationLevel::Delegation => "Delegation",
+    }
+}

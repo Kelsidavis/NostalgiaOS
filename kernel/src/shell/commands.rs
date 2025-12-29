@@ -3427,12 +3427,15 @@ pub fn cmd_se(args: &[&str]) {
         outln!("  sids               List well-known SIDs");
         outln!("  privileges         List system privileges");
         outln!("  token              Show system token info");
+        outln!("  tokens             List all allocated tokens");
         return;
     }
 
     let cmd = args[0];
 
     if eq_ignore_case(cmd, "info") {
+        // Show token pool stats in info
+        let stats = se::get_token_stats();
         outln!("Security Reference Monitor Information");
         outln!("");
         outln!("Components:");
@@ -3442,11 +3445,19 @@ pub fn cmd_se(args: &[&str]) {
         outln!("  Privileges:       Special capabilities");
         outln!("  Impersonation:    Thread security context switching");
         outln!("");
+        outln!("Token Pool:");
+        outln!("  Max Tokens:       {}", stats.max_tokens);
+        outln!("  Allocated:        {}", stats.allocated_tokens);
+        outln!("  Free:             {}", stats.free_tokens);
+        outln!("  Primary:          {}", stats.primary_tokens);
+        outln!("  Impersonation:    {}", stats.impersonation_tokens);
+        outln!("");
         outln!("Constants:");
         outln!("  TOKEN_MAX_GROUPS: {}", se::TOKEN_MAX_GROUPS);
-        outln!("  MAX_TOKENS:       {}", se::MAX_TOKENS);
         outln!("  MAX_ACE_COUNT:    {}", se::MAX_ACE_COUNT);
         outln!("  MAX_PRIVILEGES:   {}", se::SE_MAX_PRIVILEGES);
+    } else if eq_ignore_case(cmd, "tokens") {
+        show_token_list();
     } else if eq_ignore_case(cmd, "sids") {
         outln!("Well-Known Security Identifiers (SIDs)");
         outln!("");
@@ -12773,4 +12784,167 @@ fn show_block_detail(index: u8) {
     outln!("  Sectors Read:       {}", dev.sectors_read);
     outln!("  Sectors Written:    {}", dev.sectors_written);
     outln!("  Errors:             {}", dev.errors);
+}
+
+// ============================================================================
+// Token List Command (se tokens)
+// ============================================================================
+
+fn show_token_list() {
+    use crate::se::{se_get_token_snapshots, get_token_stats, token_type_name};
+
+    let stats = get_token_stats();
+    outln!("Allocated Tokens");
+    outln!("================");
+    outln!("");
+    outln!("Pool: {}/{} allocated, {} primary, {} impersonation",
+        stats.allocated_tokens, stats.max_tokens,
+        stats.primary_tokens, stats.impersonation_tokens);
+    outln!("");
+
+    let (snapshots, count) = se_get_token_snapshots(32);
+
+    if count == 0 {
+        outln!("No tokens currently allocated");
+        return;
+    }
+
+    outln!("{:<18} {:<6} {:<12} {:<10} {:<6} {:<6} {:<6}",
+        "Address", "ID", "Type", "Elevated", "Groups", "Privs", "Refs");
+    outln!("----------------------------------------------------------------------");
+
+    for i in 0..count {
+        let token = &snapshots[i];
+        let elevated_str = if token.is_elevated { "Yes" } else { "No" };
+
+        outln!("{:#018x} {:<6} {:<12} {:<10} {:<6} {:<6} {:<6}",
+            token.address,
+            token.token_id_low,
+            token_type_name(token.token_type),
+            elevated_str,
+            token.group_count,
+            token.privilege_count,
+            token.ref_count
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} tokens", count);
+}
+
+// ============================================================================
+// VAD Viewer Command (vad)
+// ============================================================================
+
+/// vad - Virtual Address Descriptor viewer
+///
+/// Display VAD statistics and list allocated VADs.
+///
+/// Usage: vad [stats|list]
+///
+/// Subcommands:
+///   stats  - Show VAD pool statistics (default)
+///   list   - List all allocated VADs
+pub fn cmd_vad(args: &[&str]) {
+    if args.is_empty() {
+        show_vad_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_vad_stats();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_vad_list();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("vad - Virtual Address Descriptor Viewer");
+        outln!("");
+        outln!("Usage: vad [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show VAD pool statistics (default)");
+        outln!("  list   - List all allocated VADs");
+        outln!("");
+        outln!("Examples:");
+        outln!("  vad        - Show VAD statistics");
+        outln!("  vad list   - List all allocated VADs");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'vad help' for usage information");
+    }
+}
+
+fn show_vad_stats() {
+    use crate::mm::{mm_get_vad_stats, MAX_VADS};
+
+    let stats = mm_get_vad_stats();
+
+    outln!("Virtual Address Descriptor (VAD) Statistics");
+    outln!("============================================");
+    outln!("");
+    outln!("Max VADs:      {}", MAX_VADS);
+    outln!("Allocated:     {}", stats.allocated_vads);
+    outln!("Free:          {}", stats.free_vads);
+}
+
+fn show_vad_list() {
+    use crate::mm::{mm_get_vad_snapshots, mm_get_vad_stats, vad_type_name, protection_name};
+
+    let stats = mm_get_vad_stats();
+    outln!("Allocated VADs");
+    outln!("==============");
+    outln!("");
+    outln!("Pool: {}/{} allocated", stats.allocated_vads, stats.total_vads);
+    outln!("");
+
+    let (snapshots, count) = mm_get_vad_snapshots(64);
+
+    if count == 0 {
+        outln!("No VADs currently allocated");
+        return;
+    }
+
+    outln!("{:<4} {:<18} {:<18} {:<12} {:<10} {:<6} {:<8}",
+        "Idx", "Start", "End", "Size", "Type", "Prot", "Commit");
+    outln!("--------------------------------------------------------------------------------");
+
+    for i in 0..count {
+        let vad = &snapshots[i];
+        let commit_str = if vad.committed { "Yes" } else { "No" };
+
+        outln!("{:<4} {:#018x} {:#018x} {:<12} {:<10} {:<6} {:<8}",
+            vad.index,
+            vad.start_address,
+            vad.end_address,
+            format_vad_size(vad.size),
+            vad_type_name(vad.vad_type),
+            protection_name(vad.protection),
+            commit_str
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} VADs", count);
+}
+
+fn format_vad_size(size: u64) -> &'static str {
+    // Simple size formatter using static strings
+    if size >= 0x100000000 {
+        ">4GB"
+    } else if size >= 0x40000000 {
+        "1GB+"
+    } else if size >= 0x10000000 {
+        "256MB+"
+    } else if size >= 0x1000000 {
+        "16MB+"
+    } else if size >= 0x100000 {
+        "1MB+"
+    } else if size >= 0x10000 {
+        "64KB+"
+    } else if size >= 0x1000 {
+        "4KB+"
+    } else {
+        "<4KB"
+    }
 }

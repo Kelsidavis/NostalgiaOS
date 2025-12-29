@@ -84,6 +84,7 @@ pub use vad::{
     MmVadType,
     MmVadRoot,
     MmVadStats,
+    MmVadSnapshot,
     MAX_VADS,
     protection,
     allocation_type,
@@ -98,6 +99,9 @@ pub use vad::{
     mm_allocate_virtual_range,
     mm_free_virtual_range,
     mm_get_vad_stats,
+    mm_get_vad_snapshots,
+    vad_type_name,
+    protection_name,
 };
 
 // Re-export pool types

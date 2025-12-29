@@ -711,3 +711,108 @@ pub struct MmVadStats {
 pub fn init() {
     crate::serial_println!("[MM] VAD subsystem initialized ({} VADs available)", MAX_VADS);
 }
+
+// ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// VAD snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct MmVadSnapshot {
+    /// VAD index
+    pub index: u32,
+    /// Starting virtual address
+    pub start_address: u64,
+    /// Ending virtual address
+    pub end_address: u64,
+    /// Size in bytes
+    pub size: u64,
+    /// VAD type
+    pub vad_type: MmVadType,
+    /// Protection flags
+    pub protection: u32,
+    /// Is committed
+    pub committed: bool,
+    /// Committed page count
+    pub committed_pages: u32,
+    /// Is locked
+    pub locked: bool,
+}
+
+impl MmVadSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            index: 0,
+            start_address: 0,
+            end_address: 0,
+            size: 0,
+            vad_type: MmVadType::Private,
+            protection: 0,
+            committed: false,
+            committed_pages: 0,
+            locked: false,
+        }
+    }
+}
+
+/// Get snapshots of all allocated VADs
+pub fn mm_get_vad_snapshots(max_count: usize) -> ([MmVadSnapshot; 64], usize) {
+    let mut snapshots = [MmVadSnapshot::empty(); 64];
+    let mut count = 0;
+
+    let limit = max_count.min(64).min(MAX_VADS);
+
+    unsafe {
+        let _guard = VAD_POOL_LOCK.lock();
+
+        for i in 0..MAX_VADS {
+            if count >= limit {
+                break;
+            }
+
+            let vad = &VAD_POOL[i];
+            if vad.is_in_use() {
+                let snap = &mut snapshots[count];
+                snap.index = i as u32;
+                snap.start_address = vad.start_address();
+                snap.end_address = vad.end_address();
+                snap.size = vad.size();
+                snap.vad_type = vad.vad_type;
+                snap.protection = vad.protection;
+                snap.committed = vad.is_committed();
+                snap.committed_pages = vad.committed_pages;
+                snap.locked = vad.is_locked();
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get VAD type name
+pub fn vad_type_name(vad_type: MmVadType) -> &'static str {
+    match vad_type {
+        MmVadType::Private => "Private",
+        MmVadType::Mapped => "Mapped",
+        MmVadType::Physical => "Physical",
+        MmVadType::Image => "Image",
+        MmVadType::LargePage => "LargePage",
+        MmVadType::Rotate => "Rotate",
+    }
+}
+
+/// Get protection name
+pub fn protection_name(protection: u32) -> &'static str {
+    match protection {
+        protection::PAGE_NOACCESS => "NoAccess",
+        protection::PAGE_READONLY => "R-",
+        protection::PAGE_READWRITE => "RW",
+        protection::PAGE_EXECUTE => "X-",
+        protection::PAGE_EXECUTE_READ => "RX",
+        protection::PAGE_EXECUTE_READWRITE => "RWX",
+        protection::PAGE_WRITECOPY => "WC",
+        protection::PAGE_EXECUTE_WRITECOPY => "XWC",
+        _ => "???",
+    }
+}
