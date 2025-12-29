@@ -1119,7 +1119,7 @@ fn sys_close(
     }
 
     // Check if this is a file handle (handles in FILE_HANDLE_BASE..SYNC_HANDLE_BASE range)
-    if handle >= FILE_HANDLE_BASE && handle < SYNC_HANDLE_BASE {
+    if (FILE_HANDLE_BASE..SYNC_HANDLE_BASE).contains(&handle) {
         if let Some(fs_handle) = unsafe { get_fs_handle(handle) } {
             // Close the fs handle
             let _ = crate::fs::close(fs_handle);
@@ -5114,8 +5114,8 @@ fn wildcard_match_impl(pattern: &[u8], name: &[u8]) -> bool {
             let nc = name[ni];
 
             // Convert to lowercase for case-insensitive matching
-            let pc_lower = if pc >= b'A' && pc <= b'Z' { pc + 32 } else { pc };
-            let nc_lower = if nc >= b'A' && nc <= b'Z' { nc + 32 } else { nc };
+            let pc_lower = if (b'A'..=b'Z').contains(&pc) { pc + 32 } else { pc };
+            let nc_lower = if (b'A'..=b'Z').contains(&nc) { nc + 32 } else { nc };
 
             if pc == b'*' {
                 // Star matches zero or more characters
@@ -12984,7 +12984,7 @@ fn debug_index_to_handle(index: usize) -> usize {
 
 /// Convert handle to debug object index
 fn handle_to_debug_index(handle: usize) -> Option<usize> {
-    if handle >= DEBUG_HANDLE_BASE && handle < DEBUG_HANDLE_BASE + crate::ke::MAX_DEBUG_OBJECTS {
+    if (DEBUG_HANDLE_BASE..DEBUG_HANDLE_BASE + crate::ke::MAX_DEBUG_OBJECTS).contains(&handle) {
         Some(handle - DEBUG_HANDLE_BASE)
     } else {
         None

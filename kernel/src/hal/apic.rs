@@ -358,8 +358,8 @@ impl LocalApic {
     ///
     /// # Arguments
     /// * `dest_apic_id` - Target APIC ID
-    /// * `vector` - Startup vector (physical address >> 12, must be < 0x100)
-    ///              The AP will start executing at physical address vector * 0x1000
+    /// * `vector` - Startup vector (physical address >> 12, must be < 0x100).
+    ///   The AP will start executing at physical address vector * 0x1000
     pub fn send_startup_ipi(&self, dest_apic_id: u8, vector: u8) {
         let icr_low: u32 = (vector as u32)
             | ((IpiDeliveryMode::Startup as u32) << 8)
@@ -607,7 +607,7 @@ pub mod ipi_vector {
 /// # Arguments
 /// * `apic_id` - The APIC ID of the processor to start
 /// * `startup_vector` - The physical page number where AP startup code resides
-///                      (physical address = startup_vector * 0x1000)
+///   (physical address = startup_vector * 0x1000)
 ///
 /// # Safety
 /// The startup code must be properly set up at the specified address before
