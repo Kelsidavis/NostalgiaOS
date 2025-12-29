@@ -151,7 +151,7 @@ const COMMANDS: &[&str] = &[
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "desc", "descriptor", "dir", "dmi", "dump", "echo", "erase", "ex", "exception", "exit",
     "hal", "help", "history", "hpet",
-    "int", "io",
+    "int", "io", "irqstat",
     "ke",
     "ldr", "ls",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
@@ -1140,6 +1140,9 @@ impl Shell {
         // Exception history viewer
         } else if eq_ignore_case(cmd, "exception") || eq_ignore_case(cmd, "exc") {
             commands::cmd_exception(&args[1..argc]);
+        // Interrupt statistics
+        } else if eq_ignore_case(cmd, "irqstat") {
+            commands::cmd_irqstat(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

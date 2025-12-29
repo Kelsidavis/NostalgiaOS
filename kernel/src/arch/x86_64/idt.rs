@@ -226,6 +226,9 @@ extern "x86-interrupt" fn virtualization_handler(stack_frame: InterruptStackFram
 /// Timer interrupt handler (vector 32)
 /// Called by APIC timer at configured frequency (typically 1000Hz)
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    // Increment statistics counter
+    INTERRUPT_STATS.timer.fetch_add(1, Ordering::Relaxed);
+
     // Increment system tick counter
     let ticks = apic::TICK_COUNT.fetch_add(1, Ordering::Relaxed);
 
@@ -255,6 +258,9 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
 /// Keyboard interrupt handler (vector 33)
 /// Called when a key is pressed or released
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    // Increment statistics counter
+    INTERRUPT_STATS.keyboard.fetch_add(1, Ordering::Relaxed);
+
     // Handle the keyboard interrupt
     crate::hal::keyboard::handle_interrupt();
 
@@ -268,6 +274,9 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
 /// IPI STOP handler (vector 0xFC)
 /// Halts this CPU immediately (for shutdown or panic)
 extern "x86-interrupt" fn ipi_stop_handler(_stack_frame: InterruptStackFrame) {
+    // Increment statistics counter
+    INTERRUPT_STATS.ipi_stop.fetch_add(1, Ordering::Relaxed);
+
     // Log that we're stopping
     crate::serial_println!("[IPI] CPU {} received STOP IPI - halting", unsafe {
         crate::arch::x86_64::percpu::get_cpu_id()
@@ -287,6 +296,9 @@ extern "x86-interrupt" fn ipi_stop_handler(_stack_frame: InterruptStackFrame) {
 /// IPI RESCHEDULE handler (vector 0xFD)
 /// Forces this CPU to run the scheduler immediately
 extern "x86-interrupt" fn ipi_reschedule_handler(_stack_frame: InterruptStackFrame) {
+    // Increment statistics counter
+    INTERRUPT_STATS.ipi_reschedule.fetch_add(1, Ordering::Relaxed);
+
     // Send EOI first
     apic::eoi();
 
@@ -300,6 +312,9 @@ extern "x86-interrupt" fn ipi_reschedule_handler(_stack_frame: InterruptStackFra
 /// TLB shootdown IPI handler (vector 0xFE)
 /// Called when this CPU receives a TLB shootdown request from another CPU
 extern "x86-interrupt" fn tlb_shootdown_ipi_handler(_stack_frame: InterruptStackFrame) {
+    // Increment statistics counter
+    INTERRUPT_STATS.tlb_shootdown.fetch_add(1, Ordering::Relaxed);
+
     // Call the TLB shootdown handler in mm::tlb
     unsafe {
         crate::mm::tlb_shootdown_handler();
@@ -313,4 +328,158 @@ extern "x86-interrupt" fn tlb_shootdown_ipi_handler(_stack_frame: InterruptStack
 extern "x86-interrupt" fn spurious_interrupt_handler(_stack_frame: InterruptStackFrame) {
     // Spurious interrupts should NOT send EOI
     // Just return - no action needed
+    // But track the count
+    INTERRUPT_STATS.spurious.fetch_add(1, Ordering::Relaxed);
+}
+
+// =============================================================================
+// Interrupt Statistics Tracking
+// =============================================================================
+
+use core::sync::atomic::AtomicU64;
+
+/// Statistics counters for interrupts and exceptions
+pub struct InterruptStats {
+    // CPU Exceptions (vectors 0-31)
+    pub divide_error: AtomicU64,
+    pub debug: AtomicU64,
+    pub nmi: AtomicU64,
+    pub breakpoint: AtomicU64,
+    pub overflow: AtomicU64,
+    pub bound_range: AtomicU64,
+    pub invalid_opcode: AtomicU64,
+    pub device_not_available: AtomicU64,
+    pub double_fault: AtomicU64,
+    pub invalid_tss: AtomicU64,
+    pub segment_not_present: AtomicU64,
+    pub stack_segment_fault: AtomicU64,
+    pub general_protection: AtomicU64,
+    pub page_fault: AtomicU64,
+    pub x87_fp: AtomicU64,
+    pub alignment_check: AtomicU64,
+    pub machine_check: AtomicU64,
+    pub simd_fp: AtomicU64,
+    pub virtualization: AtomicU64,
+
+    // Hardware Interrupts
+    pub timer: AtomicU64,
+    pub keyboard: AtomicU64,
+
+    // IPIs
+    pub ipi_stop: AtomicU64,
+    pub ipi_reschedule: AtomicU64,
+    pub tlb_shootdown: AtomicU64,
+    pub spurious: AtomicU64,
+
+    // Generic counters for other vectors
+    pub other_exceptions: AtomicU64,
+    pub other_interrupts: AtomicU64,
+}
+
+impl InterruptStats {
+    pub const fn new() -> Self {
+        Self {
+            divide_error: AtomicU64::new(0),
+            debug: AtomicU64::new(0),
+            nmi: AtomicU64::new(0),
+            breakpoint: AtomicU64::new(0),
+            overflow: AtomicU64::new(0),
+            bound_range: AtomicU64::new(0),
+            invalid_opcode: AtomicU64::new(0),
+            device_not_available: AtomicU64::new(0),
+            double_fault: AtomicU64::new(0),
+            invalid_tss: AtomicU64::new(0),
+            segment_not_present: AtomicU64::new(0),
+            stack_segment_fault: AtomicU64::new(0),
+            general_protection: AtomicU64::new(0),
+            page_fault: AtomicU64::new(0),
+            x87_fp: AtomicU64::new(0),
+            alignment_check: AtomicU64::new(0),
+            machine_check: AtomicU64::new(0),
+            simd_fp: AtomicU64::new(0),
+            virtualization: AtomicU64::new(0),
+            timer: AtomicU64::new(0),
+            keyboard: AtomicU64::new(0),
+            ipi_stop: AtomicU64::new(0),
+            ipi_reschedule: AtomicU64::new(0),
+            tlb_shootdown: AtomicU64::new(0),
+            spurious: AtomicU64::new(0),
+            other_exceptions: AtomicU64::new(0),
+            other_interrupts: AtomicU64::new(0),
+        }
+    }
+
+    /// Get total exception count
+    pub fn total_exceptions(&self) -> u64 {
+        self.divide_error.load(Ordering::Relaxed)
+            + self.debug.load(Ordering::Relaxed)
+            + self.nmi.load(Ordering::Relaxed)
+            + self.breakpoint.load(Ordering::Relaxed)
+            + self.overflow.load(Ordering::Relaxed)
+            + self.bound_range.load(Ordering::Relaxed)
+            + self.invalid_opcode.load(Ordering::Relaxed)
+            + self.device_not_available.load(Ordering::Relaxed)
+            + self.double_fault.load(Ordering::Relaxed)
+            + self.invalid_tss.load(Ordering::Relaxed)
+            + self.segment_not_present.load(Ordering::Relaxed)
+            + self.stack_segment_fault.load(Ordering::Relaxed)
+            + self.general_protection.load(Ordering::Relaxed)
+            + self.page_fault.load(Ordering::Relaxed)
+            + self.x87_fp.load(Ordering::Relaxed)
+            + self.alignment_check.load(Ordering::Relaxed)
+            + self.machine_check.load(Ordering::Relaxed)
+            + self.simd_fp.load(Ordering::Relaxed)
+            + self.virtualization.load(Ordering::Relaxed)
+            + self.other_exceptions.load(Ordering::Relaxed)
+    }
+
+    /// Get total interrupt count
+    pub fn total_interrupts(&self) -> u64 {
+        self.timer.load(Ordering::Relaxed)
+            + self.keyboard.load(Ordering::Relaxed)
+            + self.ipi_stop.load(Ordering::Relaxed)
+            + self.ipi_reschedule.load(Ordering::Relaxed)
+            + self.tlb_shootdown.load(Ordering::Relaxed)
+            + self.spurious.load(Ordering::Relaxed)
+            + self.other_interrupts.load(Ordering::Relaxed)
+    }
+
+    /// Clear all statistics
+    pub fn clear(&self) {
+        self.divide_error.store(0, Ordering::Relaxed);
+        self.debug.store(0, Ordering::Relaxed);
+        self.nmi.store(0, Ordering::Relaxed);
+        self.breakpoint.store(0, Ordering::Relaxed);
+        self.overflow.store(0, Ordering::Relaxed);
+        self.bound_range.store(0, Ordering::Relaxed);
+        self.invalid_opcode.store(0, Ordering::Relaxed);
+        self.device_not_available.store(0, Ordering::Relaxed);
+        self.double_fault.store(0, Ordering::Relaxed);
+        self.invalid_tss.store(0, Ordering::Relaxed);
+        self.segment_not_present.store(0, Ordering::Relaxed);
+        self.stack_segment_fault.store(0, Ordering::Relaxed);
+        self.general_protection.store(0, Ordering::Relaxed);
+        self.page_fault.store(0, Ordering::Relaxed);
+        self.x87_fp.store(0, Ordering::Relaxed);
+        self.alignment_check.store(0, Ordering::Relaxed);
+        self.machine_check.store(0, Ordering::Relaxed);
+        self.simd_fp.store(0, Ordering::Relaxed);
+        self.virtualization.store(0, Ordering::Relaxed);
+        self.timer.store(0, Ordering::Relaxed);
+        self.keyboard.store(0, Ordering::Relaxed);
+        self.ipi_stop.store(0, Ordering::Relaxed);
+        self.ipi_reschedule.store(0, Ordering::Relaxed);
+        self.tlb_shootdown.store(0, Ordering::Relaxed);
+        self.spurious.store(0, Ordering::Relaxed);
+        self.other_exceptions.store(0, Ordering::Relaxed);
+        self.other_interrupts.store(0, Ordering::Relaxed);
+    }
+}
+
+/// Global interrupt statistics
+pub static INTERRUPT_STATS: InterruptStats = InterruptStats::new();
+
+/// Get a reference to the interrupt statistics
+pub fn get_interrupt_stats() -> &'static InterruptStats {
+    &INTERRUPT_STATS
 }

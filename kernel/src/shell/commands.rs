@@ -124,6 +124,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    hpet           HPET timer viewer (status, timers)");
         outln!("    smbios (dmi)   SMBIOS/DMI system info (bios, cpu, mem)");
         outln!("    exception      Exception history viewer (list, stats)");
+        outln!("    irqstat        Interrupt statistics (all, rate, clear)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -9750,4 +9751,260 @@ fn test_exception(exc_type: &str) {
         outln!("Unknown exception type: {}", exc_type);
         outln!("Available: div0, breakpoint, gpf, pagefault");
     }
+}
+
+// ============================================================================
+// Interrupt Statistics Command
+// ============================================================================
+
+/// Interrupt statistics viewer command
+pub fn cmd_irqstat(args: &[&str]) {
+    if args.is_empty() {
+        show_irqstat_overview();
+        return;
+    }
+
+    let cmd = args[0];
+    if eq_ignore_case(cmd, "help") {
+        show_irqstat_help();
+    } else if eq_ignore_case(cmd, "all") || eq_ignore_case(cmd, "full") {
+        show_irqstat_all();
+    } else if eq_ignore_case(cmd, "exceptions") || eq_ignore_case(cmd, "exc") {
+        show_irqstat_exceptions();
+    } else if eq_ignore_case(cmd, "interrupts") || eq_ignore_case(cmd, "int") {
+        show_irqstat_interrupts();
+    } else if eq_ignore_case(cmd, "clear") || eq_ignore_case(cmd, "reset") {
+        clear_irqstat();
+        outln!("Interrupt statistics cleared");
+    } else if eq_ignore_case(cmd, "rate") {
+        show_irqstat_rate();
+    } else {
+        outln!("Unknown irqstat command: {}", cmd);
+        show_irqstat_help();
+    }
+}
+
+fn show_irqstat_help() {
+    outln!("Interrupt Statistics Viewer");
+    outln!("");
+    outln!("Usage: irqstat <command>");
+    outln!("");
+    outln!("Commands:");
+    outln!("  (none)      Show summary overview");
+    outln!("  all         Show all statistics");
+    outln!("  exceptions  Show exception counts only");
+    outln!("  interrupts  Show hardware interrupt counts only");
+    outln!("  rate        Show interrupt rate (per second)");
+    outln!("  clear       Reset all counters to zero");
+}
+
+fn show_irqstat_overview() {
+    use crate::arch::x86_64::idt::get_interrupt_stats;
+    use core::sync::atomic::Ordering;
+
+    let stats = get_interrupt_stats();
+
+    outln!("Interrupt Statistics Summary");
+    outln!("============================");
+    outln!("");
+
+    let total_exc = stats.total_exceptions();
+    let total_int = stats.total_interrupts();
+
+    outln!("Total exceptions:  {}", total_exc);
+    outln!("Total interrupts:  {}", total_int);
+    outln!("Grand total:       {}", total_exc + total_int);
+    outln!("");
+
+    outln!("Hardware Interrupts:");
+    let timer = stats.timer.load(Ordering::Relaxed);
+    let keyboard = stats.keyboard.load(Ordering::Relaxed);
+    let spurious = stats.spurious.load(Ordering::Relaxed);
+    if timer > 0 { outln!("  Timer:       {}", timer); }
+    if keyboard > 0 { outln!("  Keyboard:    {}", keyboard); }
+    if spurious > 0 { outln!("  Spurious:    {}", spurious); }
+
+    outln!("");
+    outln!("IPIs (Inter-Processor Interrupts):");
+    let ipi_stop = stats.ipi_stop.load(Ordering::Relaxed);
+    let ipi_resched = stats.ipi_reschedule.load(Ordering::Relaxed);
+    let tlb = stats.tlb_shootdown.load(Ordering::Relaxed);
+    if ipi_stop > 0 { outln!("  Stop:        {}", ipi_stop); }
+    if ipi_resched > 0 { outln!("  Reschedule:  {}", ipi_resched); }
+    if tlb > 0 { outln!("  TLB Shoot:   {}", tlb); }
+
+    outln!("");
+    outln!("Use 'irqstat all' for complete breakdown");
+}
+
+fn show_irqstat_all() {
+    use crate::arch::x86_64::idt::get_interrupt_stats;
+    use core::sync::atomic::Ordering;
+
+    let stats = get_interrupt_stats();
+
+    outln!("Complete Interrupt Statistics");
+    outln!("==============================");
+    outln!("");
+
+    outln!("CPU Exceptions (Vectors 0-31):");
+    outln!("  #00 Divide Error:         {}", stats.divide_error.load(Ordering::Relaxed));
+    outln!("  #01 Debug:                {}", stats.debug.load(Ordering::Relaxed));
+    outln!("  #02 NMI:                  {}", stats.nmi.load(Ordering::Relaxed));
+    outln!("  #03 Breakpoint:           {}", stats.breakpoint.load(Ordering::Relaxed));
+    outln!("  #04 Overflow:             {}", stats.overflow.load(Ordering::Relaxed));
+    outln!("  #05 Bound Range:          {}", stats.bound_range.load(Ordering::Relaxed));
+    outln!("  #06 Invalid Opcode:       {}", stats.invalid_opcode.load(Ordering::Relaxed));
+    outln!("  #07 Device Not Available: {}", stats.device_not_available.load(Ordering::Relaxed));
+    outln!("  #08 Double Fault:         {}", stats.double_fault.load(Ordering::Relaxed));
+    outln!("  #10 Invalid TSS:          {}", stats.invalid_tss.load(Ordering::Relaxed));
+    outln!("  #11 Segment Not Present:  {}", stats.segment_not_present.load(Ordering::Relaxed));
+    outln!("  #12 Stack Segment Fault:  {}", stats.stack_segment_fault.load(Ordering::Relaxed));
+    outln!("  #13 General Protection:   {}", stats.general_protection.load(Ordering::Relaxed));
+    outln!("  #14 Page Fault:           {}", stats.page_fault.load(Ordering::Relaxed));
+    outln!("  #16 x87 FP:               {}", stats.x87_fp.load(Ordering::Relaxed));
+    outln!("  #17 Alignment Check:      {}", stats.alignment_check.load(Ordering::Relaxed));
+    outln!("  #18 Machine Check:        {}", stats.machine_check.load(Ordering::Relaxed));
+    outln!("  #19 SIMD FP:              {}", stats.simd_fp.load(Ordering::Relaxed));
+    outln!("  #20 Virtualization:       {}", stats.virtualization.load(Ordering::Relaxed));
+    outln!("  Other Exceptions:         {}", stats.other_exceptions.load(Ordering::Relaxed));
+    outln!("  -------------------------");
+    outln!("  Total:                    {}", stats.total_exceptions());
+
+    outln!("");
+    outln!("Hardware Interrupts:");
+    outln!("  #32 Timer (APIC):         {}", stats.timer.load(Ordering::Relaxed));
+    outln!("  #33 Keyboard:             {}", stats.keyboard.load(Ordering::Relaxed));
+    outln!("  Other Interrupts:         {}", stats.other_interrupts.load(Ordering::Relaxed));
+
+    outln!("");
+    outln!("Inter-Processor Interrupts:");
+    outln!("  #FC IPI Stop:             {}", stats.ipi_stop.load(Ordering::Relaxed));
+    outln!("  #FD IPI Reschedule:       {}", stats.ipi_reschedule.load(Ordering::Relaxed));
+    outln!("  #FE TLB Shootdown:        {}", stats.tlb_shootdown.load(Ordering::Relaxed));
+    outln!("  #FF Spurious:             {}", stats.spurious.load(Ordering::Relaxed));
+    outln!("  -------------------------");
+    outln!("  Total:                    {}", stats.total_interrupts());
+}
+
+fn show_irqstat_exceptions() {
+    use crate::arch::x86_64::idt::get_interrupt_stats;
+    use core::sync::atomic::Ordering;
+
+    let stats = get_interrupt_stats();
+
+    outln!("Exception Statistics");
+    outln!("====================");
+    outln!("");
+
+    outln!("{:<4} {:<24} {:>12}", "Vec", "Type", "Count");
+    outln!("--------------------------------------------");
+
+    let exceptions = [
+        (0x00, "Divide Error", stats.divide_error.load(Ordering::Relaxed)),
+        (0x01, "Debug", stats.debug.load(Ordering::Relaxed)),
+        (0x02, "NMI", stats.nmi.load(Ordering::Relaxed)),
+        (0x03, "Breakpoint", stats.breakpoint.load(Ordering::Relaxed)),
+        (0x04, "Overflow", stats.overflow.load(Ordering::Relaxed)),
+        (0x05, "Bound Range", stats.bound_range.load(Ordering::Relaxed)),
+        (0x06, "Invalid Opcode", stats.invalid_opcode.load(Ordering::Relaxed)),
+        (0x07, "Device Not Available", stats.device_not_available.load(Ordering::Relaxed)),
+        (0x08, "Double Fault", stats.double_fault.load(Ordering::Relaxed)),
+        (0x0A, "Invalid TSS", stats.invalid_tss.load(Ordering::Relaxed)),
+        (0x0B, "Segment Not Present", stats.segment_not_present.load(Ordering::Relaxed)),
+        (0x0C, "Stack Segment Fault", stats.stack_segment_fault.load(Ordering::Relaxed)),
+        (0x0D, "General Protection", stats.general_protection.load(Ordering::Relaxed)),
+        (0x0E, "Page Fault", stats.page_fault.load(Ordering::Relaxed)),
+        (0x10, "x87 Floating Point", stats.x87_fp.load(Ordering::Relaxed)),
+        (0x11, "Alignment Check", stats.alignment_check.load(Ordering::Relaxed)),
+        (0x12, "Machine Check", stats.machine_check.load(Ordering::Relaxed)),
+        (0x13, "SIMD Floating Point", stats.simd_fp.load(Ordering::Relaxed)),
+        (0x14, "Virtualization", stats.virtualization.load(Ordering::Relaxed)),
+    ];
+
+    for (vec, name, count) in exceptions.iter() {
+        if *count > 0 {
+            outln!("{:#04x} {:<24} {:>12}", vec, name, count);
+        }
+    }
+
+    outln!("");
+    outln!("Total: {}", stats.total_exceptions());
+}
+
+fn show_irqstat_interrupts() {
+    use crate::arch::x86_64::idt::get_interrupt_stats;
+    use core::sync::atomic::Ordering;
+
+    let stats = get_interrupt_stats();
+
+    outln!("Hardware Interrupt Statistics");
+    outln!("=============================");
+    outln!("");
+
+    outln!("{:<4} {:<20} {:>12}", "Vec", "Type", "Count");
+    outln!("-----------------------------------------");
+
+    let timer = stats.timer.load(Ordering::Relaxed);
+    let keyboard = stats.keyboard.load(Ordering::Relaxed);
+    let ipi_stop = stats.ipi_stop.load(Ordering::Relaxed);
+    let ipi_resched = stats.ipi_reschedule.load(Ordering::Relaxed);
+    let tlb = stats.tlb_shootdown.load(Ordering::Relaxed);
+    let spurious = stats.spurious.load(Ordering::Relaxed);
+    let other = stats.other_interrupts.load(Ordering::Relaxed);
+
+    if timer > 0 { outln!("0x20 Timer             {:>12}", timer); }
+    if keyboard > 0 { outln!("0x21 Keyboard          {:>12}", keyboard); }
+    if ipi_stop > 0 { outln!("0xFC IPI Stop          {:>12}", ipi_stop); }
+    if ipi_resched > 0 { outln!("0xFD IPI Reschedule    {:>12}", ipi_resched); }
+    if tlb > 0 { outln!("0xFE TLB Shootdown     {:>12}", tlb); }
+    if spurious > 0 { outln!("0xFF Spurious          {:>12}", spurious); }
+    if other > 0 { outln!("     Other             {:>12}", other); }
+
+    outln!("");
+    outln!("Total: {}", stats.total_interrupts());
+}
+
+fn clear_irqstat() {
+    use crate::arch::x86_64::idt::get_interrupt_stats;
+    get_interrupt_stats().clear();
+}
+
+fn show_irqstat_rate() {
+    use crate::arch::x86_64::idt::get_interrupt_stats;
+    use core::sync::atomic::Ordering;
+
+    let stats = get_interrupt_stats();
+
+    // Get current timer tick count as a proxy for uptime
+    let timer_ticks = stats.timer.load(Ordering::Relaxed);
+
+    if timer_ticks == 0 {
+        outln!("No timer interrupts yet - cannot calculate rate");
+        return;
+    }
+
+    outln!("Interrupt Rate Analysis");
+    outln!("=======================");
+    outln!("");
+
+    // Assume 1000Hz timer for rate calculations
+    let seconds = timer_ticks / 1000;
+    if seconds == 0 {
+        outln!("System uptime < 1 second - need more data");
+        return;
+    }
+
+    outln!("Estimated uptime: {} seconds ({} timer ticks @ 1000Hz)", seconds, timer_ticks);
+    outln!("");
+
+    let keyboard = stats.keyboard.load(Ordering::Relaxed);
+    let ipi_resched = stats.ipi_reschedule.load(Ordering::Relaxed);
+    let tlb = stats.tlb_shootdown.load(Ordering::Relaxed);
+
+    outln!("Average rates:");
+    outln!("  Timer:       {} /sec (expected: 1000)", timer_ticks / seconds);
+    if keyboard > 0 { outln!("  Keyboard:    {:.2} /sec", keyboard as f64 / seconds as f64); }
+    if ipi_resched > 0 { outln!("  Reschedule:  {:.2} /sec", ipi_resched as f64 / seconds as f64); }
+    if tlb > 0 { outln!("  TLB Shoot:   {:.2} /sec", tlb as f64 / seconds as f64); }
 }
