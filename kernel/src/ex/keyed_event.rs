@@ -428,6 +428,84 @@ pub fn keyed_event_init() {
 }
 
 // ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// Keyed event statistics
+#[derive(Debug, Clone, Copy)]
+pub struct KeyedEventStats {
+    /// Maximum keyed events
+    pub max_keyed_events: usize,
+    /// Allocated keyed events
+    pub allocated_count: usize,
+    /// Free keyed events
+    pub free_count: usize,
+    /// Global CritSec keyed event index
+    pub critsec_event_index: Option<u32>,
+}
+
+/// Get keyed event statistics
+pub fn get_keyed_event_stats() -> KeyedEventStats {
+    let bitmap = KEYED_EVENT_BITMAP.load(Ordering::Acquire);
+    let allocated = bitmap.count_ones() as usize;
+
+    KeyedEventStats {
+        max_keyed_events: MAX_KEYED_EVENT_OBJECTS,
+        allocated_count: allocated,
+        free_count: MAX_KEYED_EVENT_OBJECTS - allocated,
+        critsec_event_index: unsafe { CRIT_SEC_KEYED_EVENT_INDEX },
+    }
+}
+
+/// Keyed event snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct KeyedEventSnapshot {
+    /// Index in pool
+    pub index: u32,
+    /// Reference count
+    pub ref_count: u32,
+    /// Is valid/active
+    pub active: bool,
+}
+
+impl KeyedEventSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            index: 0,
+            ref_count: 0,
+            active: false,
+        }
+    }
+}
+
+/// Get snapshots of allocated keyed events
+pub fn get_keyed_event_snapshots(max_count: usize) -> ([KeyedEventSnapshot; 16], usize) {
+    let mut snapshots = [KeyedEventSnapshot::empty(); 16];
+    let mut count = 0;
+
+    let limit = max_count.min(16).min(MAX_KEYED_EVENT_OBJECTS);
+    let bitmap = KEYED_EVENT_BITMAP.load(Ordering::Acquire);
+
+    for i in 0..MAX_KEYED_EVENT_OBJECTS {
+        if count >= limit {
+            break;
+        }
+
+        if (bitmap & (1u64 << i)) != 0 {
+            let obj = &KEYED_EVENT_POOL[i];
+            snapshots[count] = KeyedEventSnapshot {
+                index: i as u32,
+                ref_count: obj.ref_count.load(Ordering::Relaxed),
+                active: obj.is_valid(),
+            };
+            count += 1;
+        }
+    }
+
+    (snapshots, count)
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

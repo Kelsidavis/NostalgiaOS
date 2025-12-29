@@ -13096,3 +13096,180 @@ fn show_working_set_stats() {
     outln!("");
     outln!("Note: Use 'mm' command for detailed memory statistics.");
 }
+
+// ============================================================================
+// Keyed Event Viewer Command (keyedev)
+// ============================================================================
+
+/// keyedev - Keyed event viewer
+///
+/// Display keyed event statistics and list active keyed events.
+///
+/// Usage: keyedev [stats|list]
+///
+/// Subcommands:
+///   stats  - Show keyed event statistics (default)
+///   list   - List all active keyed events
+pub fn cmd_keyedev(args: &[&str]) {
+    if args.is_empty() {
+        show_keyed_event_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_keyed_event_stats();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_keyed_event_list();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("keyedev - Keyed Event Viewer");
+        outln!("");
+        outln!("Usage: keyedev [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show keyed event statistics (default)");
+        outln!("  list   - List all active keyed events");
+        outln!("");
+        outln!("Keyed events are used for low-memory critical section fallback.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'keyedev help' for usage information");
+    }
+}
+
+fn show_keyed_event_stats() {
+    use crate::ex::{get_keyed_event_stats, MAX_KEYED_EVENT_OBJECTS};
+
+    let stats = get_keyed_event_stats();
+
+    outln!("Keyed Event Statistics");
+    outln!("======================");
+    outln!("");
+    outln!("Max Keyed Events:  {}", MAX_KEYED_EVENT_OBJECTS);
+    outln!("Allocated:         {}", stats.allocated_count);
+    outln!("Free:              {}", stats.free_count);
+    match stats.critsec_event_index {
+        Some(idx) => outln!("CritSec Event:     Index {}", idx),
+        None => outln!("CritSec Event:     Not initialized"),
+    }
+}
+
+fn show_keyed_event_list() {
+    use crate::ex::get_keyed_event_snapshots;
+
+    outln!("Active Keyed Events");
+    outln!("===================");
+    outln!("");
+
+    let (snapshots, count) = get_keyed_event_snapshots(16);
+
+    if count == 0 {
+        outln!("No keyed events currently allocated");
+        return;
+    }
+
+    outln!("{:<6} {:<10} {:<8}",
+        "Index", "RefCount", "Active");
+    outln!("------------------------");
+
+    for i in 0..count {
+        let ke = &snapshots[i];
+        let active_str = if ke.active { "Yes" } else { "No" };
+
+        outln!("{:<6} {:<10} {:<8}",
+            ke.index,
+            ke.ref_count,
+            active_str
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} keyed events", count);
+}
+
+// ============================================================================
+// Callback Object Viewer Command (callback)
+// ============================================================================
+
+/// callback - Executive callback object viewer
+///
+/// Display callback object statistics and list registered callbacks.
+///
+/// Usage: callback [stats|list]
+pub fn cmd_callback(args: &[&str]) {
+    if args.is_empty() {
+        show_callback_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_callback_stats();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_callback_list();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("callback - Executive Callback Object Viewer");
+        outln!("");
+        outln!("Usage: callback [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show callback statistics (default)");
+        outln!("  list   - List all registered callbacks");
+        outln!("");
+        outln!("Callbacks are kernel notification mechanisms.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'callback help' for usage information");
+    }
+}
+
+fn show_callback_stats() {
+    use crate::ex::{get_callback_stats, MAX_CALLBACK_OBJECTS};
+
+    let stats = get_callback_stats();
+
+    outln!("Executive Callback Statistics");
+    outln!("==============================");
+    outln!("");
+    outln!("Max Callback Objects:  {}", MAX_CALLBACK_OBJECTS);
+    outln!("Allocated:             {}", stats.allocated_count);
+    outln!("Free:                  {}", stats.free_count);
+    outln!("Total Registrations:   {}", stats.total_registrations);
+}
+
+fn show_callback_list() {
+    use crate::ex::get_callback_snapshots;
+
+    outln!("Registered Callback Objects");
+    outln!("===========================");
+    outln!("");
+
+    let (snapshots, count) = get_callback_snapshots(16);
+
+    if count == 0 {
+        outln!("No callback objects currently allocated");
+        return;
+    }
+
+    outln!("{:<6} {:<32} {:<12} {:<8}",
+        "Index", "Name", "Registrations", "Calls");
+    outln!("--------------------------------------------------------------");
+
+    for i in 0..count {
+        let cb = &snapshots[i];
+        let name_len = cb.name_len as usize;
+        let name = core::str::from_utf8(&cb.name[..name_len]).unwrap_or("<invalid>");
+
+        outln!("{:<6} {:<32} {:<12} {:<8}",
+            cb.index,
+            name,
+            cb.registration_count,
+            cb.call_count
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} callback objects", count);
+}

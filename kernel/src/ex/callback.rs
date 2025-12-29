@@ -576,3 +576,132 @@ pub fn init() {
 
     crate::serial_println!("[CALLBACK] Callback subsystem initialized");
 }
+
+// ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// Callback object statistics
+#[derive(Debug, Clone, Copy)]
+pub struct CallbackStats {
+    /// Maximum callback objects
+    pub max_callback_objects: usize,
+    /// Allocated callback objects
+    pub allocated_count: usize,
+    /// Free callback objects
+    pub free_count: usize,
+    /// Total registrations across all callbacks
+    pub total_registrations: u32,
+}
+
+/// Get callback object statistics
+pub fn get_callback_stats() -> CallbackStats {
+    unsafe {
+        let bitmap = CALLBACK_BITMAP;
+        let allocated = bitmap.count_ones() as usize;
+
+        let mut total_regs: u32 = 0;
+        for i in 0..MAX_CALLBACK_OBJECTS {
+            if (bitmap & (1 << i)) != 0 {
+                total_regs += CALLBACK_POOL[i].registration_count.load(Ordering::Relaxed);
+            }
+        }
+
+        // Also count well-known callbacks
+        total_regs += SHUTDOWN_CALLBACK.registration_count.load(Ordering::Relaxed);
+        total_regs += POWER_STATE_CALLBACK.registration_count.load(Ordering::Relaxed);
+        total_regs += PROCESS_CALLBACK.registration_count.load(Ordering::Relaxed);
+        total_regs += THREAD_CALLBACK.registration_count.load(Ordering::Relaxed);
+        total_regs += IMAGE_LOAD_CALLBACK.registration_count.load(Ordering::Relaxed);
+
+        CallbackStats {
+            max_callback_objects: MAX_CALLBACK_OBJECTS,
+            allocated_count: allocated + 5, // +5 for well-known
+            free_count: MAX_CALLBACK_OBJECTS - allocated,
+            total_registrations: total_regs,
+        }
+    }
+}
+
+/// Callback object snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct CallbackSnapshot {
+    /// Index in pool (or 0xFF for well-known)
+    pub index: u8,
+    /// Name
+    pub name: [u8; 64],
+    /// Name length
+    pub name_len: u8,
+    /// Registration count
+    pub registration_count: u32,
+    /// Call count (not tracked, always 0)
+    pub call_count: u32,
+}
+
+impl CallbackSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            index: 0,
+            name: [0u8; 64],
+            name_len: 0,
+            registration_count: 0,
+            call_count: 0,
+        }
+    }
+}
+
+/// Get snapshots of allocated callback objects
+pub fn get_callback_snapshots(max_count: usize) -> ([CallbackSnapshot; 16], usize) {
+    let mut snapshots = [CallbackSnapshot::empty(); 16];
+    let mut count = 0;
+
+    let limit = max_count.min(16);
+
+    unsafe {
+        // Add well-known callbacks first
+        let well_known: [(&ExCallbackObject, &str); 5] = [
+            (&SHUTDOWN_CALLBACK, "\\Callback\\Shutdown"),
+            (&POWER_STATE_CALLBACK, "\\Callback\\PowerState"),
+            (&PROCESS_CALLBACK, "\\Callback\\ProcessCreate"),
+            (&THREAD_CALLBACK, "\\Callback\\ThreadCreate"),
+            (&IMAGE_LOAD_CALLBACK, "\\Callback\\ImageLoad"),
+        ];
+
+        for (cb, name) in well_known.iter() {
+            if count >= limit {
+                break;
+            }
+            let snap = &mut snapshots[count];
+            snap.index = 0xFF;
+            let name_bytes = name.as_bytes();
+            let len = name_bytes.len().min(64);
+            snap.name[..len].copy_from_slice(&name_bytes[..len]);
+            snap.name_len = len as u8;
+            snap.registration_count = cb.registration_count.load(Ordering::Relaxed);
+            snap.call_count = 0;
+            count += 1;
+        }
+
+        // Add pool callbacks
+        let bitmap = CALLBACK_BITMAP;
+        for i in 0..MAX_CALLBACK_OBJECTS {
+            if count >= limit {
+                break;
+            }
+
+            if (bitmap & (1 << i)) != 0 {
+                let cb = &CALLBACK_POOL[i];
+                let snap = &mut snapshots[count];
+                snap.index = i as u8;
+                let len = cb.name_len.min(64);
+                snap.name[..len].copy_from_slice(&cb.name[..len]);
+                snap.name_len = len as u8;
+                snap.registration_count = cb.registration_count.load(Ordering::Relaxed);
+                snap.call_count = 0;
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}

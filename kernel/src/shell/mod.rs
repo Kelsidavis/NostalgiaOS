@@ -148,12 +148,12 @@ const HISTORY_SIZE: usize = 32;
 const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq",
     "blocks", "bt",
-    "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
+    "callback", "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "desc", "descriptor", "devdrv", "dir", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
     "files",
     "hal", "handles", "help", "history", "hpet",
     "int", "io", "iocp", "ioq", "irql", "irqstat",
-    "ke",
+    "ke", "keyedev",
     "ldr", "ls",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net",
@@ -1214,6 +1214,12 @@ impl Shell {
         // Working set viewer
         } else if eq_ignore_case(cmd, "wset") {
             commands::cmd_wset(&args[1..argc]);
+        // Keyed event viewer
+        } else if eq_ignore_case(cmd, "keyedev") {
+            commands::cmd_keyedev(&args[1..argc]);
+        // Callback object viewer
+        } else if eq_ignore_case(cmd, "callback") {
+            commands::cmd_callback(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
