@@ -10276,7 +10276,7 @@ fn sys_suspend_thread(
 ) -> isize {
     let tid = match unsafe { get_thread_id(thread_handle) } {
         Some(t) => t,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtSuspendThread(tid={})", tid);
@@ -10284,7 +10284,7 @@ fn sys_suspend_thread(
     // Look up the thread by ID
     let thread_ptr = unsafe { crate::ps::cid::ps_lookup_thread_by_id(tid) };
     if thread_ptr.is_null() {
-        return -1; // STATUS_INVALID_HANDLE
+        return STATUS_INVALID_HANDLE;
     }
 
     // Get KTHREAD from ETHREAD and suspend it
@@ -10311,7 +10311,7 @@ fn sys_resume_thread(
 ) -> isize {
     let tid = match unsafe { get_thread_id(thread_handle) } {
         Some(t) => t,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtResumeThread(tid={})", tid);
@@ -10319,7 +10319,7 @@ fn sys_resume_thread(
     // Look up the thread by ID
     let thread_ptr = unsafe { crate::ps::cid::ps_lookup_thread_by_id(tid) };
     if thread_ptr.is_null() {
-        return -1; // STATUS_INVALID_HANDLE
+        return STATUS_INVALID_HANDLE;
     }
 
     // Get KTHREAD from ETHREAD and resume it
@@ -10367,7 +10367,7 @@ fn sys_open_process_token(
     _: usize, _: usize, _: usize,
 ) -> isize {
     if token_handle_ptr == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Get process ID (or use current if -1)
@@ -10376,7 +10376,7 @@ fn sys_open_process_token(
     } else {
         match unsafe { get_process_id(process_handle) } {
             Some(p) => p,
-            None => return -1,
+            None => return STATUS_INVALID_HANDLE,
         }
     };
 
@@ -10396,9 +10396,9 @@ fn sys_open_process_token(
         Some(h) => {
             unsafe { *(token_handle_ptr as *mut usize) = h; }
             crate::serial_println!("[SYSCALL] NtOpenProcessToken -> handle {:#x}", h);
-            0
+            STATUS_SUCCESS
         }
-        None => -1,
+        None => STATUS_INSUFFICIENT_RESOURCES,
     }
 }
 
@@ -10411,7 +10411,7 @@ fn sys_open_thread_token(
     _: usize, _: usize,
 ) -> isize {
     if token_handle_ptr == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let _ = open_as_self;
@@ -10421,7 +10421,7 @@ fn sys_open_thread_token(
     } else {
         match unsafe { get_thread_id(thread_handle) } {
             Some(t) => t,
-            None => return -1,
+            None => return STATUS_INVALID_HANDLE,
         }
     };
 
