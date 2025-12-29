@@ -99,6 +99,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("");
         outln!("  Hardware/Power:");
         outln!("    cpuinfo        Show CPU and ACPI information");
+        outln!("    pci [scan]     Scan PCI devices");
         outln!("    power          Show power management status");
         outln!("    shutdown       Shut down the system");
         outln!("");
@@ -4670,5 +4671,224 @@ pub fn cmd_debug(args: &[&str]) {
         outln!("  Maximum:       {}", ke::MAX_SEH_FRAMES);
     } else {
         outln!("Unknown debug command: {}", cmd);
+    }
+}
+
+// ============================================================================
+// PCI Command
+// ============================================================================
+
+/// PCI device scanner
+pub fn cmd_pci(args: &[&str]) {
+    if args.is_empty() || eq_ignore_case(args[0], "scan") {
+        scan_pci_devices();
+    } else if eq_ignore_case(args[0], "read") {
+        if args.len() < 4 {
+            outln!("Usage: pci read <bus> <device> <function>");
+            return;
+        }
+
+        let bus = args[1].parse::<u8>().unwrap_or(0);
+        let device = args[2].parse::<u8>().unwrap_or(0);
+        let function = args[3].parse::<u8>().unwrap_or(0);
+
+        read_pci_device(bus, device, function);
+    } else if eq_ignore_case(args[0], "help") {
+        outln!("PCI Configuration Space Scanner");
+        outln!("");
+        outln!("Usage: pci [command]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  scan                     Scan for PCI devices");
+        outln!("  read <bus> <dev> <func>  Read device config space");
+        outln!("  help                     Show this help");
+    } else {
+        outln!("Unknown pci command: {}", args[0]);
+    }
+}
+
+/// Read PCI config register
+fn pci_read_config(bus: u8, device: u8, function: u8, offset: u8) -> u32 {
+    let address: u32 = 0x80000000
+        | ((bus as u32) << 16)
+        | ((device as u32) << 11)
+        | ((function as u32) << 8)
+        | ((offset as u32) & 0xFC);
+
+    unsafe {
+        // Write address to 0xCF8
+        core::arch::asm!(
+            "out dx, eax",
+            in("dx") 0xCF8u16,
+            in("eax") address,
+        );
+
+        // Read data from 0xCFC
+        let data: u32;
+        core::arch::asm!(
+            "in eax, dx",
+            out("eax") data,
+            in("dx") 0xCFCu16,
+        );
+
+        data
+    }
+}
+
+/// Get PCI class name
+fn pci_class_name(class: u8, subclass: u8) -> &'static str {
+    match class {
+        0x00 => "Unclassified",
+        0x01 => match subclass {
+            0x00 => "SCSI Controller",
+            0x01 => "IDE Controller",
+            0x02 => "Floppy Controller",
+            0x05 => "ATA Controller",
+            0x06 => "SATA Controller",
+            0x08 => "NVMe Controller",
+            _ => "Mass Storage",
+        },
+        0x02 => match subclass {
+            0x00 => "Ethernet Controller",
+            0x80 => "Network Controller",
+            _ => "Network Controller",
+        },
+        0x03 => match subclass {
+            0x00 => "VGA Controller",
+            0x01 => "XGA Controller",
+            _ => "Display Controller",
+        },
+        0x04 => "Multimedia Controller",
+        0x05 => "Memory Controller",
+        0x06 => match subclass {
+            0x00 => "Host Bridge",
+            0x01 => "ISA Bridge",
+            0x04 => "PCI-to-PCI Bridge",
+            0x80 => "Bridge Device",
+            _ => "Bridge Device",
+        },
+        0x07 => "Communication Controller",
+        0x08 => "System Peripheral",
+        0x09 => "Input Device",
+        0x0A => "Docking Station",
+        0x0B => "Processor",
+        0x0C => match subclass {
+            0x03 => "USB Controller",
+            0x05 => "SMBus Controller",
+            _ => "Serial Bus Controller",
+        },
+        0x0D => "Wireless Controller",
+        0x0E => "Intelligent I/O Controller",
+        0x0F => "Satellite Controller",
+        0x10 => "Encryption Controller",
+        0x11 => "Signal Processing Controller",
+        0x12 => "Processing Accelerator",
+        0xFF => "Vendor Specific",
+        _ => "Unknown",
+    }
+}
+
+/// Scan for PCI devices
+fn scan_pci_devices() {
+    outln!("PCI Device Scan");
+    outln!("");
+    outln!("Bus Dev Func  VendorID DeviceID  Class  Description");
+    outln!("--- --- ----  -------- --------  -----  -----------");
+
+    let mut count = 0;
+
+    for bus in 0u8..=255 {
+        for device in 0u8..32 {
+            for function in 0u8..8 {
+                let vendor_device = pci_read_config(bus, device, function, 0x00);
+                let vendor_id = (vendor_device & 0xFFFF) as u16;
+
+                // 0xFFFF means no device
+                if vendor_id == 0xFFFF {
+                    if function == 0 {
+                        break; // No device at this slot
+                    }
+                    continue;
+                }
+
+                let device_id = ((vendor_device >> 16) & 0xFFFF) as u16;
+                let class_reg = pci_read_config(bus, device, function, 0x08);
+                let class = ((class_reg >> 24) & 0xFF) as u8;
+                let subclass = ((class_reg >> 16) & 0xFF) as u8;
+
+                let class_name = pci_class_name(class, subclass);
+
+                outln!("{:3} {:3}   {:1}    {:04x}     {:04x}    {:02x}:{:02x}  {}",
+                    bus, device, function, vendor_id, device_id, class, subclass, class_name);
+
+                count += 1;
+
+                // Check if multifunction device
+                if function == 0 {
+                    let header_type = pci_read_config(bus, device, function, 0x0C);
+                    if (header_type & 0x00800000) == 0 {
+                        break; // Not multifunction
+                    }
+                }
+            }
+        }
+    }
+
+    outln!("");
+    outln!("Found {} PCI device(s)", count);
+}
+
+/// Read full PCI config for a device
+fn read_pci_device(bus: u8, device: u8, function: u8) {
+    let vendor_device = pci_read_config(bus, device, function, 0x00);
+    let vendor_id = (vendor_device & 0xFFFF) as u16;
+
+    if vendor_id == 0xFFFF {
+        outln!("No device at bus {}, device {}, function {}", bus, device, function);
+        return;
+    }
+
+    let device_id = ((vendor_device >> 16) & 0xFFFF) as u16;
+    let status_cmd = pci_read_config(bus, device, function, 0x04);
+    let class_reg = pci_read_config(bus, device, function, 0x08);
+    let header = pci_read_config(bus, device, function, 0x0C);
+    let subsys = pci_read_config(bus, device, function, 0x2C);
+    let int_pin = pci_read_config(bus, device, function, 0x3C);
+
+    let class = ((class_reg >> 24) & 0xFF) as u8;
+    let subclass = ((class_reg >> 16) & 0xFF) as u8;
+    let prog_if = ((class_reg >> 8) & 0xFF) as u8;
+    let revision = (class_reg & 0xFF) as u8;
+
+    let header_type = ((header >> 16) & 0xFF) as u8;
+
+    outln!("PCI Device {:02x}:{:02x}.{}", bus, device, function);
+    outln!("");
+    outln!("  Vendor ID:      {:04x}", vendor_id);
+    outln!("  Device ID:      {:04x}", device_id);
+    outln!("  Command:        {:04x}", status_cmd & 0xFFFF);
+    outln!("  Status:         {:04x}", (status_cmd >> 16) & 0xFFFF);
+    outln!("  Class:          {:02x}:{:02x}:{:02x} ({})", class, subclass, prog_if, pci_class_name(class, subclass));
+    outln!("  Revision:       {:02x}", revision);
+    outln!("  Header Type:    {:02x}", header_type & 0x7F);
+    outln!("  Multi-Function: {}", if (header_type & 0x80) != 0 { "Yes" } else { "No" });
+    outln!("  Subsystem ID:   {:04x}:{:04x}", (subsys >> 16) & 0xFFFF, subsys & 0xFFFF);
+    outln!("  IRQ Line:       {}", int_pin & 0xFF);
+    outln!("  IRQ Pin:        {}", (int_pin >> 8) & 0xFF);
+
+    // Show BARs for standard header type
+    if (header_type & 0x7F) == 0 {
+        outln!("");
+        outln!("  Base Address Registers:");
+        for i in 0..6 {
+            let bar = pci_read_config(bus, device, function, (0x10 + i * 4) as u8);
+            if bar != 0 {
+                if (bar & 1) == 1 {
+                    outln!("    BAR{}: I/O  {:08x}", i, bar & 0xFFFFFFFC);
+                } else {
+                    outln!("    BAR{}: MEM  {:08x}", i, bar & 0xFFFFFFF0);
+                }
+            }
+        }
     }
 }

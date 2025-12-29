@@ -155,7 +155,7 @@ const COMMANDS: &[&str] = &[
     "md", "mem", "memory", "mkdir", "mm", "mv",
     "net",
     "ob",
-    "pe", "ps", "pwd",
+    "pci", "pe", "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
     "sc", "se", "services", "suspend", "sysinfo",
@@ -1093,6 +1093,9 @@ impl Shell {
         // Debug commands
         } else if eq_ignore_case(cmd, "debug") {
             commands::cmd_debug(&args[1..argc]);
+        // PCI device scanner
+        } else if eq_ignore_case(cmd, "pci") {
+            commands::cmd_pci(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
