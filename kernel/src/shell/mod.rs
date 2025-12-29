@@ -1033,6 +1033,13 @@ impl Shell {
             commands::cmd_suspend(&args[1..argc]);
         } else if eq_ignore_case(cmd, "resume") {
             commands::cmd_resume(&args[1..argc]);
+        // Hardware info commands
+        } else if eq_ignore_case(cmd, "cpuinfo") || eq_ignore_case(cmd, "sysinfo") {
+            commands::cmd_cpuinfo();
+        } else if eq_ignore_case(cmd, "power") {
+            commands::cmd_power(&args[1..argc]);
+        } else if eq_ignore_case(cmd, "shutdown") {
+            commands::cmd_shutdown();
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

@@ -244,3 +244,399 @@ pub fn start_timer(vector: u8, frequency_hz: u32) {
 pub fn get_tick_count() -> u64 {
     TICK_COUNT.load(Ordering::Relaxed)
 }
+
+// ============================================================================
+// Inter-Processor Interrupt (IPI) Support
+// ============================================================================
+
+/// IPI delivery modes
+#[repr(u32)]
+#[derive(Clone, Copy, Debug)]
+pub enum IpiDeliveryMode {
+    /// Fixed - deliver interrupt to all processors in destination
+    Fixed = 0b000,
+    /// Lowest Priority - deliver to lowest-priority processor
+    LowestPriority = 0b001,
+    /// SMI - System Management Interrupt
+    Smi = 0b010,
+    /// NMI - Non-Maskable Interrupt
+    Nmi = 0b100,
+    /// INIT - Initialization (used for starting APs)
+    Init = 0b101,
+    /// Startup - Startup IPI (SIPI, used for starting APs)
+    Startup = 0b110,
+}
+
+/// IPI destination shorthand
+#[repr(u32)]
+#[derive(Clone, Copy, Debug)]
+pub enum IpiDestination {
+    /// No shorthand - use destination field
+    NoShorthand = 0b00,
+    /// Send to self only
+    ToSelf = 0b01,
+    /// Send to all including self
+    AllIncludingSelf = 0b10,
+    /// Send to all excluding self
+    AllExcludingSelf = 0b11,
+}
+
+impl LocalApic {
+    /// Send an Inter-Processor Interrupt
+    ///
+    /// # Arguments
+    /// * `dest_apic_id` - Destination APIC ID (ignored for broadcast)
+    /// * `vector` - Interrupt vector
+    /// * `delivery_mode` - Delivery mode
+    /// * `dest_shorthand` - Destination shorthand
+    pub fn send_ipi(
+        &self,
+        dest_apic_id: u8,
+        vector: u8,
+        delivery_mode: IpiDeliveryMode,
+        dest_shorthand: IpiDestination,
+    ) {
+        // Build ICR value
+        // Bits: 0-7 vector, 8-10 delivery mode, 11 dest mode (0=physical),
+        //       12 delivery status (read-only), 13 reserved,
+        //       14 level (1=assert), 15 trigger mode (0=edge),
+        //       16-17 reserved, 18-19 dest shorthand
+        let icr_low: u32 = (vector as u32)
+            | ((delivery_mode as u32) << 8)
+            | (1 << 14) // Assert
+            | ((dest_shorthand as u32) << 18);
+
+        let icr_high: u32 = (dest_apic_id as u32) << 24;
+
+        // Write ICR (high then low, as writing low triggers the IPI)
+        self.write(reg::ICR_HIGH, icr_high);
+        self.write(reg::ICR_LOW, icr_low);
+
+        // Wait for delivery (poll delivery status bit)
+        while (self.read(reg::ICR_LOW) & (1 << 12)) != 0 {
+            core::hint::spin_loop();
+        }
+    }
+
+    /// Send INIT IPI to a processor
+    ///
+    /// This is the first step in starting an Application Processor (AP).
+    pub fn send_init_ipi(&self, dest_apic_id: u8) {
+        // Send INIT with level assert
+        let icr_low: u32 = (IpiDeliveryMode::Init as u32) << 8
+            | (1 << 14)  // Level: Assert
+            | (0 << 15); // Trigger: Edge
+
+        let icr_high: u32 = (dest_apic_id as u32) << 24;
+
+        self.write(reg::ICR_HIGH, icr_high);
+        self.write(reg::ICR_LOW, icr_low);
+
+        // Wait for delivery
+        while (self.read(reg::ICR_LOW) & (1 << 12)) != 0 {
+            core::hint::spin_loop();
+        }
+    }
+
+    /// Send INIT IPI de-assert (level-triggered)
+    pub fn send_init_ipi_deassert(&self) {
+        // INIT de-assert is broadcast to all processors
+        let icr_low: u32 = (IpiDeliveryMode::Init as u32) << 8
+            | (0 << 14)  // Level: De-assert
+            | (1 << 15)  // Trigger: Level
+            | (IpiDestination::AllIncludingSelf as u32) << 18;
+
+        self.write(reg::ICR_LOW, icr_low);
+
+        // Wait for delivery
+        while (self.read(reg::ICR_LOW) & (1 << 12)) != 0 {
+            core::hint::spin_loop();
+        }
+    }
+
+    /// Send Startup IPI (SIPI) to a processor
+    ///
+    /// # Arguments
+    /// * `dest_apic_id` - Target APIC ID
+    /// * `vector` - Startup vector (physical address >> 12, must be < 0x100)
+    ///              The AP will start executing at physical address vector * 0x1000
+    pub fn send_startup_ipi(&self, dest_apic_id: u8, vector: u8) {
+        let icr_low: u32 = (vector as u32)
+            | ((IpiDeliveryMode::Startup as u32) << 8)
+            | (1 << 14); // Assert
+
+        let icr_high: u32 = (dest_apic_id as u32) << 24;
+
+        self.write(reg::ICR_HIGH, icr_high);
+        self.write(reg::ICR_LOW, icr_low);
+
+        // Wait for delivery
+        while (self.read(reg::ICR_LOW) & (1 << 12)) != 0 {
+            core::hint::spin_loop();
+        }
+    }
+
+    /// Send a fixed IPI to another processor
+    pub fn send_fixed_ipi(&self, dest_apic_id: u8, vector: u8) {
+        self.send_ipi(dest_apic_id, vector, IpiDeliveryMode::Fixed, IpiDestination::NoShorthand);
+    }
+
+    /// Send an NMI to another processor
+    pub fn send_nmi(&self, dest_apic_id: u8) {
+        self.send_ipi(dest_apic_id, 0, IpiDeliveryMode::Nmi, IpiDestination::NoShorthand);
+    }
+
+    /// Broadcast an IPI to all processors (excluding self)
+    pub fn broadcast_ipi(&self, vector: u8) {
+        self.send_ipi(0, vector, IpiDeliveryMode::Fixed, IpiDestination::AllExcludingSelf);
+    }
+
+    /// Broadcast an IPI to all processors (including self)
+    pub fn broadcast_ipi_all(&self, vector: u8) {
+        self.send_ipi(0, vector, IpiDeliveryMode::Fixed, IpiDestination::AllIncludingSelf);
+    }
+}
+
+/// Send an IPI to a specific processor (convenience function)
+pub fn send_ipi(dest_apic_id: u8, vector: u8) {
+    get().send_fixed_ipi(dest_apic_id, vector);
+}
+
+/// Broadcast an IPI to all processors except self (convenience function)
+pub fn broadcast_ipi(vector: u8) {
+    get().broadcast_ipi(vector);
+}
+
+// ============================================================================
+// I/O APIC Support
+// ============================================================================
+
+/// I/O APIC register select offset
+const IOAPIC_REGSEL: u32 = 0x00;
+/// I/O APIC data window offset
+const IOAPIC_WINDOW: u32 = 0x10;
+
+/// I/O APIC register indices
+mod ioapic_reg {
+    pub const ID: u32 = 0x00;
+    pub const VERSION: u32 = 0x01;
+    pub const ARBITRATION: u32 = 0x02;
+    pub const REDIRECTION_TABLE_BASE: u32 = 0x10;
+}
+
+/// I/O APIC redirection entry
+#[derive(Clone, Copy, Debug)]
+pub struct IoApicRedirectionEntry {
+    /// Interrupt vector
+    pub vector: u8,
+    /// Delivery mode (000 = fixed, 001 = lowest, 010 = SMI, 100 = NMI, 101 = INIT, 111 = ExtINT)
+    pub delivery_mode: u8,
+    /// Destination mode (0 = physical, 1 = logical)
+    pub dest_mode: bool,
+    /// Delivery status (read-only, 0 = idle, 1 = pending)
+    pub delivery_status: bool,
+    /// Pin polarity (0 = active high, 1 = active low)
+    pub polarity: bool,
+    /// Remote IRR (read-only for level-triggered)
+    pub remote_irr: bool,
+    /// Trigger mode (0 = edge, 1 = level)
+    pub trigger_mode: bool,
+    /// Mask (0 = enabled, 1 = masked)
+    pub masked: bool,
+    /// Destination (APIC ID or logical destination)
+    pub destination: u8,
+}
+
+impl IoApicRedirectionEntry {
+    /// Create a default (masked) entry
+    pub fn masked() -> Self {
+        Self {
+            vector: 0,
+            delivery_mode: 0,
+            dest_mode: false,
+            delivery_status: false,
+            polarity: false,
+            remote_irr: false,
+            trigger_mode: false,
+            masked: true,
+            destination: 0,
+        }
+    }
+
+    /// Create an entry for an ISA interrupt
+    pub fn for_isa(vector: u8, dest_apic_id: u8) -> Self {
+        Self {
+            vector,
+            delivery_mode: 0, // Fixed
+            dest_mode: false, // Physical
+            delivery_status: false,
+            polarity: false,  // Active high (ISA default)
+            remote_irr: false,
+            trigger_mode: false, // Edge triggered (ISA default)
+            masked: false,
+            destination: dest_apic_id,
+        }
+    }
+
+    /// Convert to raw 64-bit value
+    pub fn to_raw(&self) -> u64 {
+        let mut value: u64 = self.vector as u64;
+        value |= (self.delivery_mode as u64 & 0x7) << 8;
+        if self.dest_mode { value |= 1 << 11; }
+        if self.polarity { value |= 1 << 13; }
+        if self.trigger_mode { value |= 1 << 15; }
+        if self.masked { value |= 1 << 16; }
+        value |= (self.destination as u64) << 56;
+        value
+    }
+
+    /// Create from raw 64-bit value
+    pub fn from_raw(value: u64) -> Self {
+        Self {
+            vector: (value & 0xFF) as u8,
+            delivery_mode: ((value >> 8) & 0x7) as u8,
+            dest_mode: (value & (1 << 11)) != 0,
+            delivery_status: (value & (1 << 12)) != 0,
+            polarity: (value & (1 << 13)) != 0,
+            remote_irr: (value & (1 << 14)) != 0,
+            trigger_mode: (value & (1 << 15)) != 0,
+            masked: (value & (1 << 16)) != 0,
+            destination: ((value >> 56) & 0xFF) as u8,
+        }
+    }
+}
+
+/// I/O APIC interface
+pub struct IoApic {
+    base_addr: u64,
+}
+
+impl IoApic {
+    /// Create a new I/O APIC instance
+    pub fn new(base_addr: u64) -> Self {
+        Self { base_addr }
+    }
+
+    /// Read an I/O APIC register
+    fn read(&self, reg: u32) -> u32 {
+        unsafe {
+            // Write register select
+            write_volatile((self.base_addr + IOAPIC_REGSEL as u64) as *mut u32, reg);
+            // Read data
+            read_volatile((self.base_addr + IOAPIC_WINDOW as u64) as *const u32)
+        }
+    }
+
+    /// Write to an I/O APIC register
+    fn write(&self, reg: u32, value: u32) {
+        unsafe {
+            // Write register select
+            write_volatile((self.base_addr + IOAPIC_REGSEL as u64) as *mut u32, reg);
+            // Write data
+            write_volatile((self.base_addr + IOAPIC_WINDOW as u64) as *mut u32, value);
+        }
+    }
+
+    /// Get the I/O APIC ID
+    pub fn id(&self) -> u8 {
+        ((self.read(ioapic_reg::ID) >> 24) & 0xF) as u8
+    }
+
+    /// Get the I/O APIC version and max redirection entries
+    pub fn version(&self) -> (u8, u8) {
+        let ver = self.read(ioapic_reg::VERSION);
+        ((ver & 0xFF) as u8, ((ver >> 16) & 0xFF) as u8 + 1)
+    }
+
+    /// Read a redirection entry
+    pub fn read_redirection(&self, irq: u8) -> IoApicRedirectionEntry {
+        let reg_base = ioapic_reg::REDIRECTION_TABLE_BASE + (irq as u32 * 2);
+        let low = self.read(reg_base) as u64;
+        let high = self.read(reg_base + 1) as u64;
+        IoApicRedirectionEntry::from_raw(low | (high << 32))
+    }
+
+    /// Write a redirection entry
+    pub fn write_redirection(&self, irq: u8, entry: IoApicRedirectionEntry) {
+        let reg_base = ioapic_reg::REDIRECTION_TABLE_BASE + (irq as u32 * 2);
+        let raw = entry.to_raw();
+        // Write high first (contains destination which doesn't trigger routing change)
+        self.write(reg_base + 1, (raw >> 32) as u32);
+        self.write(reg_base, raw as u32);
+    }
+
+    /// Mask (disable) an IRQ
+    pub fn mask(&self, irq: u8) {
+        let mut entry = self.read_redirection(irq);
+        entry.masked = true;
+        self.write_redirection(irq, entry);
+    }
+
+    /// Unmask (enable) an IRQ
+    pub fn unmask(&self, irq: u8) {
+        let mut entry = self.read_redirection(irq);
+        entry.masked = false;
+        self.write_redirection(irq, entry);
+    }
+
+    /// Initialize I/O APIC - mask all interrupts
+    pub fn init(&self) {
+        let (_, max_entries) = self.version();
+        for i in 0..max_entries {
+            self.write_redirection(i, IoApicRedirectionEntry::masked());
+        }
+    }
+}
+
+// ============================================================================
+// MP Startup Support
+// ============================================================================
+
+/// IPI vectors for kernel use
+pub mod ipi_vector {
+    /// Reschedule IPI - triggers scheduler on target CPU
+    pub const RESCHEDULE: u8 = 0xFD;
+    /// TLB shootdown IPI - invalidate TLB on target CPU
+    pub const TLB_SHOOTDOWN: u8 = 0xFE;
+    /// Stop IPI - halt target CPU
+    pub const STOP: u8 = 0xFF;
+}
+
+/// Start an Application Processor using INIT-SIPI-SIPI sequence
+///
+/// # Arguments
+/// * `apic_id` - The APIC ID of the processor to start
+/// * `startup_vector` - The physical page number where AP startup code resides
+///                      (physical address = startup_vector * 0x1000)
+///
+/// # Safety
+/// The startup code must be properly set up at the specified address before
+/// calling this function.
+pub unsafe fn start_ap(apic_id: u8, startup_vector: u8) {
+    let apic = get();
+
+    // Send INIT IPI
+    apic.send_init_ipi(apic_id);
+
+    // Wait 10ms (INIT-SIPI delay as per Intel spec)
+    // For now, use a simple delay loop
+    for _ in 0..10_000 {
+        core::hint::spin_loop();
+    }
+
+    // Send first SIPI
+    apic.send_startup_ipi(apic_id, startup_vector);
+
+    // Wait 200μs
+    for _ in 0..1_000 {
+        core::hint::spin_loop();
+    }
+
+    // Send second SIPI (some processors need this)
+    apic.send_startup_ipi(apic_id, startup_vector);
+}
+
+/// Get the current processor's APIC ID
+pub fn current_apic_id() -> u8 {
+    get().id()
+}

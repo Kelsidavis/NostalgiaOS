@@ -96,6 +96,11 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    history        Show command history");
         outln!("    reboot         Restart the system");
         outln!("");
+        outln!("  Hardware/Power:");
+        outln!("    cpuinfo        Show CPU and ACPI information");
+        outln!("    power          Show power management status");
+        outln!("    shutdown       Shut down the system");
+        outln!("");
         outln!("  Use UP/DOWN arrows to navigate command history.");
     } else {
         let topic = args[0];
@@ -1182,3 +1187,119 @@ pub fn resolve_path(path: &str) -> &'static str {
         core::str::from_utf8_unchecked(&buf[..path_len])
     }
 }
+
+/// Display CPU and system information (ACPI data)
+pub fn cmd_cpuinfo() {
+    outln!("System Information:");
+    outln!("");
+
+    // ACPI information
+    if crate::hal::acpi::is_initialized() {
+        outln!("ACPI:");
+        outln!("  Revision: {}", if crate::hal::acpi::get_revision() >= 2 { "2.0+" } else { "1.0" });
+        outln!("  Processor Count: {}", crate::hal::acpi::get_processor_count());
+        outln!("  I/O APIC Count: {}", crate::hal::acpi::get_io_apic_count());
+        outln!("  Local APIC Address: {:#x}", crate::hal::acpi::get_local_apic_address());
+        outln!("  Legacy PIC Present: {}", crate::hal::acpi::has_legacy_pics());
+        outln!("");
+
+        // Show processor information
+        outln!("Processors:");
+        for i in 0..crate::hal::acpi::get_processor_count() {
+            if let Some(cpu) = crate::hal::acpi::get_processor(i) {
+                outln!("  CPU {}: APIC ID={}, ACPI ID={}, Enabled={}, BSP={}",
+                    i, cpu.apic_id, cpu.acpi_id, cpu.enabled, cpu.is_bsp);
+            }
+        }
+        outln!("");
+
+        // Show I/O APIC information
+        outln!("I/O APICs:");
+        for i in 0..crate::hal::acpi::get_io_apic_count() {
+            if let Some(ioapic) = crate::hal::acpi::get_io_apic(i) {
+                outln!("  I/O APIC {}: ID={}, Address={:#x}, GSI Base={}",
+                    i, ioapic.id, ioapic.address, ioapic.gsi_base);
+            }
+        }
+    } else {
+        outln!("ACPI: Not available");
+    }
+
+    outln!("");
+
+    // Local APIC information
+    let apic = crate::hal::apic::get();
+    outln!("Local APIC:");
+    outln!("  ID: {}", apic.id());
+    outln!("  Base Address: {:#x}", apic.base_address());
+    outln!("  Version: {:#x}", apic.version());
+}
+
+/// Power management command
+pub fn cmd_power(args: &[&str]) {
+    if args.is_empty() {
+        // Show power status
+        outln!("Power Management Status:");
+        outln!("");
+
+        // Power manager state
+        if crate::po::is_initialized() {
+            let state = crate::po::get_system_power_state();
+            outln!("  System Power State: {:?}", state);
+            outln!("  AC Power: {}", crate::po::is_ac_power());
+            outln!("  Battery Power: {}", crate::po::is_battery_power());
+            outln!("  Action in Progress: {}", crate::po::is_action_in_progress());
+            outln!("  Processor Throttle: {}%", crate::po::get_processor_throttle());
+            outln!("");
+
+            // Capabilities
+            let caps = crate::po::get_capabilities();
+            outln!("  Power Capabilities:");
+            outln!("    Power Button: {}", caps.power_button_present);
+            outln!("    Sleep Button: {}", caps.sleep_button_present);
+            outln!("    S1 (Standby): {}", caps.system_s1);
+            outln!("    S3 (Sleep): {}", caps.system_s3);
+            outln!("    S4 (Hibernate): {}", caps.system_s4);
+            outln!("    S5 (Soft Off): {}", caps.system_s5);
+        } else {
+            outln!("  Power manager not initialized");
+        }
+
+        outln!("");
+        outln!("Usage:");
+        outln!("  power              - Show power status");
+        outln!("  power throttle N   - Set CPU throttle to N%");
+    } else if eq_ignore_case(args[0], "throttle") {
+        if args.len() < 2 {
+            outln!("Usage: power throttle <0-100>");
+            return;
+        }
+        if let Some(level) = parse_number(args[1]) {
+            let level = level.min(100) as u8;
+            crate::po::set_processor_throttle(level);
+            outln!("Processor throttle set to {}%", level);
+        } else {
+            outln!("Invalid throttle value");
+        }
+    } else {
+        outln!("Unknown power command: {}", args[0]);
+    }
+}
+
+/// Shutdown the system
+pub fn cmd_shutdown() {
+    outln!("Initiating system shutdown...");
+    match crate::po::shutdown() {
+        Ok(()) => {
+            outln!("Shutdown in progress...");
+            // Halt all processing
+            loop {
+                crate::arch::halt();
+            }
+        }
+        Err(e) => {
+            outln!("Shutdown failed: error {}", e);
+        }
+    }
+}
+

@@ -73,6 +73,7 @@ pub mod ke;
 pub mod lpc;
 pub mod mm;
 pub mod ob;
+pub mod po;
 pub mod ps;
 pub mod rtl;
 pub mod se;
@@ -307,6 +308,24 @@ fn phase1_init(boot_info: &BootInfo) {
         mm::init(boot_info);
     }
     kprintln!("  Memory manager initialized");
+
+    // Initialize ACPI (hardware discovery)
+    kprintln!("  Initializing ACPI...");
+    unsafe {
+        hal::acpi::init(boot_info.rsdp_addr);
+    }
+    if hal::acpi::is_initialized() {
+        kprintln!("  ACPI initialized: {} CPU(s), {} I/O APIC(s)",
+            hal::acpi::get_processor_count(),
+            hal::acpi::get_io_apic_count());
+    } else {
+        kprintln!("  ACPI not available");
+    }
+
+    // Initialize power manager
+    kprintln!("  Initializing power manager...");
+    po::init();
+    kprintln!("  Power manager initialized");
 
     // Initialize object manager
     kprintln!("  Initializing object manager...");

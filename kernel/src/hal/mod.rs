@@ -27,13 +27,13 @@
 //! - I/O APIC: External interrupt routing
 
 // Submodules
+pub mod acpi;
 pub mod apic;
 pub mod ata;
 pub mod keyboard;
 pub mod pic;
 
 // TODO: Future submodules
-// pub mod acpi;
 // pub mod interrupt;
 // pub mod platform;
 // pub mod timer;
