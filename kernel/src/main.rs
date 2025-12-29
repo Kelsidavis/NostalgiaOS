@@ -65,6 +65,7 @@
 pub mod arch;
 pub mod cc;
 pub mod cm;
+pub mod dbgk;
 pub mod ex;
 pub mod fs;
 pub mod fsrtl;
@@ -393,6 +394,11 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing LPC subsystem...");
     lpc::init();
     kprintln!("  LPC subsystem initialized");
+
+    // Initialize DBGK (Debugger Support)
+    kprintln!("  Initializing debugger support...");
+    dbgk::dbgk_initialize();
+    kprintln!("  Debugger support initialized");
 
     // Test file system by reading C:\TEST.TXT
     test_file_read();
