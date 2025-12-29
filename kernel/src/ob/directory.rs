@@ -452,3 +452,133 @@ pub unsafe fn ob_lookup_object(path: &[u8]) -> *mut u8 {
         ptr::null_mut()
     }
 }
+
+// ============================================================================
+// Directory Inspection (for debugging)
+// ============================================================================
+
+/// Snapshot of a directory entry for debugging
+#[derive(Debug, Clone, Copy)]
+pub struct DirectoryEntrySnapshot {
+    /// Object address
+    pub object_address: u64,
+    /// Object name
+    pub name: [u8; 64],
+    /// Name length
+    pub name_length: u8,
+    /// Object type name
+    pub type_name: [u8; 32],
+    /// Type name length
+    pub type_name_length: u8,
+    /// Reference count
+    pub ref_count: i32,
+    /// Is a directory
+    pub is_directory: bool,
+}
+
+/// Directory statistics
+#[derive(Debug, Clone, Copy)]
+pub struct DirectoryStats {
+    /// Number of directories in the namespace
+    pub directory_count: u32,
+    /// Total entries in root directory
+    pub root_entry_count: u32,
+    /// Total entries in ObjectTypes
+    pub object_types_count: u32,
+    /// Total entries in BaseNamedObjects
+    pub base_named_count: u32,
+    /// Total entries in Device
+    pub device_count: u32,
+}
+
+/// Get directory statistics
+pub fn ob_get_directory_stats() -> DirectoryStats {
+    unsafe {
+        DirectoryStats {
+            directory_count: 4, // Root, ObjectTypes, BaseNamedObjects, Device
+            root_entry_count: ROOT_DIRECTORY.count(),
+            object_types_count: OBJECT_TYPES_DIRECTORY.count(),
+            base_named_count: BASE_NAMED_OBJECTS.count(),
+            device_count: DEVICE_DIRECTORY.count(),
+        }
+    }
+}
+
+/// Get entries from a directory
+pub fn ob_get_directory_entries(dir_index: u8, max_count: usize) -> ([DirectoryEntrySnapshot; 32], usize) {
+    let mut snapshots = [DirectoryEntrySnapshot {
+        object_address: 0,
+        name: [0; 64],
+        name_length: 0,
+        type_name: [0; 32],
+        type_name_length: 0,
+        ref_count: 0,
+        is_directory: false,
+    }; 32];
+
+    let max_count = max_count.min(32);
+    let mut count = 0;
+
+    unsafe {
+        let dir = match dir_index {
+            0 => &ROOT_DIRECTORY,
+            1 => &OBJECT_TYPES_DIRECTORY,
+            2 => &BASE_NAMED_OBJECTS,
+            3 => &DEVICE_DIRECTORY,
+            _ => return (snapshots, 0),
+        };
+
+        for obj_ptr in dir.iter() {
+            if count >= max_count {
+                break;
+            }
+
+            let header = super::header::ObjectHeader::from_body(obj_ptr);
+
+            // Get name
+            let mut name = [0u8; 64];
+            let mut name_len = 0u8;
+            if let Some(obj_name) = (*header).get_name() {
+                let len = obj_name.len().min(63);
+                name[..len].copy_from_slice(&obj_name[..len]);
+                name_len = len as u8;
+            }
+
+            // Get type name
+            let mut type_name = [0u8; 32];
+            let mut type_name_len = 0u8;
+            let mut is_directory = false;
+            if let Some(obj_type) = (*header).get_type() {
+                let len = (obj_type.name_length as usize).min(31);
+                type_name[..len].copy_from_slice(&obj_type.name[..len]);
+                type_name_len = len as u8;
+                is_directory = obj_type.type_index == type_index::TYPE_DIRECTORY;
+            }
+
+            snapshots[count] = DirectoryEntrySnapshot {
+                object_address: obj_ptr as u64,
+                name,
+                name_length: name_len,
+                type_name,
+                type_name_length: type_name_len,
+                ref_count: (*header).pointer_count(),
+                is_directory,
+            };
+
+            count += 1;
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get directory name by index
+pub fn ob_get_directory_name(dir_index: u8) -> &'static str {
+    match dir_index {
+        0 => "\\",
+        1 => "\\ObjectTypes",
+        2 => "\\BaseNamedObjects",
+        3 => "\\Device",
+        _ => "Unknown",
+    }
+}

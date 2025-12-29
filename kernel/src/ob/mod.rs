@@ -41,6 +41,7 @@ pub use object_type::{
     ObjectType, ObjectTypeCallbacks, ObjectTypeInfo,
     type_index, OB_MAX_TYPE_NAME, MAX_OBJECT_TYPES,
     get_object_type, init_object_types, create_object_type,
+    ObjectTypeSnapshot, ObjectTypeStats, ob_get_type_stats, ob_get_type_snapshots,
 };
 pub use handle::{
     Handle, HandleTable, HandleTableEntry, handle_attributes,
@@ -53,6 +54,8 @@ pub use directory::{
     get_root_directory, get_object_types_directory,
     get_base_named_objects, get_device_directory,
     init_namespace, ob_lookup_object,
+    DirectoryEntrySnapshot, DirectoryStats, ob_get_directory_stats,
+    ob_get_directory_entries, ob_get_directory_name,
 };
 
 /// Initialize the Object Manager

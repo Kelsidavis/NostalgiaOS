@@ -156,7 +156,7 @@ const COMMANDS: &[&str] = &[
     "ldr", "ls",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net",
-    "ob",
+    "ob", "obdir",
     "pagetable", "pci", "pe", "pfn", "pool", "port", "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
@@ -1155,6 +1155,9 @@ impl Shell {
         // DPC queue viewer
         } else if eq_ignore_case(cmd, "dpcq") {
             commands::cmd_dpcq(&args[1..argc]);
+        // Object Manager directory viewer
+        } else if eq_ignore_case(cmd, "obdir") {
+            commands::cmd_obdir(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

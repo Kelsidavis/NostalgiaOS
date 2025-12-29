@@ -529,3 +529,102 @@ pub unsafe fn get_object_type_mut(type_index: u8) -> Option<&'static mut ObjectT
         Some(obj_type)
     }
 }
+
+// ============================================================================
+// Object Type Inspection (for debugging)
+// ============================================================================
+
+/// Snapshot of an object type for debugging
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectTypeSnapshot {
+    /// Type index
+    pub type_index: u8,
+    /// Type name (as bytes)
+    pub name: [u8; 32],
+    /// Name length
+    pub name_length: u8,
+    /// Object count
+    pub object_count: u32,
+    /// Handle count
+    pub handle_count: u32,
+    /// Object body size
+    pub body_size: u32,
+    /// Pool type (0 = nonpaged, 1 = paged)
+    pub pool_type: u8,
+    /// Allows naming
+    pub allow_naming: bool,
+}
+
+/// Object type statistics
+#[derive(Debug, Clone, Copy)]
+pub struct ObjectTypeStats {
+    /// Number of registered object types
+    pub type_count: usize,
+    /// Total objects across all types
+    pub total_objects: u32,
+    /// Total handles across all types
+    pub total_handles: u32,
+}
+
+/// Get object type statistics
+pub fn ob_get_type_stats() -> ObjectTypeStats {
+    let mut type_count = 0;
+    let mut total_objects = 0u32;
+    let mut total_handles = 0u32;
+
+    for i in 1..MAX_OBJECT_TYPES {
+        if let Some(obj_type) = get_object_type(i as u8) {
+            type_count += 1;
+            total_objects += obj_type.get_object_count();
+            total_handles += obj_type.get_handle_count();
+        }
+    }
+
+    ObjectTypeStats {
+        type_count,
+        total_objects,
+        total_handles,
+    }
+}
+
+/// Get snapshots of all object types
+pub fn ob_get_type_snapshots() -> ([ObjectTypeSnapshot; 32], usize) {
+    let mut snapshots = [ObjectTypeSnapshot {
+        type_index: 0,
+        name: [0; 32],
+        name_length: 0,
+        object_count: 0,
+        handle_count: 0,
+        body_size: 0,
+        pool_type: 0,
+        allow_naming: false,
+    }; 32];
+
+    let mut count = 0;
+
+    for i in 1..MAX_OBJECT_TYPES {
+        if let Some(obj_type) = get_object_type(i as u8) {
+            let name_len = (obj_type.name_length as usize).min(31);
+            let mut name = [0u8; 32];
+            name[..name_len].copy_from_slice(&obj_type.name[..name_len]);
+
+            snapshots[count] = ObjectTypeSnapshot {
+                type_index: obj_type.type_index,
+                name,
+                name_length: name_len as u8,
+                object_count: obj_type.get_object_count(),
+                handle_count: obj_type.get_handle_count(),
+                body_size: obj_type.type_info.object_body_size,
+                pool_type: obj_type.type_info.pool_type,
+                allow_naming: obj_type.type_info.allow_naming,
+            };
+
+            count += 1;
+            if count >= 32 {
+                break;
+            }
+        }
+    }
+
+    (snapshots, count)
+}

@@ -129,6 +129,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    pfn            PFN database viewer (stats, entry, range)");
         outln!("    timerq         Kernel timer queue viewer (stats, list)");
         outln!("    dpcq           DPC queue viewer (stats, list, pending)");
+        outln!("    obdir          Object Manager namespace viewer (types, tree)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -10799,5 +10800,190 @@ fn show_dpc_pending() {
         outln!("");
         outln!("WARNING: DPCs are pending and should be processed");
         outln!("         at the next timer interrupt or software interrupt");
+    }
+}
+
+// ============================================================================
+// Object Manager Viewer Command
+// ============================================================================
+
+/// Object Manager viewer command
+pub fn cmd_obdir(args: &[&str]) {
+    let subcmd = if args.is_empty() { "stats" } else { args[0] };
+
+    if eq_ignore_case(subcmd, "help") || eq_ignore_case(subcmd, "?") {
+        outln!("OBDIR - Object Manager Directory Viewer");
+        outln!("");
+        outln!("Commands:");
+        outln!("  obdir              Show namespace statistics (default)");
+        outln!("  obdir stats        Show namespace statistics");
+        outln!("  obdir types        List registered object types");
+        outln!("  obdir dir [path]   List directory contents");
+        outln!("                     0 = \\ (root)");
+        outln!("                     1 = \\ObjectTypes");
+        outln!("                     2 = \\BaseNamedObjects");
+        outln!("                     3 = \\Device");
+        outln!("  obdir tree         Show namespace tree");
+        outln!("  obdir help         Show this help");
+        return;
+    }
+
+    if eq_ignore_case(subcmd, "stats") {
+        show_ob_stats();
+    } else if eq_ignore_case(subcmd, "types") {
+        show_ob_types();
+    } else if eq_ignore_case(subcmd, "dir") {
+        let dir_idx = if args.len() > 1 {
+            // Simple single-digit parsing for directory index (0-3)
+            let s = args[1].trim();
+            if s.len() == 1 {
+                match s.as_bytes()[0] {
+                    b'0' => 0,
+                    b'1' => 1,
+                    b'2' => 2,
+                    b'3' => 3,
+                    _ => 0,
+                }
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+        show_ob_directory(dir_idx);
+    } else if eq_ignore_case(subcmd, "tree") {
+        show_ob_tree();
+    } else {
+        outln!("Unknown obdir command: {}", subcmd);
+        outln!("Use 'obdir help' for usage");
+    }
+}
+
+fn show_ob_stats() {
+    use crate::ob::{ob_get_type_stats, ob_get_directory_stats};
+
+    outln!("Object Manager Statistics");
+    outln!("=========================");
+    outln!("");
+
+    let type_stats = ob_get_type_stats();
+    outln!("Object Types:");
+    outln!("  Registered Types: {}", type_stats.type_count);
+    outln!("  Total Objects:    {}", type_stats.total_objects);
+    outln!("  Total Handles:    {}", type_stats.total_handles);
+
+    outln!("");
+    let dir_stats = ob_get_directory_stats();
+    outln!("Namespace Directories:");
+    outln!("  \\                   {} entries", dir_stats.root_entry_count);
+    outln!("  \\ObjectTypes        {} entries", dir_stats.object_types_count);
+    outln!("  \\BaseNamedObjects   {} entries", dir_stats.base_named_count);
+    outln!("  \\Device             {} entries", dir_stats.device_count);
+
+    outln!("");
+    outln!("Total namespace directories: {}", dir_stats.directory_count);
+}
+
+fn show_ob_types() {
+    use crate::ob::ob_get_type_snapshots;
+
+    outln!("Registered Object Types");
+    outln!("=======================");
+    outln!("");
+
+    let (types, count) = ob_get_type_snapshots();
+
+    outln!("{:<5} {:<16} {:<8} {:<8} {:<8} {:<6}",
+        "Idx", "Name", "Objects", "Handles", "Size", "Pool");
+    outln!("--------------------------------------------------------------");
+
+    for i in 0..count {
+        let t = &types[i];
+        let name = core::str::from_utf8(&t.name[..t.name_length as usize]).unwrap_or("?");
+        let pool = if t.pool_type == 0 { "NP" } else { "P" };
+
+        outln!("{:<5} {:<16} {:>8} {:>8} {:>8} {:>6}",
+            t.type_index, name, t.object_count, t.handle_count, t.body_size, pool);
+    }
+
+    outln!("");
+    outln!("Pool: NP = NonPaged, P = Paged");
+}
+
+fn show_ob_directory(dir_index: u8) {
+    use crate::ob::{ob_get_directory_entries, ob_get_directory_name};
+
+    let dir_name = ob_get_directory_name(dir_index);
+    outln!("Directory: {}", dir_name);
+    outln!("=================================");
+    outln!("");
+
+    let (entries, count) = ob_get_directory_entries(dir_index, 32);
+
+    if count == 0 {
+        outln!("(empty)");
+        return;
+    }
+
+    outln!("{:<20} {:<16} {:<18} {:<6}",
+        "Name", "Type", "Address", "Refs");
+    outln!("--------------------------------------------------------------");
+
+    for i in 0..count {
+        let e = &entries[i];
+        let name = core::str::from_utf8(&e.name[..e.name_length as usize]).unwrap_or("?");
+        let type_name = core::str::from_utf8(&e.type_name[..e.type_name_length as usize]).unwrap_or("?");
+
+        outln!("{:<20} {:<16} {:#018x} {:>5}",
+            name, type_name, e.object_address, e.ref_count);
+    }
+
+    outln!("");
+    outln!("Total: {} entries", count);
+}
+
+fn show_ob_tree() {
+    use crate::ob::{ob_get_directory_entries, ob_get_directory_name};
+
+    outln!("Object Namespace Tree");
+    outln!("=====================");
+    outln!("");
+
+    // Root directory
+    outln!("\\");
+    let (root_entries, root_count) = ob_get_directory_entries(0, 32);
+    for i in 0..root_count {
+        let e = &root_entries[i];
+        let name = core::str::from_utf8(&e.name[..e.name_length as usize]).unwrap_or("?");
+        let type_name = core::str::from_utf8(&e.type_name[..e.type_name_length as usize]).unwrap_or("?");
+
+        if e.is_directory {
+            outln!("+-- {} <{}>", name, type_name);
+
+            // Show children for known directories
+            let child_idx = match name {
+                "ObjectTypes" => Some(1u8),
+                "BaseNamedObjects" => Some(2u8),
+                "Device" => Some(3u8),
+                _ => None,
+            };
+
+            if let Some(idx) = child_idx {
+                let (child_entries, child_count) = ob_get_directory_entries(idx, 16);
+                for j in 0..child_count {
+                    let ce = &child_entries[j];
+                    let child_name = core::str::from_utf8(&ce.name[..ce.name_length as usize]).unwrap_or("?");
+                    let child_type = core::str::from_utf8(&ce.type_name[..ce.type_name_length as usize]).unwrap_or("?");
+
+                    if j + 1 < child_count {
+                        outln!("|   +-- {} <{}>", child_name, child_type);
+                    } else {
+                        outln!("    +-- {} <{}>", child_name, child_type);
+                    }
+                }
+            }
+        } else {
+            outln!("+-- {} <{}>", name, type_name);
+        }
     }
 }
