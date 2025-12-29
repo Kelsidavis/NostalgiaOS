@@ -412,3 +412,158 @@ pub fn ki_get_next_timer_delta() -> Option<u64> {
         }
     }
 }
+
+// ============================================================================
+// Timer Queue Inspection (for debugging)
+// ============================================================================
+
+/// Snapshot of a timer for debugging
+#[derive(Debug, Clone, Copy)]
+pub struct TimerSnapshot {
+    /// Timer address (for identification)
+    pub address: u64,
+    /// Due time (absolute tick count)
+    pub due_time: u64,
+    /// Period (0 = one-shot)
+    pub period: u32,
+    /// Timer type
+    pub timer_type: TimerType,
+    /// Whether timer is signaled
+    pub signaled: bool,
+    /// Whether timer has an associated DPC
+    pub has_dpc: bool,
+    /// DPC address (if any)
+    pub dpc_address: u64,
+}
+
+/// Get timer queue statistics
+#[derive(Debug, Clone, Copy)]
+pub struct TimerQueueStats {
+    /// Number of active timers
+    pub active_count: u64,
+    /// Number of periodic timers
+    pub periodic_count: u64,
+    /// Number of one-shot timers
+    pub oneshot_count: u64,
+    /// Number of signaled timers
+    pub signaled_count: u64,
+    /// Nearest timer expiration (ms from now)
+    pub next_expiration_ms: Option<u64>,
+    /// Current tick count
+    pub current_time: u64,
+}
+
+/// Get timer queue statistics
+pub fn ki_get_timer_stats() -> TimerQueueStats {
+    unsafe {
+        if !TIMER_LIST_INITIALIZED.load(Ordering::Acquire) {
+            return TimerQueueStats {
+                active_count: 0,
+                periodic_count: 0,
+                oneshot_count: 0,
+                signaled_count: 0,
+                next_expiration_ms: None,
+                current_time: 0,
+            };
+        }
+
+        let current_time = apic::get_tick_count();
+        let head = TIMER_LIST_HEAD.get();
+
+        let mut periodic_count = 0u64;
+        let mut oneshot_count = 0u64;
+        let mut signaled_count = 0u64;
+        let mut next_exp: Option<u64> = None;
+
+        // Walk the timer list
+        let mut current = (*head).flink;
+        while current != head {
+            let timer = containing_record!(current, KTimer, timer_list_entry);
+
+            if (*timer).period() > 0 {
+                periodic_count += 1;
+            } else {
+                oneshot_count += 1;
+            }
+
+            if (*timer).is_signaled() {
+                signaled_count += 1;
+            }
+
+            // First timer is the next to expire (list is sorted)
+            if next_exp.is_none() {
+                let due = (*timer).due_time();
+                if due > current_time {
+                    next_exp = Some(due - current_time);
+                } else {
+                    next_exp = Some(0);
+                }
+            }
+
+            current = (*current).flink;
+        }
+
+        TimerQueueStats {
+            active_count: ACTIVE_TIMER_COUNT.load(Ordering::Relaxed),
+            periodic_count,
+            oneshot_count,
+            signaled_count,
+            next_expiration_ms: next_exp,
+            current_time,
+        }
+    }
+}
+
+/// Get a snapshot of timers in the queue
+/// Returns up to `max_count` timer snapshots
+pub fn ki_get_timer_snapshots(max_count: usize) -> ([TimerSnapshot; 32], usize) {
+    let mut snapshots = [TimerSnapshot {
+        address: 0,
+        due_time: 0,
+        period: 0,
+        timer_type: TimerType::Notification,
+        signaled: false,
+        has_dpc: false,
+        dpc_address: 0,
+    }; 32];
+
+    let max_count = max_count.min(32);
+    let mut count = 0;
+
+    unsafe {
+        if !TIMER_LIST_INITIALIZED.load(Ordering::Acquire) {
+            return (snapshots, 0);
+        }
+
+        let head = TIMER_LIST_HEAD.get();
+        let mut current = (*head).flink;
+
+        while current != head && count < max_count {
+            let timer = containing_record!(current, KTimer, timer_list_entry);
+            let dpc_ptr = *(*timer).dpc.get();
+
+            snapshots[count] = TimerSnapshot {
+                address: timer as u64,
+                due_time: (*timer).due_time(),
+                period: (*timer).period(),
+                timer_type: *(*timer).timer_type.get(),
+                signaled: (*timer).is_signaled(),
+                has_dpc: !dpc_ptr.is_null(),
+                dpc_address: dpc_ptr as u64,
+            };
+
+            count += 1;
+            current = (*current).flink;
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get timer type name
+pub fn timer_type_name(tt: TimerType) -> &'static str {
+    match tt {
+        TimerType::Notification => "Notification",
+        TimerType::Synchronization => "Synchronization",
+    }
+}

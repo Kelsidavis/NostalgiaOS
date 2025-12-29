@@ -149,7 +149,7 @@ const COMMANDS: &[&str] = &[
     "acpi", "apic",
     "bt",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
-    "debug", "del", "desc", "descriptor", "dir", "dmi", "dump", "echo", "erase", "ex", "exception", "exit",
+    "debug", "del", "desc", "descriptor", "dir", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
     "hal", "help", "history", "hpet",
     "int", "io", "irqstat",
     "ke",
@@ -161,7 +161,7 @@ const COMMANDS: &[&str] = &[
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
     "sc", "se", "services", "smbios", "stack", "suspend", "sysinfo",
-    "tasks", "time", "timer", "touch", "type",
+    "tasks", "time", "timer", "timerq", "touch", "type",
     "usertest",
     "veh", "ver", "version",
 ];
@@ -1149,6 +1149,12 @@ impl Shell {
         // PFN database viewer
         } else if eq_ignore_case(cmd, "pfn") {
             commands::cmd_pfn(&args[1..argc]);
+        // Timer queue viewer
+        } else if eq_ignore_case(cmd, "timerq") {
+            commands::cmd_timerq(&args[1..argc]);
+        // DPC queue viewer
+        } else if eq_ignore_case(cmd, "dpcq") {
+            commands::cmd_dpcq(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

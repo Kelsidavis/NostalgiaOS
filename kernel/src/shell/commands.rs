@@ -127,6 +127,8 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    irqstat        Interrupt statistics (all, rate, clear)");
         outln!("    pool           Kernel pool allocator stats (classes)");
         outln!("    pfn            PFN database viewer (stats, entry, range)");
+        outln!("    timerq         Kernel timer queue viewer (stats, list)");
+        outln!("    dpcq           DPC queue viewer (stats, list, pending)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -10533,4 +10535,269 @@ fn show_pfn_lists() {
 
     outln!("");
     outln!("Active Pages: {}", stats.active_pages);
+}
+
+// ============================================================================
+// Timer Queue Viewer Command
+// ============================================================================
+
+/// Timer queue viewer command
+pub fn cmd_timerq(args: &[&str]) {
+    let subcmd = if args.is_empty() { "stats" } else { args[0] };
+
+    if eq_ignore_case(subcmd, "help") || eq_ignore_case(subcmd, "?") {
+        outln!("TIMERQ - Timer Queue Viewer");
+        outln!("");
+        outln!("Commands:");
+        outln!("  timerq              Show timer statistics (default)");
+        outln!("  timerq stats        Show timer queue statistics");
+        outln!("  timerq list         List active timers");
+        outln!("  timerq next         Show next timer to expire");
+        outln!("  timerq help         Show this help");
+        return;
+    }
+
+    if eq_ignore_case(subcmd, "stats") {
+        show_timer_stats();
+    } else if eq_ignore_case(subcmd, "list") {
+        show_timer_list();
+    } else if eq_ignore_case(subcmd, "next") {
+        show_next_timer();
+    } else {
+        outln!("Unknown timerq command: {}", subcmd);
+        outln!("Use 'timerq help' for usage");
+    }
+}
+
+fn show_timer_stats() {
+    use crate::ke::timer::{ki_get_timer_stats, ki_get_active_timer_count};
+
+    outln!("Timer Queue Statistics");
+    outln!("======================");
+    outln!("");
+
+    let stats = ki_get_timer_stats();
+
+    outln!("Current Time:      {} ticks", stats.current_time);
+    outln!("Active Timers:     {}", stats.active_count);
+    outln!("  Periodic:        {}", stats.periodic_count);
+    outln!("  One-shot:        {}", stats.oneshot_count);
+    outln!("  Signaled:        {}", stats.signaled_count);
+
+    match stats.next_expiration_ms {
+        Some(0) => outln!("Next Expiration:   NOW (overdue)"),
+        Some(ms) => outln!("Next Expiration:   {} ms", ms),
+        None => outln!("Next Expiration:   None (queue empty)"),
+    }
+
+    outln!("");
+    outln!("Timer Count (alt): {}", ki_get_active_timer_count());
+}
+
+fn show_timer_list() {
+    use crate::ke::timer::{ki_get_timer_snapshots, ki_get_timer_stats, timer_type_name};
+
+    let stats = ki_get_timer_stats();
+    let (timers, count) = ki_get_timer_snapshots(20);
+
+    outln!("Active Timers (current time: {} ticks)", stats.current_time);
+    outln!("==================================================");
+    outln!("");
+
+    if count == 0 {
+        outln!("No active timers in the queue");
+        return;
+    }
+
+    outln!("{:<18} {:<12} {:<10} {:<14} {:<6} {:<6}",
+        "Address", "Due Time", "Delta", "Type", "Period", "DPC");
+    outln!("--------------------------------------------------------------------------------");
+
+    for i in 0..count {
+        let t = &timers[i];
+        let delta = if t.due_time > stats.current_time {
+            t.due_time - stats.current_time
+        } else {
+            0
+        };
+
+        let type_name = timer_type_name(t.timer_type);
+        let dpc_str = if t.has_dpc { "Yes" } else { "No" };
+
+        if t.period > 0 {
+            outln!("{:#018x} {:<12} {:>10} {:<14} {:>6} {:>6}",
+                t.address, t.due_time, delta, type_name, t.period, dpc_str);
+        } else {
+            outln!("{:#018x} {:<12} {:>10} {:<14} {:>6} {:>6}",
+                t.address, t.due_time, delta, type_name, "-", dpc_str);
+        }
+    }
+
+    if count < stats.active_count as usize {
+        outln!("");
+        outln!("... showing {} of {} timers", count, stats.active_count);
+    }
+}
+
+fn show_next_timer() {
+    use crate::ke::timer::{ki_get_timer_snapshots, ki_get_timer_stats, timer_type_name};
+
+    let stats = ki_get_timer_stats();
+    let (timers, count) = ki_get_timer_snapshots(1);
+
+    outln!("Next Timer to Expire");
+    outln!("====================");
+    outln!("");
+
+    if count == 0 {
+        outln!("No timers in the queue");
+        return;
+    }
+
+    let t = &timers[0];
+    let delta = if t.due_time > stats.current_time {
+        t.due_time - stats.current_time
+    } else {
+        0
+    };
+
+    outln!("Timer Address:   {:#018x}", t.address);
+    outln!("Due Time:        {} ticks", t.due_time);
+    outln!("Current Time:    {} ticks", stats.current_time);
+    if delta == 0 {
+        outln!("Time Delta:      OVERDUE");
+    } else {
+        outln!("Time Delta:      {} ms", delta);
+    }
+    outln!("Timer Type:      {}", timer_type_name(t.timer_type));
+    if t.period > 0 {
+        outln!("Period:          {} ms", t.period);
+    } else {
+        outln!("Period:          None (one-shot)");
+    }
+    outln!("Signaled:        {}", if t.signaled { "Yes" } else { "No" });
+    if t.has_dpc {
+        outln!("DPC Address:     {:#018x}", t.dpc_address);
+    } else {
+        outln!("DPC:             None");
+    }
+}
+
+// ============================================================================
+// DPC Queue Viewer Command
+// ============================================================================
+
+/// DPC queue viewer command
+pub fn cmd_dpcq(args: &[&str]) {
+    let subcmd = if args.is_empty() { "stats" } else { args[0] };
+
+    if eq_ignore_case(subcmd, "help") || eq_ignore_case(subcmd, "?") {
+        outln!("DPCQ - DPC Queue Viewer");
+        outln!("");
+        outln!("Commands:");
+        outln!("  dpcq               Show DPC statistics (default)");
+        outln!("  dpcq stats         Show DPC queue statistics");
+        outln!("  dpcq list          List queued DPCs");
+        outln!("  dpcq pending       Check if DPCs are pending");
+        outln!("  dpcq help          Show this help");
+        return;
+    }
+
+    if eq_ignore_case(subcmd, "stats") {
+        show_dpc_stats();
+    } else if eq_ignore_case(subcmd, "list") {
+        show_dpc_list();
+    } else if eq_ignore_case(subcmd, "pending") {
+        show_dpc_pending();
+    } else {
+        outln!("Unknown dpcq command: {}", subcmd);
+        outln!("Use 'dpcq help' for usage");
+    }
+}
+
+fn show_dpc_stats() {
+    use crate::ke::dpc::ki_get_dpc_stats;
+    use crate::ke::prcb::{get_current_prcb, ke_get_current_processor_number};
+
+    let stats = ki_get_dpc_stats();
+    let prcb = get_current_prcb();
+
+    outln!("DPC Queue Statistics");
+    outln!("====================");
+    outln!("");
+
+    outln!("Current Processor: {}", ke_get_current_processor_number());
+    outln!("Active Processors: {}", stats.processor_count);
+    outln!("");
+
+    outln!("Current CPU DPC Queue:");
+    outln!("  Queue Depth:     {}", stats.current_queue_depth);
+    outln!("  DPC Pending:     {}", if stats.dpc_pending { "Yes" } else { "No" });
+    outln!("  IRQ Requested:   {}", if prcb.dpc_interrupt_requested { "Yes" } else { "No" });
+
+    outln!("");
+    outln!("Scheduling State:");
+    outln!("  Ready Summary:   {:#010x}", prcb.ready_summary);
+    outln!("  Context Sw:      {}", prcb.context_switches);
+    outln!("  Quantum End:     {}", if prcb.quantum_end { "Yes" } else { "No" });
+}
+
+fn show_dpc_list() {
+    use crate::ke::dpc::{ki_get_dpc_snapshots, ki_get_dpc_stats, dpc_importance_name};
+
+    let stats = ki_get_dpc_stats();
+    let (dpcs, count) = ki_get_dpc_snapshots(16);
+
+    outln!("DPC Queue Contents");
+    outln!("==================");
+    outln!("");
+
+    if count == 0 {
+        outln!("DPC queue is empty");
+        outln!("  Pending flag: {}", if stats.dpc_pending { "Yes" } else { "No" });
+        return;
+    }
+
+    outln!("{:<18} {:<18} {:<10} {:<10}",
+        "DPC Address", "Routine", "Importance", "Target CPU");
+    outln!("--------------------------------------------------------------");
+
+    for i in 0..count {
+        let d = &dpcs[i];
+        let imp_name = dpc_importance_name(d.importance);
+        let target = if d.target_processor == 0xFFFFFFFF {
+            "Any"
+        } else {
+            "Current"
+        };
+
+        outln!("{:#018x} {:#018x} {:<10} {:<10}",
+            d.address, d.routine_address, imp_name, target);
+    }
+
+    outln!("");
+    outln!("Total queued: {}", count);
+}
+
+fn show_dpc_pending() {
+    use crate::ke::dpc::ki_check_dpc_pending;
+    use crate::ke::prcb::{get_current_prcb, ke_get_current_processor_number};
+
+    let pending = ki_check_dpc_pending();
+    let prcb = get_current_prcb();
+
+    outln!("DPC Pending Status");
+    outln!("==================");
+    outln!("");
+
+    outln!("Processor:       {}", ke_get_current_processor_number());
+    outln!("DPC Pending:     {}", if pending { "YES" } else { "No" });
+    outln!("Queue Depth:     {}", prcb.dpc_queue_depth);
+    outln!("IRQ Requested:   {}", if prcb.dpc_interrupt_requested { "Yes" } else { "No" });
+
+    if pending {
+        outln!("");
+        outln!("WARNING: DPCs are pending and should be processed");
+        outln!("         at the next timer interrupt or software interrupt");
+    }
 }

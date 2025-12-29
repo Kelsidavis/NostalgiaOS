@@ -297,3 +297,115 @@ pub unsafe fn ki_request_software_interrupt() {
     // In a full implementation, this would trigger a software interrupt
     // For now, DPCs are processed in the timer interrupt
 }
+
+// ============================================================================
+// DPC Queue Inspection (for debugging)
+// ============================================================================
+
+/// Snapshot of a DPC for debugging
+#[derive(Debug, Clone, Copy)]
+pub struct DpcSnapshot {
+    /// DPC address
+    pub address: u64,
+    /// DPC routine address
+    pub routine_address: u64,
+    /// Deferred context
+    pub deferred_context: usize,
+    /// System argument 1
+    pub system_arg1: usize,
+    /// System argument 2
+    pub system_arg2: usize,
+    /// DPC importance
+    pub importance: DpcImportance,
+    /// Target processor
+    pub target_processor: u32,
+}
+
+/// DPC queue statistics
+#[derive(Debug, Clone, Copy)]
+pub struct DpcQueueStats {
+    /// Number of processors
+    pub processor_count: usize,
+    /// DPCs queued on current processor
+    pub current_queue_depth: u32,
+    /// DPC pending flag
+    pub dpc_pending: bool,
+    /// Total DPCs processed (estimated)
+    pub total_high_importance: u32,
+    pub total_medium_importance: u32,
+    pub total_low_importance: u32,
+}
+
+/// Get DPC queue statistics for current processor
+pub fn ki_get_dpc_stats() -> DpcQueueStats {
+    let prcb = super::prcb::get_current_prcb();
+    let cpu_count = super::prcb::get_active_cpu_count();
+
+    DpcQueueStats {
+        processor_count: cpu_count,
+        current_queue_depth: prcb.dpc_queue_depth,
+        dpc_pending: prcb.dpc_pending,
+        total_high_importance: 0,
+        total_medium_importance: 0,
+        total_low_importance: 0,
+    }
+}
+
+/// Get snapshots of DPCs in the current processor's queue
+pub fn ki_get_dpc_snapshots(max_count: usize) -> ([DpcSnapshot; 16], usize) {
+    let mut snapshots = [DpcSnapshot {
+        address: 0,
+        routine_address: 0,
+        deferred_context: 0,
+        system_arg1: 0,
+        system_arg2: 0,
+        importance: DpcImportance::Medium,
+        target_processor: 0,
+    }; 16];
+
+    let max_count = max_count.min(16);
+    let mut count = 0;
+
+    unsafe {
+        let prcb = get_current_prcb_mut();
+        let head = &prcb.dpc_queue_head as *const ListEntry as *mut ListEntry;
+
+        if (*head).is_empty() {
+            return (snapshots, 0);
+        }
+
+        let mut current = (*head).flink;
+        while current != head && count < max_count {
+            let dpc = containing_record!(current, KDpc, dpc_list_entry);
+
+            let routine_addr = match *(*dpc).deferred_routine.get() {
+                Some(r) => r as *const () as u64,
+                None => 0,
+            };
+
+            snapshots[count] = DpcSnapshot {
+                address: dpc as u64,
+                routine_address: routine_addr,
+                deferred_context: *(*dpc).deferred_context.get(),
+                system_arg1: *(*dpc).system_argument1.get(),
+                system_arg2: *(*dpc).system_argument2.get(),
+                importance: *(*dpc).importance.get(),
+                target_processor: *(*dpc).processor_number.get(),
+            };
+
+            count += 1;
+            current = (*current).flink;
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get DPC importance name
+pub fn dpc_importance_name(importance: DpcImportance) -> &'static str {
+    match importance {
+        DpcImportance::Low => "Low",
+        DpcImportance::Medium => "Medium",
+        DpcImportance::High => "High",
+    }
+}
