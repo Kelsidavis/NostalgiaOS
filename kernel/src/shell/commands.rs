@@ -2510,6 +2510,9 @@ pub fn cmd_usertest(args: &[&str]) {
         outln!("Commands:");
         outln!("  run      Run user-mode test (IRETQ to ring 3)");
         outln!("  info     Show user-mode page table info");
+        outln!("  process  Test process creation with PEB/TEB");
+        outln!("  teb      Show TEB structure info");
+        outln!("  peb      Show PEB structure info");
         return;
     }
 
@@ -2550,7 +2553,144 @@ pub fn cmd_usertest(args: &[&str]) {
                 outln!("Use 'mm init' to initialize user-mode page tables.");
             }
         }
+    } else if eq_ignore_case(cmd, "process") {
+        cmd_usertest_process();
+    } else if eq_ignore_case(cmd, "teb") {
+        cmd_usertest_teb();
+    } else if eq_ignore_case(cmd, "peb") {
+        cmd_usertest_peb();
     } else {
         outln!("Unknown usertest command: {}", cmd);
     }
+}
+
+/// Test process creation with PEB/TEB
+fn cmd_usertest_process() {
+    outln!("Testing User Process Creation with PEB/TEB");
+    outln!("");
+
+    unsafe {
+        use crate::ps;
+
+        // Get system process as parent
+        let parent = ps::get_system_process();
+        outln!("Parent process: {:p} (PID {})", parent, (*parent).unique_process_id);
+
+        // Create a test user process
+        // Use dummy addresses since we're just testing structure creation
+        let entry_point = 0x401000u64;  // Typical PE entry point
+        let user_stack = 0x7FFE0000u64; // High user stack address
+        let image_base = 0x400000u64;   // Standard image base
+        let image_size = 0x10000u32;    // 64KB image
+        let subsystem = 3u16;           // IMAGE_SUBSYSTEM_WINDOWS_CUI
+
+        outln!("Creating user process...");
+        outln!("  Entry point:  {:#x}", entry_point);
+        outln!("  User stack:   {:#x}", user_stack);
+        outln!("  Image base:   {:#x}", image_base);
+        outln!("  Image size:   {:#x}", image_size);
+        outln!("  Subsystem:    {} (CUI)", subsystem);
+        outln!("");
+
+        let (process, thread) = ps::ps_create_user_process_ex(
+            parent,
+            b"test.exe",
+            entry_point,
+            user_stack,
+            0, // CR3 - using kernel page tables
+            image_base,
+            image_size,
+            subsystem,
+        );
+
+        if process.is_null() {
+            outln!("Error: Failed to create process!");
+            return;
+        }
+
+        outln!("Process created successfully!");
+        outln!("  EPROCESS:     {:p}", process);
+        outln!("  PID:          {}", (*process).unique_process_id);
+        outln!("  Name:         {:?}", core::str::from_utf8_unchecked((*process).image_name()));
+        outln!("  PEB:          {:p}", (*process).peb);
+        outln!("");
+
+        if !(*process).peb.is_null() {
+            let peb = &*(*process).peb;
+            outln!("PEB Contents:");
+            outln!("  Image base:   {:#x}", peb.image_base_address as u64);
+            outln!("  OS Version:   {}.{}.{}", peb.os_major_version, peb.os_minor_version, peb.os_build_number);
+            outln!("  Subsystem:    {}", peb.image_subsystem);
+            outln!("");
+        }
+
+        if thread.is_null() {
+            outln!("Warning: Thread creation failed!");
+        } else {
+            outln!("Thread created successfully!");
+            outln!("  ETHREAD:      {:p}", thread);
+            outln!("  TID:          {}", (*thread).thread_id());
+            outln!("  TEB:          {:p}", (*thread).teb);
+            outln!("");
+
+            if !(*thread).teb.is_null() {
+                let teb = &*(*thread).teb;
+                outln!("TEB Contents:");
+                outln!("  Stack base:   {:p}", teb.nt_tib.stack_base);
+                outln!("  Stack limit:  {:p}", teb.nt_tib.stack_limit);
+                outln!("  PEB pointer:  {:p}", teb.process_environment_block);
+                outln!("  PID:          {}", teb.client_id.unique_process);
+                outln!("  TID:          {}", teb.client_id.unique_thread);
+            }
+        }
+
+        outln!("");
+        outln!("Per-CPU syscall data:");
+        let percpu = crate::arch::x86_64::get_percpu_syscall_data();
+        outln!("  Address:      {:#x}", percpu);
+        outln!("  (gs:[0] after SWAPGS will read kernel stack from here)");
+    }
+}
+
+/// Show TEB structure info
+fn cmd_usertest_teb() {
+    outln!("TEB (Thread Environment Block) Structure");
+    outln!("");
+    outln!("Size: {} bytes ({:#x})", core::mem::size_of::<crate::ps::Teb>(),
+           core::mem::size_of::<crate::ps::Teb>());
+    outln!("");
+    outln!("Key fields (x64 offsets):");
+    outln!("  gs:[0x00]  NT_TIB.ExceptionList");
+    outln!("  gs:[0x08]  NT_TIB.StackBase");
+    outln!("  gs:[0x10]  NT_TIB.StackLimit");
+    outln!("  gs:[0x30]  NT_TIB.Self (TEB pointer)");
+    outln!("  gs:[0x60]  ProcessEnvironmentBlock (PEB)");
+    outln!("  gs:[0x68]  LastErrorValue");
+    outln!("  gs:[0x48]  ClientId.UniqueProcess");
+    outln!("  gs:[0x50]  ClientId.UniqueThread");
+    outln!("");
+    outln!("TLS slots: {} minimum + {} expansion",
+           crate::ps::TLS_MINIMUM_AVAILABLE,
+           crate::ps::TLS_EXPANSION_SLOTS);
+}
+
+/// Show PEB structure info
+fn cmd_usertest_peb() {
+    outln!("PEB (Process Environment Block) Structure");
+    outln!("");
+    outln!("Size: {} bytes ({:#x})", core::mem::size_of::<crate::ps::Peb>(),
+           core::mem::size_of::<crate::ps::Peb>());
+    outln!("");
+    outln!("Key fields:");
+    outln!("  +0x000  InheritedAddressSpace");
+    outln!("  +0x002  BeingDebugged");
+    outln!("  +0x010  ImageBaseAddress");
+    outln!("  +0x018  Ldr (PEB_LDR_DATA)");
+    outln!("  +0x020  ProcessParameters");
+    outln!("  +0x118  OSMajorVersion");
+    outln!("  +0x11C  OSMinorVersion");
+    outln!("  +0x120  OSBuildNumber");
+    outln!("  +0x128  ImageSubsystem");
+    outln!("");
+    outln!("Windows Server 2003 version: 5.2.3790");
 }
