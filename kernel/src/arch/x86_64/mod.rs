@@ -17,6 +17,10 @@ pub mod syscall;
 pub mod percpu;
 pub mod ap_trampoline;
 
+// Re-export key context types for user-mode support
+pub use context::{KTrapFrame, UserContext, ProcessorMode};
+pub use context::{setup_user_thread_context, ki_return_to_user};
+
 use x86_64::instructions::{hlt, interrupts};
 
 /// Phase 0 architecture initialization
