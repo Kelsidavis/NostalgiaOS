@@ -1036,7 +1036,7 @@ fn sys_debug_print(
 
     // Validate buffer pointer and length
     if buffer == 0 || length == 0 || length > 1024 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Validate user memory access
@@ -1169,7 +1169,7 @@ fn sys_read_file(
     _: usize, _: usize,
 ) -> isize {
     if buffer == 0 || length == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Special case: handle 0 = stdin (not implemented)
@@ -1177,7 +1177,7 @@ fn sys_read_file(
         if bytes_read_ptr != 0 {
             unsafe { *(bytes_read_ptr as *mut usize) = 0; }
         }
-        return 0;
+        return STATUS_SUCCESS;
     }
 
     // Try to get fs handle
@@ -1186,7 +1186,7 @@ fn sys_read_file(
         None => {
             // Not a file handle - return error
             crate::serial_println!("[SYSCALL] NtReadFile: invalid handle {}", handle);
-            return -1;
+            return STATUS_INVALID_HANDLE;
         }
     };
 
@@ -1199,14 +1199,15 @@ fn sys_read_file(
                 unsafe { *(bytes_read_ptr as *mut usize) = bytes_read; }
             }
             crate::serial_println!("[SYSCALL] NtReadFile(handle={}) -> {} bytes", handle, bytes_read);
-            0
+            STATUS_SUCCESS
         }
         Err(e) => {
             crate::serial_println!("[SYSCALL] NtReadFile(handle={}) -> error {:?}", handle, e);
             if bytes_read_ptr != 0 {
                 unsafe { *(bytes_read_ptr as *mut usize) = 0; }
             }
-            -1
+            // Map file system errors to NT status codes
+            0xC0000185u32 as isize // STATUS_IO_DEVICE_ERROR
         }
     }
 }
@@ -1220,7 +1221,7 @@ fn sys_write_file(
     _: usize, _: usize,
 ) -> isize {
     if buffer == 0 || length == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Special case: handle 1 = stdout (serial console)
@@ -1234,7 +1235,7 @@ fn sys_write_file(
             if bytes_written_ptr != 0 {
                 unsafe { *(bytes_written_ptr as *mut usize) = length; }
             }
-            return 0;
+            return STATUS_SUCCESS;
         }
     }
 
@@ -1249,7 +1250,7 @@ fn sys_write_file(
             if bytes_written_ptr != 0 {
                 unsafe { *(bytes_written_ptr as *mut usize) = length; }
             }
-            return 0;
+            return STATUS_SUCCESS;
         }
     }
 
@@ -1258,7 +1259,7 @@ fn sys_write_file(
         Some(h) => h,
         None => {
             crate::serial_println!("[SYSCALL] NtWriteFile: invalid handle {}", handle);
-            return -1;
+            return STATUS_INVALID_HANDLE;
         }
     };
 
@@ -1271,14 +1272,15 @@ fn sys_write_file(
                 unsafe { *(bytes_written_ptr as *mut usize) = bytes_written; }
             }
             crate::serial_println!("[SYSCALL] NtWriteFile(handle={}) -> {} bytes", handle, bytes_written);
-            0
+            STATUS_SUCCESS
         }
         Err(e) => {
             crate::serial_println!("[SYSCALL] NtWriteFile(handle={}) -> error {:?}", handle, e);
             if bytes_written_ptr != 0 {
                 unsafe { *(bytes_written_ptr as *mut usize) = 0; }
             }
-            -1
+            // Map file system errors to NT status codes
+            0xC0000185u32 as isize // STATUS_IO_DEVICE_ERROR
         }
     }
 }
@@ -2016,7 +2018,7 @@ fn sys_delay_execution(
     let is_alertable = alertable != 0;
 
     if delay_interval == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Read the delay value (negative = relative delay in 100ns units)
@@ -2024,7 +2026,7 @@ fn sys_delay_execution(
 
     if delay_100ns >= 0 {
         // Absolute time not yet supported
-        return -1;
+        return STATUS_NOT_IMPLEMENTED;
     }
 
     // Convert to milliseconds (negative 100ns -> positive ms)
