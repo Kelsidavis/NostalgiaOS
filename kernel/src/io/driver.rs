@@ -483,3 +483,118 @@ pub unsafe fn io_call_driver(
 pub unsafe fn init_driver_system() {
     crate::serial_println!("[IO] Driver subsystem initialized ({} drivers available)", MAX_DRIVERS);
 }
+
+// ============================================================================
+// Driver Pool Inspection (for debugging)
+// ============================================================================
+
+/// Driver pool statistics
+#[derive(Debug, Clone, Copy)]
+pub struct DriverPoolStats {
+    /// Total number of drivers in pool
+    pub total_drivers: usize,
+    /// Number of allocated drivers
+    pub allocated_drivers: usize,
+    /// Number of free drivers
+    pub free_drivers: usize,
+}
+
+/// Snapshot of an allocated driver
+#[derive(Debug, Clone, Copy)]
+pub struct DriverSnapshot {
+    /// Driver address
+    pub address: u64,
+    /// Driver name
+    pub name: [u8; 32],
+    /// Name length
+    pub name_length: u8,
+    /// Number of devices
+    pub device_count: u32,
+    /// Has unload routine
+    pub has_unload: bool,
+    /// Has start I/O routine
+    pub has_start_io: bool,
+    /// Number of major functions registered
+    pub major_function_count: u32,
+    /// Driver flags
+    pub flags: u32,
+}
+
+/// Get driver pool statistics
+pub fn io_get_driver_stats() -> DriverPoolStats {
+    unsafe {
+        let _guard = DRIVER_POOL_LOCK.lock();
+        let allocated = DRIVER_POOL_BITMAP.count_ones() as usize;
+
+        DriverPoolStats {
+            total_drivers: MAX_DRIVERS,
+            allocated_drivers: allocated,
+            free_drivers: MAX_DRIVERS - allocated,
+        }
+    }
+}
+
+/// Get snapshots of allocated drivers
+pub fn io_get_driver_snapshots(max_count: usize) -> ([DriverSnapshot; 16], usize) {
+    let mut snapshots = [DriverSnapshot {
+        address: 0,
+        name: [0; 32],
+        name_length: 0,
+        device_count: 0,
+        has_unload: false,
+        has_start_io: false,
+        major_function_count: 0,
+        flags: 0,
+    }; 16];
+
+    let max_count = max_count.min(16);
+    let mut count = 0;
+
+    unsafe {
+        let _guard = DRIVER_POOL_LOCK.lock();
+
+        for i in 0..MAX_DRIVERS {
+            if count >= max_count {
+                break;
+            }
+            if DRIVER_POOL_BITMAP & (1 << i) != 0 {
+                let driver = &DRIVER_POOL[i];
+
+                // Copy name
+                let mut name = [0u8; 32];
+                let name_len = (driver.driver_name_length as usize).min(31);
+                name[..name_len].copy_from_slice(&driver.driver_name[..name_len]);
+
+                // Count devices
+                let mut device_count = 0u32;
+                let mut dev = driver.device_object;
+                while !dev.is_null() {
+                    device_count += 1;
+                    dev = (*dev).next_device;
+                }
+
+                // Count major functions
+                let mut major_count = 0u32;
+                for func in driver.major_function.iter() {
+                    if func.is_some() {
+                        major_count += 1;
+                    }
+                }
+
+                snapshots[count] = DriverSnapshot {
+                    address: &DRIVER_POOL[i] as *const _ as u64,
+                    name,
+                    name_length: name_len as u8,
+                    device_count,
+                    has_unload: driver.driver_unload.is_some(),
+                    has_start_io: driver.driver_start_io.is_some(),
+                    major_function_count: major_count,
+                    flags: driver.flags,
+                };
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}

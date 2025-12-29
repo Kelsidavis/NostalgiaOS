@@ -573,3 +573,127 @@ pub unsafe fn io_attach_device(
 pub unsafe fn init_device_system() {
     crate::serial_println!("[IO] Device subsystem initialized ({} devices available)", MAX_DEVICES);
 }
+
+// ============================================================================
+// Device Pool Inspection (for debugging)
+// ============================================================================
+
+/// Device pool statistics
+#[derive(Debug, Clone, Copy)]
+pub struct DevicePoolStats {
+    /// Total number of devices in pool
+    pub total_devices: usize,
+    /// Number of allocated devices
+    pub allocated_devices: usize,
+    /// Number of free devices
+    pub free_devices: usize,
+}
+
+/// Snapshot of an allocated device
+#[derive(Debug, Clone, Copy)]
+pub struct DeviceSnapshot {
+    /// Device address
+    pub address: u64,
+    /// Device name
+    pub name: [u8; 32],
+    /// Name length
+    pub name_length: u8,
+    /// Device type
+    pub device_type: u32,
+    /// Device flags
+    pub flags: u32,
+    /// Stack size
+    pub stack_size: u8,
+    /// Has attached device
+    pub has_attached: bool,
+    /// Has driver
+    pub has_driver: bool,
+    /// Reference count
+    pub ref_count: i32,
+}
+
+/// Get device pool statistics
+pub fn io_get_device_stats() -> DevicePoolStats {
+    unsafe {
+        let _guard = DEVICE_POOL_LOCK.lock();
+        let allocated = DEVICE_POOL_BITMAP.count_ones() as usize;
+
+        DevicePoolStats {
+            total_devices: MAX_DEVICES,
+            allocated_devices: allocated,
+            free_devices: MAX_DEVICES - allocated,
+        }
+    }
+}
+
+/// Get snapshots of allocated devices
+pub fn io_get_device_snapshots(max_count: usize) -> ([DeviceSnapshot; 32], usize) {
+    let mut snapshots = [DeviceSnapshot {
+        address: 0,
+        name: [0; 32],
+        name_length: 0,
+        device_type: 0,
+        flags: 0,
+        stack_size: 0,
+        has_attached: false,
+        has_driver: false,
+        ref_count: 0,
+    }; 32];
+
+    let max_count = max_count.min(32);
+    let mut count = 0;
+
+    unsafe {
+        let _guard = DEVICE_POOL_LOCK.lock();
+
+        for i in 0..MAX_DEVICES {
+            if count >= max_count {
+                break;
+            }
+            if DEVICE_POOL_BITMAP & (1 << i) != 0 {
+                let device = &DEVICE_POOL[i];
+
+                let mut name = [0u8; 32];
+                let name_len = (device.device_name_length as usize).min(31);
+                name[..name_len].copy_from_slice(&device.device_name[..name_len]);
+
+                snapshots[count] = DeviceSnapshot {
+                    address: &DEVICE_POOL[i] as *const _ as u64,
+                    name,
+                    name_length: name_len as u8,
+                    device_type: device.device_type,
+                    flags: device.flags.load(Ordering::Relaxed),
+                    stack_size: device.stack_size,
+                    has_attached: !device.attached_device.is_null(),
+                    has_driver: !device.driver_object.is_null(),
+                    ref_count: device.reference_count.load(Ordering::Relaxed),
+                };
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get device type name
+pub fn device_type_name(device_type: u32) -> &'static str {
+    match device_type {
+        device_type::FILE_DEVICE_DISK => "Disk",
+        device_type::FILE_DEVICE_DISK_FILE_SYSTEM => "DiskFS",
+        device_type::FILE_DEVICE_FILE_SYSTEM => "FileSystem",
+        device_type::FILE_DEVICE_KEYBOARD => "Keyboard",
+        device_type::FILE_DEVICE_MOUSE => "Mouse",
+        device_type::FILE_DEVICE_NAMED_PIPE => "NamedPipe",
+        device_type::FILE_DEVICE_NETWORK => "Network",
+        device_type::FILE_DEVICE_NULL => "Null",
+        device_type::FILE_DEVICE_SERIAL_PORT => "Serial",
+        device_type::FILE_DEVICE_CONSOLE => "Console",
+        device_type::FILE_DEVICE_VIRTUAL_DISK => "VirtDisk",
+        device_type::FILE_DEVICE_UNKNOWN => "Unknown",
+        device_type::FILE_DEVICE_CD_ROM => "CDROM",
+        device_type::FILE_DEVICE_TAPE => "Tape",
+        device_type::FILE_DEVICE_PRINTER => "Printer",
+        _ => "Other",
+    }
+}

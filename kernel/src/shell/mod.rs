@@ -149,7 +149,7 @@ const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq",
     "bt",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
-    "debug", "del", "desc", "descriptor", "dir", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
+    "debug", "del", "desc", "descriptor", "devdrv", "dir", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
     "hal", "handles", "help", "history", "hpet",
     "int", "io", "ioq", "irql", "irqstat",
     "ke",
@@ -1183,6 +1183,9 @@ impl Shell {
         // I/O request queue viewer
         } else if eq_ignore_case(cmd, "ioq") {
             commands::cmd_ioq(&args[1..argc]);
+        // Device/Driver viewer
+        } else if eq_ignore_case(cmd, "devdrv") {
+            commands::cmd_devdrv(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

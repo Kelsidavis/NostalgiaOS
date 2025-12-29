@@ -12012,3 +12012,135 @@ fn show_pending_irps() {
         outln!("Total pending: {}", pending_count);
     }
 }
+
+// ============================================================================
+// Device/Driver Viewer Command
+// ============================================================================
+
+/// Device/Driver viewer command
+pub fn cmd_devdrv(args: &[&str]) {
+    if args.is_empty() {
+        show_devdrv_help();
+        return;
+    }
+
+    let cmd = args[0];
+    if eq_ignore_ascii_case(cmd, "help") || cmd == "-h" || cmd == "--help" || cmd == "-?" {
+        show_devdrv_help();
+    } else if eq_ignore_ascii_case(cmd, "devices") {
+        show_device_list();
+    } else if eq_ignore_ascii_case(cmd, "drivers") {
+        show_driver_list();
+    } else if eq_ignore_ascii_case(cmd, "stats") {
+        show_devdrv_stats();
+    } else {
+        outln!("Unknown subcommand: {}", args[0]);
+        show_devdrv_help();
+    }
+}
+
+fn show_devdrv_help() {
+    outln!("Device/Driver Viewer");
+    outln!("");
+    outln!("Usage: devdrv <subcommand>");
+    outln!("");
+    outln!("Subcommands:");
+    outln!("  stats     - Show device and driver statistics");
+    outln!("  devices   - List allocated devices");
+    outln!("  drivers   - List allocated drivers");
+    outln!("  help      - Show this help message");
+}
+
+fn show_devdrv_stats() {
+    use crate::io::{io_get_device_stats, io_get_driver_stats};
+
+    let dev_stats = io_get_device_stats();
+    let drv_stats = io_get_driver_stats();
+
+    outln!("Device/Driver Pool Statistics");
+    outln!("=============================");
+    outln!("");
+    outln!("Device Pool:");
+    outln!("  Total:     {}", dev_stats.total_devices);
+    outln!("  Allocated: {}", dev_stats.allocated_devices);
+    outln!("  Free:      {}", dev_stats.free_devices);
+    outln!("");
+    outln!("Driver Pool:");
+    outln!("  Total:     {}", drv_stats.total_drivers);
+    outln!("  Allocated: {}", drv_stats.allocated_drivers);
+    outln!("  Free:      {}", drv_stats.free_drivers);
+}
+
+fn show_device_list() {
+    use crate::io::{io_get_device_snapshots, device_type_name};
+
+    outln!("Allocated Devices");
+    outln!("=================");
+    outln!("");
+
+    let (snapshots, count) = io_get_device_snapshots(32);
+
+    if count == 0 {
+        outln!("No devices currently allocated");
+        return;
+    }
+
+    outln!("{:<18} {:<16} {:<12} {:<6} {:<6}",
+        "Address", "Name", "Type", "Stack", "Refs");
+    outln!("------------------------------------------------------------");
+
+    for i in 0..count {
+        let dev = &snapshots[i];
+        let name = core::str::from_utf8(&dev.name[..dev.name_length as usize])
+            .unwrap_or("?");
+        let type_name = device_type_name(dev.device_type);
+
+        outln!("{:#018x} {:<16} {:<12} {:<6} {:<6}",
+            dev.address,
+            name,
+            type_name,
+            dev.stack_size,
+            dev.ref_count
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} devices", count);
+}
+
+fn show_driver_list() {
+    use crate::io::io_get_driver_snapshots;
+
+    outln!("Allocated Drivers");
+    outln!("=================");
+    outln!("");
+
+    let (snapshots, count) = io_get_driver_snapshots(16);
+
+    if count == 0 {
+        outln!("No drivers currently allocated");
+        return;
+    }
+
+    outln!("{:<18} {:<20} {:<6} {:<8} {:<8}",
+        "Address", "Name", "Devs", "Unload", "MajFns");
+    outln!("------------------------------------------------------------");
+
+    for i in 0..count {
+        let drv = &snapshots[i];
+        let name = core::str::from_utf8(&drv.name[..drv.name_length as usize])
+            .unwrap_or("?");
+        let has_unload = if drv.has_unload { "Yes" } else { "No" };
+
+        outln!("{:#018x} {:<20} {:<6} {:<8} {:<8}",
+            drv.address,
+            name,
+            drv.device_count,
+            has_unload,
+            drv.major_function_count
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} drivers", count);
+}

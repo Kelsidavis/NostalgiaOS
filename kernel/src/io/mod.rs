@@ -63,6 +63,11 @@ pub use device::{
     io_create_device,
     io_delete_device,
     io_attach_device,
+    DevicePoolStats,
+    DeviceSnapshot,
+    io_get_device_stats,
+    io_get_device_snapshots,
+    device_type_name,
 };
 
 pub use driver::{
@@ -77,6 +82,10 @@ pub use driver::{
     io_create_driver,
     io_delete_driver,
     io_call_driver,
+    DriverPoolStats,
+    DriverSnapshot,
+    io_get_driver_stats,
+    io_get_driver_snapshots,
 };
 
 pub use file::{
