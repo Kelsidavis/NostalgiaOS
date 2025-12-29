@@ -4830,6 +4830,40 @@ pub struct FileLockInfo {
     pub fail_immediately: bool,
 }
 
+// ============================================================================
+// File Lock Tracking Table
+// ============================================================================
+
+/// Maximum number of file locks
+const MAX_FILE_LOCKS: usize = 64;
+
+/// File lock entry for tracking active locks
+#[derive(Clone, Copy)]
+struct FileLockEntry {
+    handle: usize,
+    offset: i64,
+    length: i64,
+    key: u32,
+    active: bool,
+}
+
+impl FileLockEntry {
+    const fn new() -> Self {
+        Self { handle: 0, offset: 0, length: 0, key: 0, active: false }
+    }
+
+    /// Check if this lock overlaps with another range
+    fn overlaps(&self, offset: i64, length: i64) -> bool {
+        if !self.active { return false; }
+        let self_end = self.offset.saturating_add(self.length);
+        let other_end = offset.saturating_add(length);
+        self.offset < other_end && offset < self_end
+    }
+}
+
+/// File lock table
+static mut FILE_LOCK_TABLE: [FileLockEntry; MAX_FILE_LOCKS] = [FileLockEntry::new(); MAX_FILE_LOCKS];
+
 /// NtLockFile - Lock a byte range in a file
 ///
 /// Provides byte-range locking for file coordination between processes.
@@ -4863,15 +4897,31 @@ fn sys_lock_file(
         file_handle, offset, len, key, fail_immediately != 0
     );
 
-    // For now, just record the lock request
-    // A full implementation would:
-    // 1. Check for conflicting locks
-    // 2. Either wait or fail immediately based on fail_immediately
-    // 3. Add lock to the file's lock list
+    unsafe {
+        // Check for conflicting locks on this file
+        for entry in FILE_LOCK_TABLE.iter() {
+            if entry.active && entry.handle == file_handle && entry.overlaps(offset, len) {
+                crate::serial_println!("[SYSCALL] NtLockFile: lock conflict");
+                return 0xC0000054u32 as isize; // STATUS_FILE_LOCK_CONFLICT
+            }
+        }
 
-    // Track locks per file (simplified - in reality this would be per file object)
-    // For now, just succeed
-    0 // STATUS_SUCCESS
+        // Find a free slot and add the lock
+        for entry in FILE_LOCK_TABLE.iter_mut() {
+            if !entry.active {
+                entry.handle = file_handle;
+                entry.offset = offset;
+                entry.length = len;
+                entry.key = key as u32;
+                entry.active = true;
+                crate::serial_println!("[SYSCALL] NtLockFile: lock acquired");
+                return 0; // STATUS_SUCCESS
+            }
+        }
+
+        crate::serial_println!("[SYSCALL] NtLockFile: no lock slots available");
+        0xC000009Au32 as isize // STATUS_INSUFFICIENT_RESOURCES
+    }
 }
 
 /// NtUnlockFile - Unlock a byte range in a file
@@ -4901,8 +4951,24 @@ fn sys_unlock_file(
         file_handle, offset, len, key
     );
 
-    // For now, just succeed
-    0 // STATUS_SUCCESS
+    unsafe {
+        // Find and remove the matching lock
+        for entry in FILE_LOCK_TABLE.iter_mut() {
+            if entry.active
+                && entry.handle == file_handle
+                && entry.offset == offset
+                && entry.length == len
+                && entry.key == key as u32
+            {
+                entry.active = false;
+                crate::serial_println!("[SYSCALL] NtUnlockFile: lock released");
+                return 0; // STATUS_SUCCESS
+            }
+        }
+
+        crate::serial_println!("[SYSCALL] NtUnlockFile: lock not found");
+        0xC0000225u32 as isize // STATUS_NOT_FOUND
+    }
 }
 
 // ============================================================================
