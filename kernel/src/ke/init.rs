@@ -1,12 +1,13 @@
 //! Kernel Executive Initialization
 //!
 //! This module provides initialization routines for the kernel executive,
-//! including the scheduler, PRCB, threads, and timer.
+//! including the scheduler, PRCB, KPCR, threads, and timer.
 
 use core::sync::atomic::{AtomicU32, Ordering};
 use crate::hal::apic;
 use crate::arch::x86_64::idt::vector;
 use super::prcb;
+use super::kpcr;
 use super::process;
 use super::idle;
 use super::thread::{KThread, constants};
@@ -30,8 +31,16 @@ static NEXT_STACK: AtomicU32 = AtomicU32::new(1); // 0 is reserved for idle
 /// # Safety
 /// Must be called exactly once during kernel boot
 pub unsafe fn init() {
-    // Initialize the processor control block
+    // Initialize the processor control block (KPRCB)
     prcb::init_bsp_prcb();
+
+    // Initialize the processor control region (KPCR)
+    // Get pointer to BSP's PRCB for KPCR initialization
+    let bsp_prcb = prcb::ki_get_processor_block(0);
+    kpcr::init_kpcr(0, bsp_prcb);
+
+    // Lower IRQL to PASSIVE_LEVEL now that we're initialized
+    kpcr::ke_lower_irql(kpcr::irql::PASSIVE_LEVEL);
 
     // Initialize the system process (process 0)
     process::init_system_process();
@@ -48,6 +57,7 @@ pub unsafe fn init() {
 
     crate::kprintln!("[KE] Kernel executive initialized");
     crate::serial_println!("[KE] Kernel executive initialized");
+    crate::serial_println!("[KE] KPRCB and KPCR initialized for BSP");
     crate::kprintln!("[KE] APIC timer running at {} Hz", TIMER_FREQUENCY_HZ);
     crate::serial_println!("[KE] APIC timer running at {} Hz", TIMER_FREQUENCY_HZ);
 }

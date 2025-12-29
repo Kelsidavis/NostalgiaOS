@@ -78,6 +78,13 @@ pub unsafe extern "C" fn ap_main() -> ! {
     // Initialize this CPU's PRCB and set GS base
     crate::ke::prcb::init_prcb(cpu_id);
 
+    // Initialize this CPU's KPCR (Processor Control Region)
+    let prcb = crate::ke::prcb::ki_get_processor_block(cpu_id);
+    crate::ke::kpcr::init_kpcr(cpu_id, prcb);
+
+    // Lower IRQL to PASSIVE_LEVEL
+    crate::ke::kpcr::ke_lower_irql(crate::ke::kpcr::irql::PASSIVE_LEVEL);
+
     // Initialize this CPU's idle thread
     crate::ke::idle::init_idle_thread(cpu_id);
 
@@ -96,6 +103,7 @@ pub unsafe extern "C" fn ap_main() -> ! {
     // Signal that this AP has started
     AP_STARTED_COUNT.fetch_add(1, Ordering::SeqCst);
 
+    crate::serial_println!("[AP{}] KPRCB and KPCR initialized", cpu_id);
     crate::serial_println!("[AP{}] Initialization complete, entering idle loop", cpu_id);
 
     // Enter the idle loop - this never returns

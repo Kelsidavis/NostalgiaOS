@@ -6,8 +6,9 @@
 //! - **Dispatcher Objects**: KEVENT, KSEMAPHORE, KMUTANT, KTIMER
 //! - **DPC**: Deferred Procedure Calls for interrupt deferral
 //! - **APC**: Asynchronous Procedure Calls for thread-specific callbacks
-//! - **Spinlocks**: Low-level synchronization primitives
+//! - **Spinlocks**: Low-level synchronization primitives (including queued spinlocks)
 //! - **Wait/Unwait**: Multi-object wait support
+//! - **IPI**: Inter-processor interrupt for SMP communication
 //!
 //! # IRQL (Interrupt Request Level)
 //!
@@ -16,11 +17,13 @@
 //! - APC_LEVEL (1): APC delivery enabled
 //! - DISPATCH_LEVEL (2): DPC execution, scheduler runs
 //! - Device IRQLs (3-26): Hardware interrupts
-//! - HIGH_LEVEL (31): Clock, IPI, power fail
+//! - IPI_LEVEL (29): Inter-processor interrupts
+//! - HIGH_LEVEL (31): Clock, power fail
 //!
 //! # Key Structures
 //!
-//! - `KPRCB`: Per-processor control block
+//! - `KPCR`: Per-processor control region (IRQL, IDT, GDT)
+//! - `KPRCB`: Per-processor control block (scheduling, IPI, queued locks)
 //! - `KTHREAD`: Kernel thread object
 //! - `KPROCESS`: Kernel process object
 //! - `DISPATCHER_HEADER`: Common header for waitable objects
@@ -30,9 +33,14 @@ pub mod list;
 pub mod thread;
 pub mod process;
 pub mod prcb;
+pub mod kpcr;
 pub mod scheduler;
 pub mod idle;
 pub mod init;
+
+// SMP support
+pub mod queued_spinlock;
+pub mod ipi;
 
 // Synchronization primitives
 pub mod dispatcher;
@@ -71,7 +79,44 @@ pub mod profile;
 pub use list::ListEntry;
 pub use thread::{KThread, ThreadState};
 pub use process::{KProcess, ProcessState};
-pub use prcb::KPrcb;
+pub use prcb::{
+    KPrcb, KAffinity, KSpinLockQueue, LockQueueNumber, KipiWorker, KipiBroadcastWorker,
+    ipi_request, IPI_PACKET_SHIFT, IPI_REQUEST_MASK, LOCK_QUEUE_MAXIMUM, MAX_CPUS,
+    get_current_prcb, get_current_prcb_mut, get_prcb, get_prcb_mut,
+    ki_get_processor_block, get_active_cpu_count, ke_get_active_processors,
+    ki_get_idle_summary, ki_set_processor_idle, ki_clear_processor_idle,
+    ke_get_current_processor_number, ke_get_current_processor_set_member,
+};
+
+// Re-export KPCR types
+pub use kpcr::{
+    KPcr, Kirql, irql, get_current_kpcr, get_current_kpcr_mut, get_kpcr,
+    ke_get_current_irql, ke_raise_irql, ke_lower_irql,
+    ke_raise_irql_to_dpc_level, ke_raise_irql_to_synch_level,
+    ki_enter_interrupt, ki_exit_interrupt,
+    ke_is_executing_interrupt, ke_is_dpc_active,
+};
+
+// Re-export queued spinlock types
+pub use queued_spinlock::{
+    KQueuedSpinLock, KLockQueueHandle, KSpinLock as NtSpinLock,
+    ke_acquire_queued_spinlock, ke_release_queued_spinlock,
+    ke_acquire_queued_spinlock_at_dpc_level, ke_release_queued_spinlock_from_dpc_level,
+    ke_try_to_acquire_queued_spinlock,
+    ke_acquire_in_stack_queued_spinlock, ke_release_in_stack_queued_spinlock,
+    ke_acquire_spin_lock, ke_release_spin_lock,
+    ke_acquire_spin_lock_at_dpc_level, ke_release_spin_lock_from_dpc_level,
+};
+
+// Re-export IPI types
+pub use ipi::{
+    IPI_VECTOR, IPI_VECTOR_RESCHEDULE, IPI_VECTOR_TLB_SHOOTDOWN, IPI_VECTOR_STOP,
+    ki_ipi_send, ki_ipi_send_apc, ki_ipi_send_dpc, ki_ipi_send_freeze,
+    ki_ipi_send_packet, ki_ipi_process_requests, ke_ipi_generic_call,
+    ki_freeze_all_processors, ki_thaw_all_processors,
+    ki_flush_single_tb, ki_flush_entire_tb, TlbShootdownContext,
+    ki_ipi_interrupt_handler,
+};
 
 // Re-export synchronization types
 pub use dispatcher::{DispatcherHeader, DispatcherType, KWaitBlock, WaitType, WaitStatus};
