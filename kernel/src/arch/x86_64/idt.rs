@@ -23,6 +23,9 @@ use crate::hal::apic;
 pub mod vector {
     pub const TIMER: u8 = 32;
     pub const KEYBOARD: u8 = 33;
+    // SMP IPIs (high vectors)
+    pub const IPI_STOP: u8 = 0xFC;
+    pub const IPI_RESCHEDULE: u8 = 0xFD;
     pub const TLB_SHOOTDOWN: u8 = 0xFE;
     pub const SPURIOUS: u8 = 0xFF;
 }
@@ -76,7 +79,9 @@ static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
     // Keyboard interrupt (vector 33) - PS/2 keyboard
     idt[vector::KEYBOARD].set_handler_fn(keyboard_interrupt_handler);
 
-    // TLB shootdown IPI handler (vector 0xFE)
+    // SMP IPI handlers
+    idt[vector::IPI_STOP].set_handler_fn(ipi_stop_handler);
+    idt[vector::IPI_RESCHEDULE].set_handler_fn(ipi_reschedule_handler);
     idt[vector::TLB_SHOOTDOWN].set_handler_fn(tlb_shootdown_ipi_handler);
 
     // Spurious interrupt handler
@@ -257,6 +262,38 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     // For PIC, we need to send EOI to the master PIC at port 0x20
     unsafe {
         crate::arch::io::outb(0x20, 0x20);
+    }
+}
+
+/// IPI STOP handler (vector 0xFC)
+/// Halts this CPU immediately (for shutdown or panic)
+extern "x86-interrupt" fn ipi_stop_handler(_stack_frame: InterruptStackFrame) {
+    // Log that we're stopping
+    crate::serial_println!("[IPI] CPU {} received STOP IPI - halting", unsafe {
+        crate::arch::x86_64::percpu::get_cpu_id()
+    });
+
+    // Send EOI before halting
+    apic::eoi();
+
+    // Halt this CPU forever
+    loop {
+        unsafe {
+            core::arch::asm!("cli", "hlt");
+        }
+    }
+}
+
+/// IPI RESCHEDULE handler (vector 0xFD)
+/// Forces this CPU to run the scheduler immediately
+extern "x86-interrupt" fn ipi_reschedule_handler(_stack_frame: InterruptStackFrame) {
+    // Send EOI first
+    apic::eoi();
+
+    // Force a reschedule by calling the dispatcher
+    // This will select the highest priority ready thread
+    unsafe {
+        crate::ke::scheduler::ki_dispatch_interrupt();
     }
 }
 
