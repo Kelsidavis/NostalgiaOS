@@ -974,8 +974,21 @@ fn thread_start_wrapper(_param: *mut u8) {
 fn sys_get_current_process_id(
     _: usize, _: usize, _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
-    // Return process ID (for now, always 4 - the System process)
-    4
+    unsafe {
+        let prcb = crate::ke::prcb::get_current_prcb();
+        if !prcb.current_thread.is_null() {
+            // Get process from current thread, then get process ID
+            let process = (*prcb.current_thread).process;
+            if !process.is_null() {
+                (*process).process_id as isize
+            } else {
+                0 // No process, return System process ID
+            }
+        } else {
+            // No current thread, return System process ID
+            0
+        }
+    }
 }
 
 /// NtGetCurrentThreadId - Get current thread ID
@@ -4328,15 +4341,31 @@ fn sys_unmap_view_of_section(
     base_address: usize,
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    use crate::mm::{mm_find_section_by_view_address, mm_unmap_view_of_section};
+
     if base_address == 0 {
-        return -1;
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
     }
 
-    // We need to find the section for this base address
-    // For now, this is a stub - full implementation would track views
-    crate::serial_println!("[SYSCALL] NtUnmapViewOfSection - stub at {:#x}", base_address);
+    crate::serial_println!("[SYSCALL] NtUnmapViewOfSection(base={:#x})", base_address);
 
-    0
+    // Find the section containing this view
+    unsafe {
+        let section = mm_find_section_by_view_address(base_address as u64);
+        if section.is_null() {
+            crate::serial_println!("[SYSCALL] NtUnmapViewOfSection: no section found at {:#x}", base_address);
+            return 0xC0000225u32 as isize; // STATUS_NOT_FOUND
+        }
+
+        // Unmap the view from the section
+        if mm_unmap_view_of_section(section, base_address as u64) {
+            crate::serial_println!("[SYSCALL] NtUnmapViewOfSection: unmapped view at {:#x}", base_address);
+            0 // STATUS_SUCCESS
+        } else {
+            crate::serial_println!("[SYSCALL] NtUnmapViewOfSection: failed to unmap view");
+            0xC0000001u32 as isize // STATUS_UNSUCCESSFUL
+        }
+    }
 }
 
 /// NtQuerySection - Query section information

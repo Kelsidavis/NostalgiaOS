@@ -199,6 +199,7 @@ pub use section::{
     mm_close_section,
     mm_map_view_of_section,
     mm_unmap_view_of_section,
+    mm_find_section_by_view_address,
     mm_extend_section,
     mm_query_section,
     mm_get_section_stats,

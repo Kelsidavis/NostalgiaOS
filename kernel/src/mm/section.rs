@@ -660,3 +660,21 @@ pub fn mm_get_section_stats() -> SectionStats {
 
     stats
 }
+
+/// Find a section by its mapped view base address
+///
+/// Searches all active sections for a view with the given base address.
+/// Returns a pointer to the section if found, null otherwise.
+pub unsafe fn mm_find_section_by_view_address(base_address: u64) -> *mut Section {
+    for section in SECTION_POOL.iter_mut() {
+        if section.active {
+            // Check if any view in this section has the given base address
+            for view in section.views.iter() {
+                if view.active && view.base_address == base_address {
+                    return section as *mut Section;
+                }
+            }
+        }
+    }
+    core::ptr::null_mut()
+}
