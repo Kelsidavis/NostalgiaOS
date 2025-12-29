@@ -147,7 +147,7 @@ const HISTORY_SIZE: usize = 32;
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
     "acpi",
-    "cat", "cd", "clear", "cls", "copy", "cp", "cpuinfo",
+    "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "dir", "dump", "echo", "erase", "ex", "exit",
     "hal", "help", "history",
     "int", "io",
@@ -1109,6 +1109,9 @@ impl Shell {
         // Memory map
         } else if eq_ignore_case(cmd, "memmap") {
             commands::cmd_memmap(&args[1..argc]);
+        // CPU features
+        } else if eq_ignore_case(cmd, "cpufeatures") {
+            commands::cmd_cpufeatures(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

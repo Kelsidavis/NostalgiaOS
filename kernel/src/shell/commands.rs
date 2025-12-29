@@ -114,6 +114,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    int <type>     Trigger interrupts (div0, break, gpf)");
         outln!("    timer <cmd>    Timer diagnostics (apic, tsc, pit)");
         outln!("    memmap <cmd>   Physical memory map (regions, e820)");
+        outln!("    cpufeatures    CPU feature detection (CPUID)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -5821,4 +5822,380 @@ fn format_size(bytes: u64) -> &'static str {
 
         core::str::from_utf8_unchecked(&buf[..pos])
     }
+}
+
+// ============================================================================
+// CPU Features Command
+// ============================================================================
+
+/// CPU feature detection and information
+pub fn cmd_cpufeatures(args: &[&str]) {
+    if args.is_empty() || eq_ignore_case(args[0], "all") {
+        show_all_cpu_features();
+    } else if eq_ignore_case(args[0], "vendor") {
+        show_cpu_vendor();
+    } else if eq_ignore_case(args[0], "basic") {
+        show_basic_features();
+    } else if eq_ignore_case(args[0], "extended") {
+        show_extended_features();
+    } else if eq_ignore_case(args[0], "cache") {
+        show_cache_info();
+    } else if eq_ignore_case(args[0], "raw") {
+        if args.len() < 2 {
+            outln!("Usage: cpufeatures raw <leaf> [subleaf]");
+            return;
+        }
+        let leaf_str = args[1].trim_start_matches("0x").trim_start_matches("0X");
+        let leaf = u32::from_str_radix(leaf_str, 16).unwrap_or(0);
+        let subleaf = if args.len() > 2 {
+            let sub_str = args[2].trim_start_matches("0x").trim_start_matches("0X");
+            u32::from_str_radix(sub_str, 16).unwrap_or(0)
+        } else {
+            0
+        };
+        show_raw_cpuid(leaf, subleaf);
+    } else if eq_ignore_case(args[0], "help") {
+        outln!("CPU Feature Detection");
+        outln!("");
+        outln!("Usage: cpufeatures [command]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  all              Show all CPU features (default)");
+        outln!("  vendor           Show vendor and brand string");
+        outln!("  basic            Show basic feature flags");
+        outln!("  extended         Show extended feature flags");
+        outln!("  cache            Show cache information");
+        outln!("  raw <leaf>       Show raw CPUID leaf");
+        outln!("  help             Show this help");
+    } else {
+        outln!("Unknown cpufeatures command: {}", args[0]);
+    }
+}
+
+/// Read CPUID with rbx workaround
+fn cpuid(leaf: u32, subleaf: u32) -> (u32, u32, u32, u32) {
+    let eax: u32;
+    let ebx: u32;
+    let ecx: u32;
+    let edx: u32;
+
+    unsafe {
+        core::arch::asm!(
+            "push rbx",
+            "cpuid",
+            "mov {ebx_out:e}, ebx",
+            "pop rbx",
+            inout("eax") leaf => eax,
+            ebx_out = out(reg) ebx,
+            inout("ecx") subleaf => ecx,
+            out("edx") edx,
+        );
+    }
+
+    (eax, ebx, ecx, edx)
+}
+
+/// Show all CPU features
+fn show_all_cpu_features() {
+    show_cpu_vendor();
+    outln!("");
+    show_basic_features();
+    outln!("");
+    show_extended_features();
+}
+
+/// Show CPU vendor and brand
+fn show_cpu_vendor() {
+    outln!("CPU Identification");
+    outln!("");
+
+    // Leaf 0: Vendor string
+    let (max_leaf, ebx, ecx, edx) = cpuid(0, 0);
+
+    let mut vendor = [0u8; 12];
+    vendor[0..4].copy_from_slice(&ebx.to_le_bytes());
+    vendor[4..8].copy_from_slice(&edx.to_le_bytes());
+    vendor[8..12].copy_from_slice(&ecx.to_le_bytes());
+    let vendor_str = core::str::from_utf8(&vendor).unwrap_or("Unknown");
+
+    outln!("  Vendor:     {}", vendor_str);
+    outln!("  Max Leaf:   {:#x}", max_leaf);
+
+    // Leaf 1: Family/Model/Stepping
+    if max_leaf >= 1 {
+        let (eax, _ebx, _ecx, _edx) = cpuid(1, 0);
+
+        let stepping = eax & 0xF;
+        let model = (eax >> 4) & 0xF;
+        let family = (eax >> 8) & 0xF;
+        let ext_model = (eax >> 16) & 0xF;
+        let ext_family = (eax >> 20) & 0xFF;
+
+        let display_family = if family == 0xF {
+            family + ext_family
+        } else {
+            family
+        };
+
+        let display_model = if family == 0x6 || family == 0xF {
+            (ext_model << 4) + model
+        } else {
+            model
+        };
+
+        outln!("  Family:     {} (ext: {})", display_family, ext_family);
+        outln!("  Model:      {} (ext: {})", display_model, ext_model);
+        outln!("  Stepping:   {}", stepping);
+    }
+
+    // Extended leaf 0x80000000: Max extended leaf
+    let (max_ext_leaf, _, _, _) = cpuid(0x80000000, 0);
+
+    if max_ext_leaf >= 0x80000004 {
+        outln!("");
+        outln!("  Brand String:");
+
+        // Read brand string from leaves 0x80000002-0x80000004
+        let mut brand = [0u8; 48];
+
+        for i in 0..3 {
+            let (eax, ebx, ecx, edx) = cpuid(0x80000002 + i, 0);
+            let offset = (i as usize) * 16;
+            brand[offset..offset+4].copy_from_slice(&eax.to_le_bytes());
+            brand[offset+4..offset+8].copy_from_slice(&ebx.to_le_bytes());
+            brand[offset+8..offset+12].copy_from_slice(&ecx.to_le_bytes());
+            brand[offset+12..offset+16].copy_from_slice(&edx.to_le_bytes());
+        }
+
+        // Trim trailing nulls and whitespace
+        let brand_len = brand.iter().rposition(|&c| c != 0 && c != b' ').map_or(0, |i| i + 1);
+        let brand_str = core::str::from_utf8(&brand[..brand_len]).unwrap_or("Unknown");
+        outln!("    {}", brand_str.trim());
+    }
+}
+
+/// Show basic feature flags (leaf 1)
+fn show_basic_features() {
+    outln!("Basic CPU Features (CPUID.01H)");
+    outln!("");
+
+    let (max_leaf, _, _, _) = cpuid(0, 0);
+    if max_leaf < 1 {
+        outln!("  Leaf 1 not supported");
+        return;
+    }
+
+    let (_, _, ecx, edx) = cpuid(1, 0);
+
+    // EDX features
+    outln!("  EDX Features:");
+    let edx_features = [
+        (0, "FPU", "x87 FPU"),
+        (1, "VME", "Virtual Mode Extensions"),
+        (2, "DE", "Debugging Extensions"),
+        (3, "PSE", "Page Size Extension"),
+        (4, "TSC", "Time Stamp Counter"),
+        (5, "MSR", "Model Specific Registers"),
+        (6, "PAE", "Physical Address Extension"),
+        (7, "MCE", "Machine Check Exception"),
+        (8, "CX8", "CMPXCHG8B"),
+        (9, "APIC", "On-chip APIC"),
+        (11, "SEP", "SYSENTER/SYSEXIT"),
+        (12, "MTRR", "Memory Type Range Registers"),
+        (13, "PGE", "Page Global Enable"),
+        (14, "MCA", "Machine Check Architecture"),
+        (15, "CMOV", "Conditional Move"),
+        (16, "PAT", "Page Attribute Table"),
+        (17, "PSE36", "36-bit Page Size Extension"),
+        (19, "CLFSH", "CLFLUSH"),
+        (23, "MMX", "MMX"),
+        (24, "FXSR", "FXSAVE/FXRSTOR"),
+        (25, "SSE", "SSE"),
+        (26, "SSE2", "SSE2"),
+        (28, "HTT", "Hyper-Threading"),
+    ];
+
+    for (bit, name, _desc) in edx_features {
+        if (edx & (1 << bit)) != 0 {
+            out!("  {} ", name);
+        }
+    }
+    outln!("");
+
+    // ECX features
+    outln!("");
+    outln!("  ECX Features:");
+    let ecx_features = [
+        (0, "SSE3", "SSE3"),
+        (1, "PCLMULQDQ", "Carry-less Multiplication"),
+        (3, "MONITOR", "MONITOR/MWAIT"),
+        (9, "SSSE3", "SSSE3"),
+        (12, "FMA", "FMA"),
+        (13, "CX16", "CMPXCHG16B"),
+        (19, "SSE4.1", "SSE4.1"),
+        (20, "SSE4.2", "SSE4.2"),
+        (21, "x2APIC", "x2APIC"),
+        (22, "MOVBE", "MOVBE"),
+        (23, "POPCNT", "POPCNT"),
+        (24, "TSC-DL", "TSC-Deadline"),
+        (25, "AES", "AES-NI"),
+        (26, "XSAVE", "XSAVE"),
+        (27, "OSXSAVE", "OSXSAVE"),
+        (28, "AVX", "AVX"),
+        (29, "F16C", "F16C"),
+        (30, "RDRAND", "RDRAND"),
+    ];
+
+    for (bit, name, _desc) in ecx_features {
+        if (ecx & (1 << bit)) != 0 {
+            out!("  {} ", name);
+        }
+    }
+    outln!("");
+}
+
+/// Show extended feature flags (leaf 7)
+fn show_extended_features() {
+    outln!("Extended CPU Features (CPUID.07H)");
+    outln!("");
+
+    let (max_leaf, _, _, _) = cpuid(0, 0);
+    if max_leaf < 7 {
+        outln!("  Leaf 7 not supported");
+        return;
+    }
+
+    let (_, ebx, ecx, edx) = cpuid(7, 0);
+
+    outln!("  EBX Features:");
+    let ebx_features = [
+        (0, "FSGSBASE", "FSGSBASE"),
+        (3, "BMI1", "BMI1"),
+        (4, "HLE", "HLE"),
+        (5, "AVX2", "AVX2"),
+        (7, "SMEP", "SMEP"),
+        (8, "BMI2", "BMI2"),
+        (9, "ERMS", "Enhanced REP MOVSB/STOSB"),
+        (10, "INVPCID", "INVPCID"),
+        (11, "RTM", "RTM"),
+        (16, "AVX512F", "AVX-512 Foundation"),
+        (18, "RDSEED", "RDSEED"),
+        (19, "ADX", "ADX"),
+        (20, "SMAP", "SMAP"),
+        (23, "CLFLUSHOPT", "CLFLUSHOPT"),
+        (26, "CLWB", "CLWB"),
+        (29, "SHA", "SHA"),
+    ];
+
+    for (bit, name, _desc) in ebx_features {
+        if (ebx & (1 << bit)) != 0 {
+            out!("  {} ", name);
+        }
+    }
+    outln!("");
+
+    // ECX features
+    if ecx != 0 {
+        outln!("");
+        outln!("  ECX Features:");
+        let ecx_features = [
+            (1, "WAITPKG", "UMONITOR/UMWAIT/TPAUSE"),
+            (7, "CET_SS", "CET Shadow Stack"),
+            (22, "RDPID", "RDPID"),
+        ];
+
+        for (bit, name, _desc) in ecx_features {
+            if (ecx & (1 << bit)) != 0 {
+                out!("  {} ", name);
+            }
+        }
+        outln!("");
+    }
+
+    // Check for extended CPUID (AMD)
+    let (max_ext, _, _, _) = cpuid(0x80000000, 0);
+    if max_ext >= 0x80000001 {
+        let (_, _, _ext_ecx, ext_edx) = cpuid(0x80000001, 0);
+
+        outln!("");
+        outln!("  Extended (AMD) Features:");
+        let ext_features = [
+            (11, "SYSCALL", "SYSCALL/SYSRET"),
+            (20, "NX", "No-Execute"),
+            (26, "1GBPAGES", "1GB Pages"),
+            (27, "RDTSCP", "RDTSCP"),
+            (29, "LM", "Long Mode"),
+        ];
+
+        for (bit, name, _desc) in ext_features {
+            if (ext_edx & (1 << bit)) != 0 {
+                out!("  {} ", name);
+            }
+        }
+        outln!("");
+    }
+}
+
+/// Show cache information
+fn show_cache_info() {
+    outln!("CPU Cache Information");
+    outln!("");
+
+    let (max_leaf, _, _, _) = cpuid(0, 0);
+
+    // Try leaf 4 (Intel deterministic cache parameters)
+    if max_leaf >= 4 {
+        outln!("  Deterministic Cache Parameters (Leaf 4):");
+        outln!("");
+
+        for i in 0..8 {
+            let (eax, ebx, ecx, _edx) = cpuid(4, i);
+
+            let cache_type = eax & 0x1F;
+            if cache_type == 0 {
+                break; // No more caches
+            }
+
+            let level = (eax >> 5) & 0x7;
+            let type_name = match cache_type {
+                1 => "Data",
+                2 => "Instruction",
+                3 => "Unified",
+                _ => "Unknown",
+            };
+
+            let ways = ((ebx >> 22) & 0x3FF) + 1;
+            let partitions = ((ebx >> 12) & 0x3FF) + 1;
+            let line_size = (ebx & 0xFFF) + 1;
+            let sets = ecx + 1;
+
+            let size = ways * partitions * line_size * sets;
+            let size_kb = size / 1024;
+
+            outln!("    L{} {} Cache: {} KB ({} ways, {} line, {} sets)",
+                level, type_name, size_kb, ways, line_size, sets);
+        }
+    } else {
+        outln!("  Leaf 4 not supported");
+    }
+}
+
+/// Show raw CPUID output
+fn show_raw_cpuid(leaf: u32, subleaf: u32) {
+    let (eax, ebx, ecx, edx) = cpuid(leaf, subleaf);
+
+    outln!("CPUID Leaf {:#x}, Subleaf {:#x}", leaf, subleaf);
+    outln!("");
+    outln!("  EAX: {:#010x} ({})", eax, eax);
+    outln!("  EBX: {:#010x} ({})", ebx, ebx);
+    outln!("  ECX: {:#010x} ({})", ecx, ecx);
+    outln!("  EDX: {:#010x} ({})", edx, edx);
+    outln!("");
+
+    // Show as binary for feature flags
+    outln!("  Binary:");
+    outln!("  EAX: {:032b}", eax);
+    outln!("  EBX: {:032b}", ebx);
+    outln!("  ECX: {:032b}", ecx);
+    outln!("  EDX: {:032b}", edx);
 }
