@@ -82,9 +82,13 @@ pub use job::{
 pub use peb::{
     Peb, PebLdrData, LdrDataTableEntry,
     RtlUserProcessParameters, UnicodeString,
-    ListEntry64, peb_flags,
+    ListEntry64, peb_flags, ldr_flags,
     // PEB allocation and initialization
     allocate_peb, free_peb, init_peb, init_peb_ldr_data,
+    // LDR entry allocation and initialization
+    allocate_ldr_entry, free_ldr_entry, init_ldr_entry,
+    add_ldr_entry_to_lists, create_ldr_entry_for_module,
+    MAX_LDR_ENTRIES,
 };
 
 pub use teb::{

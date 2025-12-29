@@ -761,6 +761,9 @@ pub unsafe fn free_peb(peb: *mut Peb) {
 ///
 /// # Safety
 /// peb must be a valid pointer to a PEB structure
+///
+/// Note: image_size and entry_point are logged but not stored in PEB.
+/// They should be stored in the LDR_DATA_TABLE_ENTRY for the main executable.
 pub unsafe fn init_peb(
     peb: *mut Peb,
     image_base: u64,
@@ -791,6 +794,7 @@ pub unsafe fn init_peb(
 
     crate::serial_println!("[PEB] Initialized PEB at {:p}", peb);
     crate::serial_println!("[PEB]   Image base:   {:#x}", image_base);
+    crate::serial_println!("[PEB]   Image size:   {:#x}", image_size);
     crate::serial_println!("[PEB]   Entry point:  {:#x}", entry_point);
     crate::serial_println!("[PEB]   Subsystem:    {}", subsystem);
 }
@@ -818,4 +822,217 @@ pub unsafe fn init_peb_ldr_data(peb: *mut Peb, ldr: *mut PebLdrData) {
     peb.ldr = ldr;
 
     crate::serial_println!("[PEB] Initialized loader data at {:p}", ldr);
+}
+
+// ============================================================================
+// LDR_DATA_TABLE_ENTRY Pool and Initialization
+// ============================================================================
+
+/// Maximum number of loaded modules per process
+pub const MAX_LDR_ENTRIES: usize = 64;
+
+/// Static pool of LDR_DATA_TABLE_ENTRY structures
+static mut LDR_ENTRY_POOL: [LdrDataTableEntry; MAX_LDR_ENTRIES] = {
+    const INIT: LdrDataTableEntry = LdrDataTableEntry::new();
+    [INIT; MAX_LDR_ENTRIES]
+};
+
+/// LDR entry pool bitmap
+static mut LDR_ENTRY_POOL_BITMAP: u64 = 0;
+
+/// LDR entry pool lock
+static LDR_ENTRY_POOL_LOCK: crate::ke::SpinLock<()> = crate::ke::SpinLock::new(());
+
+/// Allocate a LDR_DATA_TABLE_ENTRY from the pool
+///
+/// # Safety
+/// Must be called with proper synchronization
+pub unsafe fn allocate_ldr_entry() -> Option<*mut LdrDataTableEntry> {
+    let _guard = LDR_ENTRY_POOL_LOCK.lock();
+
+    for bit_idx in 0..MAX_LDR_ENTRIES {
+        if LDR_ENTRY_POOL_BITMAP & (1 << bit_idx) == 0 {
+            LDR_ENTRY_POOL_BITMAP |= 1 << bit_idx;
+            let entry = &mut LDR_ENTRY_POOL[bit_idx] as *mut LdrDataTableEntry;
+            // Initialize to default
+            *entry = LdrDataTableEntry::new();
+            return Some(entry);
+        }
+    }
+    None
+}
+
+/// Free a LDR_DATA_TABLE_ENTRY back to the pool
+///
+/// # Safety
+/// Entry must have been allocated from this pool
+pub unsafe fn free_ldr_entry(entry: *mut LdrDataTableEntry) {
+    let _guard = LDR_ENTRY_POOL_LOCK.lock();
+
+    let base = LDR_ENTRY_POOL.as_ptr() as usize;
+    let offset = entry as usize - base;
+    let index = offset / core::mem::size_of::<LdrDataTableEntry>();
+    if index < MAX_LDR_ENTRIES {
+        LDR_ENTRY_POOL_BITMAP &= !(1 << index);
+    }
+}
+
+/// LDR entry flags
+pub mod ldr_flags {
+    /// Entry is statically linked (not dynamically loaded)
+    pub const LDRP_STATIC_LINK: u32 = 0x00000002;
+    /// Entry is the image (main executable)
+    pub const LDRP_IMAGE_DLL: u32 = 0x00000004;
+    /// Entry point has been called
+    pub const LDRP_ENTRY_PROCESSED: u32 = 0x00004000;
+    /// Entry is being processed
+    pub const LDRP_PROCESS_ATTACH_CALLED: u32 = 0x00080000;
+    /// DLL can be relocated
+    pub const LDRP_REDIRECTED: u32 = 0x10000000;
+}
+
+/// Initialize a LDR_DATA_TABLE_ENTRY for a loaded module
+///
+/// # Arguments
+/// * `entry` - Pointer to entry to initialize
+/// * `dll_base` - Base address of the loaded module
+/// * `entry_point` - Entry point address
+/// * `size_of_image` - Size of the module image
+/// * `name` - Module name (base name only)
+/// * `is_exe` - True if this is the main executable
+///
+/// # Safety
+/// entry must be a valid allocated LdrDataTableEntry
+pub unsafe fn init_ldr_entry(
+    entry: *mut LdrDataTableEntry,
+    dll_base: u64,
+    entry_point: u64,
+    size_of_image: u32,
+    name: &[u8],
+    is_exe: bool,
+) {
+    let entry = &mut *entry;
+
+    // Set module addresses
+    entry.dll_base = dll_base as *mut u8;
+    entry.entry_point = entry_point as *mut u8;
+    entry.size_of_image = size_of_image;
+
+    // Set initial load count
+    entry.load_count = if is_exe { u16::MAX } else { 1 }; // -1 for exe (pinned)
+
+    // Set flags
+    entry.flags = ldr_flags::LDRP_STATIC_LINK;
+    if !is_exe {
+        entry.flags |= ldr_flags::LDRP_IMAGE_DLL;
+    }
+
+    // Initialize links (will be updated when added to list)
+    entry.in_load_order_links.init_head();
+    entry.in_memory_order_links.init_head();
+    entry.in_initialization_order_links.init_head();
+    entry.hash_links.init_head();
+    entry.node_module_link.init_head();
+
+    // Set the base name
+    // In a full implementation, we'd allocate unicode string buffers
+    // For now, just log what we're initializing
+    crate::serial_println!("[LDR] Initialized entry for '{}'",
+        core::str::from_utf8_unchecked(name));
+    crate::serial_println!("[LDR]   Base:        {:#x}", dll_base);
+    crate::serial_println!("[LDR]   Entry:       {:#x}", entry_point);
+    crate::serial_println!("[LDR]   Size:        {:#x}", size_of_image);
+    crate::serial_println!("[LDR]   Flags:       {:#x}", entry.flags);
+}
+
+/// Add a LDR entry to the PEB_LDR_DATA module lists
+///
+/// # Safety
+/// - ldr must be a valid initialized PEB_LDR_DATA
+/// - entry must be a valid initialized LdrDataTableEntry
+pub unsafe fn add_ldr_entry_to_lists(ldr: *mut PebLdrData, entry: *mut LdrDataTableEntry) {
+    let ldr = &mut *ldr;
+    let entry = &mut *entry;
+
+    // Add to load order list (at tail)
+    insert_tail_list64(
+        &mut ldr.in_load_order_module_list,
+        &mut entry.in_load_order_links,
+    );
+
+    // Add to memory order list (at tail)
+    // Memory order list uses a different offset into LdrDataTableEntry
+    insert_tail_list64(
+        &mut ldr.in_memory_order_module_list,
+        &mut entry.in_memory_order_links,
+    );
+
+    // Add to init order list (at tail)
+    insert_tail_list64(
+        &mut ldr.in_initialization_order_module_list,
+        &mut entry.in_initialization_order_links,
+    );
+}
+
+/// Insert entry at tail of a doubly-linked list
+unsafe fn insert_tail_list64(head: &mut ListEntry64, entry: &mut ListEntry64) {
+    let head_addr = head as *mut ListEntry64 as u64;
+    let entry_addr = entry as *mut ListEntry64 as u64;
+
+    // Get current tail
+    let tail_addr = head.blink;
+
+    // Entry's forward points to head, backward points to old tail
+    entry.flink = head_addr;
+    entry.blink = tail_addr;
+
+    // Old tail's forward now points to new entry
+    if tail_addr != 0 {
+        let tail = tail_addr as *mut ListEntry64;
+        (*tail).flink = entry_addr;
+    }
+
+    // Head's backward points to new entry (new tail)
+    head.blink = entry_addr;
+
+    // If list was empty, head's forward also points to entry
+    if head.flink == head_addr {
+        head.flink = entry_addr;
+    }
+}
+
+/// Create and add a LDR entry for a loaded module
+///
+/// Convenience function that allocates an entry, initializes it,
+/// and adds it to the loader lists.
+///
+/// # Returns
+/// Pointer to the new entry, or null on failure
+///
+/// # Safety
+/// ldr must be a valid initialized PEB_LDR_DATA
+pub unsafe fn create_ldr_entry_for_module(
+    ldr: *mut PebLdrData,
+    dll_base: u64,
+    entry_point: u64,
+    size_of_image: u32,
+    name: &[u8],
+    is_exe: bool,
+) -> *mut LdrDataTableEntry {
+    // Allocate entry
+    let entry = match allocate_ldr_entry() {
+        Some(e) => e,
+        None => {
+            crate::serial_println!("[LDR] Failed to allocate LDR entry");
+            return core::ptr::null_mut();
+        }
+    };
+
+    // Initialize entry
+    init_ldr_entry(entry, dll_base, entry_point, size_of_image, name, is_exe);
+
+    // Add to lists
+    add_ldr_entry_to_lists(ldr, entry);
+
+    entry
 }
