@@ -196,6 +196,7 @@ pub use section::{
     SectionType,
     SectionInfo,
     SectionStats,
+    SectionSnapshot,
     ControlArea,
     section_access,
     section_type,
@@ -210,6 +211,8 @@ pub use section::{
     mm_extend_section,
     mm_query_section,
     mm_get_section_stats,
+    mm_get_section_snapshots,
+    section_type_name,
     MAX_SECTIONS,
     SECTION_ALLOCATION_GRANULARITY,
 };

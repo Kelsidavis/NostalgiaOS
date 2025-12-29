@@ -161,11 +161,11 @@ const COMMANDS: &[&str] = &[
     "pagetable", "pci", "pe", "pfn", "pipes", "pool", "pooltag", "port", "prcb", "ps", "pwd",
     "quit",
     "ramdisk", "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
-    "sc", "sched", "se", "services", "smbios", "stack", "suspend", "sysinfo",
+    "sc", "sched", "se", "section", "services", "smbios", "stack", "suspend", "sysinfo",
     "tasks", "time", "timer", "timerq", "touch", "type",
     "usertest",
     "vad", "veh", "ver", "version", "volumes",
-    "waitq",
+    "waitq", "wset",
 ];
 
 /// Current working directory
@@ -1208,6 +1208,12 @@ impl Shell {
         // VAD viewer
         } else if eq_ignore_case(cmd, "vad") {
             commands::cmd_vad(&args[1..argc]);
+        // Section object viewer
+        } else if eq_ignore_case(cmd, "section") {
+            commands::cmd_section(&args[1..argc]);
+        // Working set viewer
+        } else if eq_ignore_case(cmd, "wset") {
+            commands::cmd_wset(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

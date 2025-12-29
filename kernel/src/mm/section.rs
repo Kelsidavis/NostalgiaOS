@@ -678,3 +678,77 @@ pub unsafe fn mm_find_section_by_view_address(base_address: u64) -> *mut Section
     }
     core::ptr::null_mut()
 }
+
+// ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// Section snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct SectionSnapshot {
+    /// Section index
+    pub index: u32,
+    /// Section type
+    pub section_type: SectionType,
+    /// Size in bytes
+    pub size: u64,
+    /// Number of views
+    pub view_count: u32,
+    /// Reference count
+    pub ref_count: u32,
+    /// Is file-backed
+    pub file_backed: bool,
+}
+
+impl SectionSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            index: 0,
+            section_type: SectionType::PageFile,
+            size: 0,
+            view_count: 0,
+            ref_count: 0,
+            file_backed: false,
+        }
+    }
+}
+
+/// Get snapshots of all active sections
+pub fn mm_get_section_snapshots(max_count: usize) -> ([SectionSnapshot; 32], usize) {
+    let mut snapshots = [SectionSnapshot::empty(); 32];
+    let mut count = 0;
+
+    let limit = max_count.min(32).min(MAX_SECTIONS);
+
+    unsafe {
+        for i in 0..MAX_SECTIONS {
+            if count >= limit {
+                break;
+            }
+
+            let section = &SECTION_POOL[i];
+            if section.active {
+                let snap = &mut snapshots[count];
+                snap.index = i as u32;
+                snap.section_type = section.section_type;
+                snap.size = section.size;
+                snap.view_count = section.view_count();
+                snap.ref_count = section.ref_count;
+                snap.file_backed = section.is_file_backed();
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get section type name
+pub fn section_type_name(section_type: SectionType) -> &'static str {
+    match section_type {
+        SectionType::PageFile => "PageFile",
+        SectionType::FileBacked => "FileBacked",
+        SectionType::Image => "Image",
+        SectionType::PhysicalMemory => "Physical",
+    }
+}

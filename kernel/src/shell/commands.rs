@@ -12948,3 +12948,151 @@ fn format_vad_size(size: u64) -> &'static str {
         "<4KB"
     }
 }
+
+// ============================================================================
+// Section Object Viewer Command (section)
+// ============================================================================
+
+/// section - Section object viewer
+///
+/// Display section object statistics and list active sections.
+///
+/// Usage: section [stats|list]
+///
+/// Subcommands:
+///   stats  - Show section pool statistics (default)
+///   list   - List all active section objects
+pub fn cmd_section(args: &[&str]) {
+    if args.is_empty() {
+        show_section_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_section_stats();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_section_list();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("section - Section Object Viewer");
+        outln!("");
+        outln!("Usage: section [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show section pool statistics (default)");
+        outln!("  list   - List all active section objects");
+        outln!("");
+        outln!("Section Types:");
+        outln!("  PageFile  - Shared memory (page-file backed)");
+        outln!("  FileBacked - Memory-mapped file");
+        outln!("  Image     - Executable/DLL");
+        outln!("  Physical  - Physical memory mapping");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'section help' for usage information");
+    }
+}
+
+fn show_section_stats() {
+    use crate::mm::{mm_get_section_stats, MAX_SECTIONS};
+
+    let stats = mm_get_section_stats();
+
+    outln!("Section Object Statistics");
+    outln!("=========================");
+    outln!("");
+    outln!("Max Sections:     {}", MAX_SECTIONS);
+    outln!("Active Sections:  {}", stats.active_sections);
+    outln!("Total Views:      {}", stats.total_views);
+}
+
+fn show_section_list() {
+    use crate::mm::{mm_get_section_snapshots, mm_get_section_stats, section_type_name};
+
+    let stats = mm_get_section_stats();
+    outln!("Active Section Objects");
+    outln!("======================");
+    outln!("");
+    outln!("Pool: {}/{} active", stats.active_sections, stats.total_sections);
+    outln!("");
+
+    let (snapshots, count) = mm_get_section_snapshots(32);
+
+    if count == 0 {
+        outln!("No section objects currently active");
+        return;
+    }
+
+    outln!("{:<4} {:<12} {:<12} {:<8} {:<6} {:<10}",
+        "Idx", "Type", "Size", "Views", "Refs", "FileBacked");
+    outln!("------------------------------------------------------");
+
+    for i in 0..count {
+        let section = &snapshots[i];
+        let file_str = if section.file_backed { "Yes" } else { "No" };
+
+        outln!("{:<4} {:<12} {:<12} {:<8} {:<6} {:<10}",
+            section.index,
+            section_type_name(section.section_type),
+            format_vad_size(section.size),
+            section.view_count,
+            section.ref_count,
+            file_str
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} sections", count);
+}
+
+// ============================================================================
+// Working Set Viewer Command (wset)
+// ============================================================================
+
+/// wset - Working set viewer
+///
+/// Display working set statistics for address spaces.
+///
+/// Usage: wset [stats]
+pub fn cmd_wset(args: &[&str]) {
+    if args.is_empty() {
+        show_working_set_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_working_set_stats();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("wset - Working Set Viewer");
+        outln!("");
+        outln!("Usage: wset [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show working set statistics (default)");
+        outln!("");
+        outln!("Working sets track the resident pages for each address space.");
+        outln!("Pages not in the working set may be paged out.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'wset help' for usage information");
+    }
+}
+
+fn show_working_set_stats() {
+    use crate::mm::mm_get_address_space_stats;
+
+    let stats = mm_get_address_space_stats();
+
+    outln!("Working Set / Address Space Statistics");
+    outln!("======================================");
+    outln!("");
+    outln!("Address Spaces:");
+    outln!("  Max:       {}", stats.total);
+    outln!("  Allocated: {}", stats.allocated);
+    outln!("  Free:      {}", stats.free);
+    outln!("");
+    outln!("Note: Use 'mm' command for detailed memory statistics.");
+}
