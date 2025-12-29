@@ -1102,6 +1102,19 @@ fn sys_close(
         return STATUS_SUCCESS;
     }
 
+    // Check if this is a sync object handle (handles >= SYNC_HANDLE_BASE)
+    if handle >= SYNC_HANDLE_BASE && handle < FILE_HANDLE_BASE {
+        if let Some((_, obj_type)) = unsafe { get_sync_object(handle) } {
+            // Free the sync object
+            unsafe { free_sync_object(handle); }
+            crate::serial_println!("[SYSCALL] NtClose: closed {:?} sync object", obj_type);
+            return STATUS_SUCCESS;
+        }
+        // Handle in sync range but not valid
+        crate::serial_println!("[SYSCALL] NtClose: invalid sync handle");
+        return STATUS_INVALID_HANDLE;
+    }
+
     // Check if this is a file handle (handles >= FILE_HANDLE_BASE)
     if handle >= FILE_HANDLE_BASE {
         if let Some(fs_handle) = unsafe { get_fs_handle(handle) } {
