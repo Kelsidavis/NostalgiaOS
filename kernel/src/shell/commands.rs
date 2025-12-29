@@ -110,6 +110,12 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
+        outln!("  Kernel Subsystems:");
+        outln!("    ob <cmd>       Object Manager (types, dir, handles)");
+        outln!("    rtl <cmd>      Runtime Library (time, random, crc32)");
+        outln!("    ldr <cmd>      Loader (info, modules, dll)");
+        outln!("    pe <file>      Parse PE/DLL file headers");
+        outln!("");
         outln!("  Use UP/DOWN arrows to navigate command history.");
     } else {
         let topic = args[0];
@@ -2978,5 +2984,173 @@ pub fn cmd_rtl(args: &[&str]) {
         }
     } else {
         outln!("Unknown rtl command: {}", cmd);
+    }
+}
+
+// ============================================================================
+// Object Manager (OB) Command
+// ============================================================================
+
+/// Object Manager test command
+pub fn cmd_ob(args: &[&str]) {
+    use crate::ob;
+
+    if args.is_empty() {
+        outln!("Object Manager (OB) Commands");
+        outln!("");
+        outln!("Usage: ob <command> [args]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  info               Show OB statistics");
+        outln!("  types              List registered object types");
+        outln!("  dir [path]         List directory contents");
+        outln!("  handles            Show system handle table");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "info") {
+        outln!("Object Manager Information");
+        outln!("");
+        outln!("Constants:");
+        outln!("  MAX_OBJECT_TYPES:      {}", ob::MAX_OBJECT_TYPES);
+        outln!("  MAX_DIRECTORY_ENTRIES: {}", ob::MAX_DIRECTORY_ENTRIES);
+        outln!("  MAX_HANDLES:           {}", ob::MAX_HANDLES);
+        outln!("  OB_MAX_NAME_LENGTH:    {}", ob::OB_MAX_NAME_LENGTH);
+        outln!("");
+        outln!("Well-known type indices:");
+        outln!("  TYPE_TYPE:       {}", ob::type_index::TYPE_TYPE);
+        outln!("  TYPE_DIRECTORY:  {}", ob::type_index::TYPE_DIRECTORY);
+        outln!("  TYPE_PROCESS:    {}", ob::type_index::TYPE_PROCESS);
+        outln!("  TYPE_THREAD:     {}", ob::type_index::TYPE_THREAD);
+        outln!("  TYPE_EVENT:      {}", ob::type_index::TYPE_EVENT);
+        outln!("  TYPE_FILE:       {}", ob::type_index::TYPE_FILE);
+        outln!("  TYPE_SECTION:    {}", ob::type_index::TYPE_SECTION);
+    } else if eq_ignore_case(cmd, "types") {
+        outln!("Registered Object Types:");
+        outln!("");
+        outln!("{:<5} {:<20} {:<10}", "Idx", "Name", "Objects");
+        outln!("---------------------------------------------");
+
+        for i in 1..ob::MAX_OBJECT_TYPES {
+            if let Some(obj_type) = ob::get_object_type(i as u8) {
+                // Check if type is initialized (has a name)
+                let name_bytes = obj_type.name_slice();
+                if !name_bytes.is_empty() {
+                    let name = core::str::from_utf8(name_bytes).unwrap_or("?");
+                    outln!("{:<5} {:<20} {:<10}",
+                           i,
+                           name,
+                           obj_type.get_object_count());
+                }
+            }
+        }
+    } else if eq_ignore_case(cmd, "dir") {
+        let path = if args.len() > 1 { args[1] } else { "\\" };
+
+        outln!("Directory: {}", path);
+        outln!("");
+
+        unsafe {
+            // Get the appropriate directory
+            let dir = if path == "\\" || path == "/" {
+                ob::get_root_directory()
+            } else if path == "\\ObjectTypes" || path == "/ObjectTypes" {
+                ob::get_object_types_directory()
+            } else if path == "\\Device" || path == "/Device" {
+                ob::get_device_directory()
+            } else if path == "\\BaseNamedObjects" || path == "/BaseNamedObjects" {
+                ob::get_base_named_objects()
+            } else {
+                outln!("Unknown directory: {}", path);
+                outln!("Known directories: \\, \\ObjectTypes, \\Device, \\BaseNamedObjects");
+                return;
+            };
+
+            if dir.is_null() {
+                outln!("  (Directory not found)");
+                return;
+            }
+
+            outln!("{:<20} {:<18} {:<10}", "Name", "Object", "Type");
+            outln!("----------------------------------------------------");
+
+            let mut count = 0;
+            for obj_ptr in (*dir).iter() {
+                // Get object header to retrieve name and type
+                let header = ob::ObjectHeader::from_body(obj_ptr);
+
+                // Get name if available
+                let mut name_buf = [0u8; 32];
+                let name = if let Some(n) = (*header).get_name() {
+                    let len = n.len().min(name_buf.len());
+                    name_buf[..len].copy_from_slice(&n[..len]);
+                    core::str::from_utf8(&name_buf[..len]).unwrap_or("?")
+                } else {
+                    "<unnamed>"
+                };
+
+                // Get type name
+                let type_name = if let Some(t) = (*header).get_type() {
+                    let name_bytes = t.name_slice();
+                    core::str::from_utf8(name_bytes).unwrap_or("?")
+                } else {
+                    "?"
+                };
+
+                outln!("{:<20} {:p} {:<10}", name, obj_ptr, type_name);
+                count += 1;
+            }
+
+            if count == 0 {
+                outln!("  (Empty directory)");
+            } else {
+                outln!("");
+                outln!("Total: {} entries", count);
+            }
+        }
+    } else if eq_ignore_case(cmd, "handles") {
+        outln!("System Handle Table");
+        outln!("");
+
+        unsafe {
+            let table = ob::get_system_handle_table();
+
+            if table.is_null() {
+                outln!("  (Handle table not found)");
+                return;
+            }
+
+            outln!("{:<10} {:<10} {:p}", "Handle", "Access", "Object");
+            outln!("------------------------------------------");
+
+            let mut count = 0;
+            for i in 0..ob::MAX_HANDLES {
+                // get_entry takes Handle (u32), not index
+                let handle = (i as u32) * ob::HANDLE_INCREMENT;
+                if let Some(entry) = (*table).get_entry(handle) {
+                    outln!("{:#010x} {:#010x} {:p}",
+                           handle,
+                           entry.access_mask,
+                           entry.object);
+                    count += 1;
+
+                    if count >= 20 {
+                        outln!("  ... (showing first 20 handles)");
+                        break;
+                    }
+                }
+            }
+
+            if count == 0 {
+                outln!("  (No handles)");
+            } else {
+                outln!("");
+                outln!("Total shown: {} handles", count);
+            }
+        }
+    } else {
+        outln!("Unknown ob command: {}", cmd);
     }
 }

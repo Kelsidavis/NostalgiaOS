@@ -1063,6 +1063,9 @@ impl Shell {
         // RTL (Runtime Library)
         } else if eq_ignore_case(cmd, "rtl") {
             commands::cmd_rtl(&args[1..argc]);
+        // Object Manager
+        } else if eq_ignore_case(cmd, "ob") {
+            commands::cmd_ob(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
