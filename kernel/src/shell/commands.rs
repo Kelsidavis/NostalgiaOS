@@ -116,6 +116,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    memmap <cmd>   Physical memory map (regions, e820)");
         outln!("    cpufeatures    CPU feature detection (CPUID)");
         outln!("    pagetable      Page table walker (cr3, walk, translate)");
+        outln!("    msr            MSR browser (common, syscall, apic)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -6504,4 +6505,258 @@ fn show_kernel_mappings() {
     let rsp_kernel = rsp >= 0xFFFF_8000_0000_0000;
     outln!("  RIP in kernel space: {}", if rip_kernel { "Yes" } else { "No" });
     outln!("  RSP in kernel space: {}", if rsp_kernel { "Yes" } else { "No" });
+}
+
+// ============================================================================
+// MSR Browser Command
+// ============================================================================
+
+/// MSR (Model Specific Register) browser
+pub fn cmd_msr(args: &[&str]) {
+    if args.is_empty() || eq_ignore_case(args[0], "common") {
+        show_common_msrs();
+    } else if eq_ignore_case(args[0], "read") {
+        if args.len() < 2 {
+            outln!("Usage: msr read <msr_address>");
+            return;
+        }
+        let msr_str = args[1].trim_start_matches("0x").trim_start_matches("0X");
+        match u32::from_str_radix(msr_str, 16) {
+            Ok(msr) => read_msr_cmd(msr),
+            Err(_) => outln!("Error: Invalid MSR address '{}'", args[1]),
+        }
+    } else if eq_ignore_case(args[0], "apic") {
+        show_apic_msrs();
+    } else if eq_ignore_case(args[0], "syscall") {
+        show_syscall_msrs();
+    } else if eq_ignore_case(args[0], "perf") {
+        show_perf_msrs();
+    } else if eq_ignore_case(args[0], "pat") {
+        show_pat_msr();
+    } else if eq_ignore_case(args[0], "list") {
+        show_msr_list();
+    } else if eq_ignore_case(args[0], "help") {
+        outln!("MSR Browser");
+        outln!("");
+        outln!("Usage: msr [command]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  common          Show common MSRs (default)");
+        outln!("  read <addr>     Read specific MSR");
+        outln!("  apic            Show APIC MSRs");
+        outln!("  syscall         Show SYSCALL/SYSRET MSRs");
+        outln!("  perf            Show performance MSRs");
+        outln!("  pat             Show PAT (Page Attribute Table)");
+        outln!("  list            List known MSR addresses");
+        outln!("  help            Show this help");
+    } else {
+        outln!("Unknown msr command: {}", args[0]);
+    }
+}
+
+/// Read MSR safely
+fn read_msr(msr: u32) -> Result<u64, ()> {
+    let lo: u32;
+    let hi: u32;
+
+    unsafe {
+        core::arch::asm!(
+            "rdmsr",
+            in("ecx") msr,
+            out("eax") lo,
+            out("edx") hi,
+        );
+    }
+
+    Ok(((hi as u64) << 32) | (lo as u64))
+}
+
+/// Read and display a specific MSR
+fn read_msr_cmd(msr: u32) {
+    match read_msr(msr) {
+        Ok(value) => {
+            outln!("MSR {:#010x}:", msr);
+            outln!("  Value:  {:#018x}", value);
+            outln!("  Hi:     {:#010x}", (value >> 32) as u32);
+            outln!("  Lo:     {:#010x}", value as u32);
+            outln!("");
+            outln!("  Binary: {:064b}", value);
+        }
+        Err(_) => {
+            outln!("Error reading MSR {:#010x}", msr);
+        }
+    }
+}
+
+/// Show common MSRs
+fn show_common_msrs() {
+    outln!("Common Model Specific Registers");
+    outln!("");
+
+    let msrs = [
+        (0x10, "IA32_TIME_STAMP_COUNTER"),
+        (0x1B, "IA32_APIC_BASE"),
+        (0xFE, "IA32_MTRRCAP"),
+        (0x174, "IA32_SYSENTER_CS"),
+        (0x175, "IA32_SYSENTER_ESP"),
+        (0x176, "IA32_SYSENTER_EIP"),
+        (0x277, "IA32_PAT"),
+        (0xC0000080, "IA32_EFER"),
+        (0xC0000081, "IA32_STAR"),
+        (0xC0000082, "IA32_LSTAR"),
+        (0xC0000084, "IA32_FMASK"),
+        (0xC0000100, "IA32_FS_BASE"),
+        (0xC0000101, "IA32_GS_BASE"),
+        (0xC0000102, "IA32_KERNEL_GS_BASE"),
+    ];
+
+    outln!("  {:>12}  {:<28}  {:<18}", "Address", "Name", "Value");
+    outln!("  {:->12}  {:->28}  {:->18}", "", "", "");
+
+    for (addr, name) in msrs {
+        if let Ok(value) = read_msr(addr) {
+            outln!("  {:#012x}  {:<28}  {:#018x}", addr, name, value);
+        }
+    }
+}
+
+/// Show APIC-related MSRs
+fn show_apic_msrs() {
+    outln!("APIC Model Specific Registers");
+    outln!("");
+
+    if let Ok(apic_base) = read_msr(0x1B) {
+        outln!("IA32_APIC_BASE (0x1B): {:#018x}", apic_base);
+        outln!("");
+        outln!("  Base Address:  {:#018x}", apic_base & 0xFFFF_FFFF_FFFF_F000);
+        outln!("  BSP:           {}", (apic_base >> 8) & 1);
+        outln!("  x2APIC:        {}", (apic_base >> 10) & 1);
+        outln!("  Global Enable: {}", (apic_base >> 11) & 1);
+    }
+}
+
+/// Show SYSCALL/SYSRET MSRs
+fn show_syscall_msrs() {
+    outln!("SYSCALL/SYSRET Model Specific Registers");
+    outln!("");
+
+    // EFER
+    if let Ok(efer) = read_msr(0xC0000080) {
+        outln!("IA32_EFER (0xC0000080): {:#018x}", efer);
+        outln!("  SCE (SYSCALL Enable):     {}", efer & 1);
+        outln!("  LME (Long Mode Enable):   {}", (efer >> 8) & 1);
+        outln!("  LMA (Long Mode Active):   {}", (efer >> 10) & 1);
+        outln!("  NXE (No-Execute Enable):  {}", (efer >> 11) & 1);
+        outln!("");
+    }
+
+    // STAR
+    if let Ok(star) = read_msr(0xC0000081) {
+        outln!("IA32_STAR (0xC0000081): {:#018x}", star);
+        outln!("  SYSCALL CS:  {:#06x}", ((star >> 32) & 0xFFFF) as u16);
+        outln!("  SYSCALL SS:  {:#06x}", (((star >> 32) & 0xFFFF) + 8) as u16);
+        outln!("  SYSRET CS:   {:#06x}", (((star >> 48) & 0xFFFF) + 16) as u16);
+        outln!("  SYSRET SS:   {:#06x}", (((star >> 48) & 0xFFFF) + 8) as u16);
+        outln!("");
+    }
+
+    // LSTAR
+    if let Ok(lstar) = read_msr(0xC0000082) {
+        outln!("IA32_LSTAR (0xC0000082): {:#018x}", lstar);
+        outln!("  SYSCALL Entry Point (Long Mode)");
+        outln!("");
+    }
+
+    // CSTAR (Compatibility Mode - not used in 64-bit only)
+    if let Ok(cstar) = read_msr(0xC0000083) {
+        outln!("IA32_CSTAR (0xC0000083): {:#018x}", cstar);
+        outln!("  SYSCALL Entry Point (Compatibility Mode)");
+        outln!("");
+    }
+
+    // FMASK
+    if let Ok(fmask) = read_msr(0xC0000084) {
+        outln!("IA32_FMASK (0xC0000084): {:#018x}", fmask);
+        outln!("  RFLAGS mask on SYSCALL");
+    }
+}
+
+/// Show performance-related MSRs
+fn show_perf_msrs() {
+    outln!("Performance Model Specific Registers");
+    outln!("");
+
+    // TSC
+    if let Ok(tsc) = read_msr(0x10) {
+        outln!("IA32_TIME_STAMP_COUNTER (0x10): {}", tsc);
+        outln!("");
+    }
+
+    // MPERF/APERF (if available)
+    if let Ok(mperf) = read_msr(0xE7) {
+        outln!("IA32_MPERF (0xE7): {}", mperf);
+    }
+    if let Ok(aperf) = read_msr(0xE8) {
+        outln!("IA32_APERF (0xE8): {}", aperf);
+    }
+
+    outln!("");
+    outln!("Note: Some performance MSRs may not be available on all CPUs");
+}
+
+/// Show PAT (Page Attribute Table) MSR
+fn show_pat_msr() {
+    outln!("Page Attribute Table (PAT) MSR");
+    outln!("");
+
+    if let Ok(pat) = read_msr(0x277) {
+        outln!("IA32_PAT (0x277): {:#018x}", pat);
+        outln!("");
+
+        let pat_types = ["UC", "WC", "??", "??", "WT", "WP", "WB", "UC-"];
+
+        for i in 0..8 {
+            let entry = ((pat >> (i * 8)) & 0x7) as usize;
+            let type_name = if entry < pat_types.len() {
+                pat_types[entry]
+            } else {
+                "??"
+            };
+            outln!("  PA{}: {} ({})", i, entry, type_name);
+        }
+
+        outln!("");
+        outln!("Type meanings:");
+        outln!("  UC  = Uncacheable");
+        outln!("  WC  = Write Combining");
+        outln!("  WT  = Write Through");
+        outln!("  WP  = Write Protected");
+        outln!("  WB  = Write Back");
+        outln!("  UC- = Uncacheable (weak)");
+    }
+}
+
+/// Show list of known MSRs
+fn show_msr_list() {
+    outln!("Known Model Specific Registers");
+    outln!("");
+    outln!("Architectural MSRs:");
+    outln!("  0x10        IA32_TIME_STAMP_COUNTER (TSC)");
+    outln!("  0x1B        IA32_APIC_BASE");
+    outln!("  0xFE        IA32_MTRRCAP");
+    outln!("  0x174-176   IA32_SYSENTER_CS/ESP/EIP");
+    outln!("  0x277       IA32_PAT");
+    outln!("  0x2FF       IA32_MTRR_DEF_TYPE");
+    outln!("");
+    outln!("AMD64/Intel64 MSRs:");
+    outln!("  0xC0000080  IA32_EFER (Extended Feature Enable)");
+    outln!("  0xC0000081  IA32_STAR (SYSCALL target)");
+    outln!("  0xC0000082  IA32_LSTAR (Long Mode SYSCALL)");
+    outln!("  0xC0000083  IA32_CSTAR (Compat Mode SYSCALL)");
+    outln!("  0xC0000084  IA32_FMASK (SYSCALL RFLAGS mask)");
+    outln!("  0xC0000100  IA32_FS_BASE");
+    outln!("  0xC0000101  IA32_GS_BASE");
+    outln!("  0xC0000102  IA32_KERNEL_GS_BASE (for SWAPGS)");
+    outln!("");
+    outln!("Use 'msr read <addr>' to read any MSR");
 }

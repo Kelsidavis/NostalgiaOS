@@ -153,7 +153,7 @@ const COMMANDS: &[&str] = &[
     "int", "io",
     "ke",
     "ldr", "ls",
-    "md", "mem", "memmap", "memory", "mkdir", "mm", "mv",
+    "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net",
     "ob",
     "pagetable", "pci", "pe", "ps", "pwd",
@@ -1115,6 +1115,9 @@ impl Shell {
         // Page table walker
         } else if eq_ignore_case(cmd, "pagetable") {
             commands::cmd_pagetable(&args[1..argc]);
+        // MSR browser
+        } else if eq_ignore_case(cmd, "msr") {
+            commands::cmd_msr(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
