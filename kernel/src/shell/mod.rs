@@ -148,7 +148,7 @@ const HISTORY_SIZE: usize = 32;
 const COMMANDS: &[&str] = &[
     "acpi", "apic",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
-    "debug", "del", "dir", "dump", "echo", "erase", "ex", "exit",
+    "debug", "del", "desc", "descriptor", "dir", "dump", "echo", "erase", "ex", "exit",
     "hal", "help", "history",
     "int", "io",
     "ke",
@@ -1124,6 +1124,9 @@ impl Shell {
         // APIC viewer
         } else if eq_ignore_case(cmd, "apic") {
             commands::cmd_apic(&args[1..argc]);
+        // Descriptor table viewer
+        } else if eq_ignore_case(cmd, "descriptor") || eq_ignore_case(cmd, "desc") {
+            commands::cmd_descriptor(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

@@ -119,6 +119,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    msr            MSR browser (common, syscall, apic)");
         outln!("    port           I/O port browser (scan, inb/outb)");
         outln!("    apic           APIC viewer (lvt, ioapic, isr/irr)");
+        outln!("    desc[riptor]   GDT/IDT viewer (gdt, idt, tss)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -7732,4 +7733,545 @@ unsafe fn ioapic_read(base: u64, reg: u8) -> u32 {
 
     core::ptr::write_volatile(ioregsel, reg as u32);
     core::ptr::read_volatile(iowin)
+}
+
+// ============================================================================
+// GDT/IDT Viewer Command
+// ============================================================================
+
+/// GDT/IDT viewer for descriptor table inspection
+pub fn cmd_descriptor(args: &[&str]) {
+    if args.is_empty() {
+        show_descriptor_help();
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "help") {
+        show_descriptor_help();
+    } else if eq_ignore_case(cmd, "gdt") {
+        if args.len() > 1 {
+            // Show specific entry
+            if let Some(idx) = parse_number(args[1]) {
+                show_gdt_entry(idx);
+            } else {
+                outln!("Invalid GDT index: {}", args[1]);
+            }
+        } else {
+            show_gdt_all();
+        }
+    } else if eq_ignore_case(cmd, "idt") {
+        if args.len() > 1 {
+            // Show specific entry
+            if let Some(idx) = parse_number(args[1]) {
+                show_idt_entry(idx);
+            } else {
+                outln!("Invalid IDT index: {}", args[1]);
+            }
+        } else {
+            show_idt_summary();
+        }
+    } else if eq_ignore_case(cmd, "tss") {
+        show_tss();
+    } else if eq_ignore_case(cmd, "ldt") {
+        show_ldt();
+    } else if eq_ignore_case(cmd, "selectors") {
+        show_current_selectors();
+    } else {
+        outln!("Unknown descriptor command: {}", cmd);
+        show_descriptor_help();
+    }
+}
+
+fn show_descriptor_help() {
+    outln!("Descriptor Table Viewer");
+    outln!("");
+    outln!("Usage: descriptor <command> [args]");
+    outln!("");
+    outln!("Commands:");
+    outln!("  gdt              Show all GDT entries");
+    outln!("  gdt <index>      Show specific GDT entry");
+    outln!("  idt              Show IDT summary");
+    outln!("  idt <index>      Show specific IDT entry");
+    outln!("  tss              Show Task State Segment");
+    outln!("  ldt              Show LDT status");
+    outln!("  selectors        Show current segment selectors");
+}
+
+#[repr(C, packed)]
+struct DescriptorTablePtr {
+    limit: u16,
+    base: u64,
+}
+
+unsafe fn get_gdtr() -> DescriptorTablePtr {
+    let mut gdtr = DescriptorTablePtr { limit: 0, base: 0 };
+    core::arch::asm!("sgdt [{}]", in(reg) &mut gdtr, options(nostack));
+    gdtr
+}
+
+unsafe fn get_idtr() -> DescriptorTablePtr {
+    let mut idtr = DescriptorTablePtr { limit: 0, base: 0 };
+    core::arch::asm!("sidt [{}]", in(reg) &mut idtr, options(nostack));
+    idtr
+}
+
+fn show_gdt_all() {
+    outln!("Global Descriptor Table (GDT)");
+    outln!("");
+
+    unsafe {
+        let gdtr = get_gdtr();
+        // Copy fields from packed struct before using
+        let gdt_base = { gdtr.base };
+        let gdt_limit = { gdtr.limit };
+        let num_entries = (gdt_limit as usize + 1) / 8;
+
+        outln!("GDTR: Base=0x{:016X}  Limit=0x{:04X} ({} entries)",
+               gdt_base, gdt_limit, num_entries);
+        outln!("");
+
+        outln!("Idx  Base             Limit    Type  DPL P  Flags");
+        outln!("---  ----------------  -------  ----  --- -  -----");
+
+        for i in 0..num_entries.min(32) {
+            let entry_ptr = (gdt_base + (i as u64 * 8)) as *const u64;
+            let entry = core::ptr::read_unaligned(entry_ptr);
+
+            if entry == 0 {
+                outln!("{:3}: NULL", i);
+                continue;
+            }
+
+            // Check if this is a system segment (TSS/LDT are 16 bytes in 64-bit mode)
+            let segment_type = ((entry >> 40) & 0xF) as u8;
+            let is_system = ((entry >> 44) & 1) == 0;
+
+            if is_system && (segment_type == 0x9 || segment_type == 0xB || segment_type == 0x2) {
+                // 16-byte system segment (TSS or LDT)
+                let entry_hi = core::ptr::read_unaligned((gdt_base + (i as u64 * 8) + 8) as *const u64);
+                show_gdt_system_segment(i, entry, entry_hi);
+            } else {
+                show_gdt_code_data_segment(i, entry);
+            }
+        }
+    }
+}
+
+fn show_gdt_code_data_segment(index: usize, entry: u64) {
+    let base = ((entry >> 16) & 0xFFFFFF) | ((entry >> 32) & 0xFF000000);
+    let limit = (entry & 0xFFFF) | ((entry >> 32) & 0xF0000);
+    let access = ((entry >> 40) & 0xFF) as u8;
+    let flags = ((entry >> 52) & 0xF) as u8;
+
+    let segment_type = access & 0xF;
+    let dpl = (access >> 5) & 0x3;
+    let present = (access >> 7) & 1;
+    let is_code = (access & 0x8) != 0;
+
+    let granularity = (flags & 0x8) != 0;
+    let actual_limit = if granularity { (limit << 12) | 0xFFF } else { limit };
+
+    let type_str = if is_code {
+        match segment_type & 0x7 {
+            0 | 4 => "Code",
+            1 | 5 => "Code-A",
+            2 | 6 => "Code-R",
+            3 | 7 => "Code-RA",
+            _ => "Code-?",
+        }
+    } else {
+        match segment_type & 0x7 {
+            0 | 4 => "Data",
+            1 | 5 => "Data-A",
+            2 | 6 => "Data-W",
+            3 | 7 => "Data-WA",
+            _ => "Data-?",
+        }
+    };
+
+    let flags_str = if (flags & 0x2) != 0 { "L" } else if (flags & 0x4) != 0 { "D" } else { "-" };
+
+    outln!(
+        "{:3}: {:016X}  {:07X}  {:6} {:3}  {}  {}{}",
+        index,
+        base,
+        actual_limit,
+        type_str,
+        dpl,
+        present,
+        flags_str,
+        if granularity { "G" } else { "-" }
+    );
+}
+
+fn show_gdt_system_segment(index: usize, entry_lo: u64, entry_hi: u64) {
+    let base = ((entry_lo >> 16) & 0xFFFFFF)
+        | ((entry_lo >> 32) & 0xFF000000)
+        | ((entry_hi & 0xFFFFFFFF) << 32);
+    let limit = (entry_lo & 0xFFFF) | ((entry_lo >> 32) & 0xF0000);
+    let access = ((entry_lo >> 40) & 0xFF) as u8;
+
+    let segment_type = access & 0xF;
+    let dpl = (access >> 5) & 0x3;
+    let present = (access >> 7) & 1;
+
+    let type_str = match segment_type {
+        0x2 => "LDT",
+        0x9 => "TSS-A",
+        0xB => "TSS-B",
+        _ => "Sys-?",
+    };
+
+    outln!(
+        "{:3}: {:016X}  {:07X}  {:6} {:3}  {}  (16-byte)",
+        index,
+        base,
+        limit,
+        type_str,
+        dpl,
+        present
+    );
+}
+
+fn show_gdt_entry(index: usize) {
+    outln!("GDT Entry {}", index);
+    outln!("");
+
+    unsafe {
+        let gdtr = get_gdtr();
+        let gdt_base = { gdtr.base };
+        let gdt_limit = { gdtr.limit };
+        let max_entries = (gdt_limit as usize + 1) / 8;
+
+        if index >= max_entries {
+            outln!("Error: Index {} out of range (max {})", index, max_entries - 1);
+            return;
+        }
+
+        let entry_ptr = (gdt_base + (index as u64 * 8)) as *const u64;
+        let entry = core::ptr::read_unaligned(entry_ptr);
+
+        outln!("Raw: 0x{:016X}", entry);
+        outln!("");
+
+        if entry == 0 {
+            outln!("NULL descriptor");
+            return;
+        }
+
+        // Decode all fields
+        let base = ((entry >> 16) & 0xFFFFFF) | ((entry >> 32) & 0xFF000000);
+        let limit = (entry & 0xFFFF) | ((entry >> 32) & 0xF0000);
+        let access = ((entry >> 40) & 0xFF) as u8;
+        let flags = ((entry >> 52) & 0xF) as u8;
+
+        let segment_type = access & 0xF;
+        let is_system = ((entry >> 44) & 1) == 0;
+        let dpl = (access >> 5) & 0x3;
+        let present = (access >> 7) & 1;
+
+        let granularity = (flags & 0x8) != 0;
+        let db = (flags & 0x4) != 0;
+        let long_mode = (flags & 0x2) != 0;
+
+        outln!("Base:        0x{:016X}", base);
+        outln!("Limit:       0x{:05X} ({})", limit, if granularity { "4KB granularity" } else { "byte granularity" });
+        outln!("Access:      0x{:02X}", access);
+        outln!("  Type:      0x{:X} ({})", segment_type,
+               if is_system {
+                   match segment_type {
+                       0x2 => "LDT",
+                       0x9 => "64-bit TSS (Available)",
+                       0xB => "64-bit TSS (Busy)",
+                       _ => "System"
+                   }
+               } else if (access & 0x8) != 0 {
+                   "Code"
+               } else {
+                   "Data"
+               }
+        );
+        outln!("  DPL:       {}", dpl);
+        outln!("  Present:   {}", present != 0);
+        outln!("Flags:       0x{:X}", flags);
+        outln!("  G (4KB):   {}", granularity);
+        outln!("  D/B:       {}", db);
+        outln!("  L (64-bit):{}", long_mode);
+    }
+}
+
+fn show_idt_summary() {
+    outln!("Interrupt Descriptor Table (IDT)");
+    outln!("");
+
+    unsafe {
+        let idtr = get_idtr();
+        let idt_base = { idtr.base };
+        let idt_limit = { idtr.limit };
+        let num_entries = (idt_limit as usize + 1) / 16;
+
+        outln!("IDTR: Base=0x{:016X}  Limit=0x{:04X} ({} entries)",
+               idt_base, idt_limit, num_entries);
+        outln!("");
+
+        outln!("Showing active entries (non-NULL handlers):");
+        outln!("Vec  Handler           Type       DPL IST");
+        outln!("---  ----------------  ---------  --- ---");
+
+        let mut active_count = 0;
+        for i in 0..num_entries.min(256) {
+            let entry_ptr = (idt_base + (i as u64 * 16)) as *const u128;
+            let entry = core::ptr::read_unaligned(entry_ptr);
+
+            let offset_lo = (entry & 0xFFFF) as u64;
+            let selector = ((entry >> 16) & 0xFFFF) as u16;
+            let ist = ((entry >> 32) & 0x7) as u8;
+            let gate_type = ((entry >> 40) & 0xF) as u8;
+            let dpl = ((entry >> 45) & 0x3) as u8;
+            let present = ((entry >> 47) & 0x1) as u8;
+            let offset_mid = ((entry >> 48) & 0xFFFF) as u64;
+            let offset_hi = ((entry >> 64) & 0xFFFFFFFF) as u64;
+
+            let handler = offset_lo | (offset_mid << 16) | (offset_hi << 32);
+
+            if present != 0 && handler != 0 {
+                let type_str = match gate_type {
+                    0xE => "Int Gate",
+                    0xF => "Trap Gate",
+                    _ => "Unknown",
+                };
+
+                let vec_name = get_interrupt_name(i);
+                if let Some(name) = vec_name {
+                    outln!("{:3}  {:016X}  {:9}  {:3} {:3}  {}",
+                           i, handler, type_str, dpl, ist, name);
+                } else {
+                    outln!("{:3}  {:016X}  {:9}  {:3} {:3}",
+                           i, handler, type_str, dpl, ist);
+                }
+                active_count += 1;
+            }
+        }
+
+        outln!("");
+        outln!("Total active entries: {}", active_count);
+    }
+}
+
+fn get_interrupt_name(vector: usize) -> Option<&'static str> {
+    match vector {
+        0 => Some("#DE Divide Error"),
+        1 => Some("#DB Debug"),
+        2 => Some("NMI"),
+        3 => Some("#BP Breakpoint"),
+        4 => Some("#OF Overflow"),
+        5 => Some("#BR Bound Range"),
+        6 => Some("#UD Invalid Opcode"),
+        7 => Some("#NM No Math"),
+        8 => Some("#DF Double Fault"),
+        10 => Some("#TS Invalid TSS"),
+        11 => Some("#NP Segment Not Present"),
+        12 => Some("#SS Stack Fault"),
+        13 => Some("#GP General Protection"),
+        14 => Some("#PF Page Fault"),
+        16 => Some("#MF Math Fault"),
+        17 => Some("#AC Alignment Check"),
+        18 => Some("#MC Machine Check"),
+        19 => Some("#XM SIMD Exception"),
+        20 => Some("#VE Virtualization"),
+        21 => Some("#CP Control Protection"),
+        32..=47 => Some("IRQ (PIC/APIC)"),
+        255 => Some("Spurious"),
+        _ => None,
+    }
+}
+
+fn show_idt_entry(index: usize) {
+    outln!("IDT Entry {} (0x{:02X})", index, index);
+    outln!("");
+
+    unsafe {
+        let idtr = get_idtr();
+        let idt_base = { idtr.base };
+        let idt_limit = { idtr.limit };
+        let max_entries = (idt_limit as usize + 1) / 16;
+
+        if index >= max_entries {
+            outln!("Error: Index {} out of range (max {})", index, max_entries - 1);
+            return;
+        }
+
+        let entry_ptr = (idt_base + (index as u64 * 16)) as *const u128;
+        let entry = core::ptr::read_unaligned(entry_ptr);
+
+        outln!("Raw: 0x{:032X}", entry);
+        outln!("");
+
+        let offset_lo = (entry & 0xFFFF) as u64;
+        let selector = ((entry >> 16) & 0xFFFF) as u16;
+        let ist = ((entry >> 32) & 0x7) as u8;
+        let gate_type = ((entry >> 40) & 0xF) as u8;
+        let dpl = ((entry >> 45) & 0x3) as u8;
+        let present = ((entry >> 47) & 0x1) as u8;
+        let offset_mid = ((entry >> 48) & 0xFFFF) as u64;
+        let offset_hi = ((entry >> 64) & 0xFFFFFFFF) as u64;
+
+        let handler = offset_lo | (offset_mid << 16) | (offset_hi << 32);
+
+        outln!("Handler:     0x{:016X}", handler);
+        outln!("Selector:    0x{:04X} (index {}, RPL {})", selector, selector >> 3, selector & 3);
+        outln!("IST:         {} {}", ist, if ist > 0 { "(separate stack)" } else { "(default stack)" });
+        outln!("Gate Type:   0x{:X} ({})", gate_type,
+               match gate_type {
+                   0xE => "64-bit Interrupt Gate",
+                   0xF => "64-bit Trap Gate",
+                   _ => "Unknown"
+               }
+        );
+        outln!("DPL:         {}", dpl);
+        outln!("Present:     {}", present != 0);
+
+        if let Some(name) = get_interrupt_name(index) {
+            outln!("");
+            outln!("Description: {}", name);
+        }
+    }
+}
+
+fn show_tss() {
+    outln!("Task State Segment (TSS)");
+    outln!("");
+
+    unsafe {
+        // Get TSS from GDT - typically at index 2 or 3
+        let gdtr = get_gdtr();
+        let gdt_base = { gdtr.base };
+        let gdt_limit = { gdtr.limit };
+        let num_entries = (gdt_limit as usize + 1) / 8;
+
+        let mut tss_found = false;
+
+        for i in 1..num_entries.min(16) {
+            let entry_ptr = (gdt_base + (i as u64 * 8)) as *const u64;
+            let entry = core::ptr::read_unaligned(entry_ptr);
+
+            let segment_type = ((entry >> 40) & 0xF) as u8;
+            let is_system = ((entry >> 44) & 1) == 0;
+
+            if is_system && (segment_type == 0x9 || segment_type == 0xB) {
+                // Found TSS
+                let entry_hi = core::ptr::read_unaligned((gdt_base + (i as u64 * 8) + 8) as *const u64);
+                let base = ((entry >> 16) & 0xFFFFFF)
+                    | ((entry >> 32) & 0xFF000000)
+                    | ((entry_hi & 0xFFFFFFFF) << 32);
+                let limit = (entry & 0xFFFF) | ((entry >> 32) & 0xF0000);
+
+                outln!("TSS found at GDT index {}", i);
+                outln!("  Base:  0x{:016X}", base);
+                outln!("  Limit: 0x{:05X}", limit);
+                outln!("  State: {}", if segment_type == 0x9 { "Available" } else { "Busy" });
+                outln!("");
+
+                // Read TSS fields
+                let tss_ptr = base as *const u8;
+                let rsp0 = core::ptr::read_unaligned(tss_ptr.add(4) as *const u64);
+                let rsp1 = core::ptr::read_unaligned(tss_ptr.add(12) as *const u64);
+                let rsp2 = core::ptr::read_unaligned(tss_ptr.add(20) as *const u64);
+
+                outln!("Privilege Level Stacks:");
+                outln!("  RSP0 (Ring 0): 0x{:016X}", rsp0);
+                outln!("  RSP1 (Ring 1): 0x{:016X}", rsp1);
+                outln!("  RSP2 (Ring 2): 0x{:016X}", rsp2);
+                outln!("");
+
+                outln!("Interrupt Stack Table (IST):");
+                for ist in 1..=7 {
+                    let ist_ptr = tss_ptr.add(28 + (ist - 1) * 8) as *const u64;
+                    let ist_val = core::ptr::read_unaligned(ist_ptr);
+                    if ist_val != 0 {
+                        outln!("  IST{}: 0x{:016X}", ist, ist_val);
+                    }
+                }
+
+                let iomap_base = core::ptr::read_unaligned(tss_ptr.add(102) as *const u16);
+                outln!("");
+                outln!("I/O Map Base: 0x{:04X}", iomap_base);
+
+                tss_found = true;
+                break;
+            }
+        }
+
+        if !tss_found {
+            outln!("No TSS found in GDT");
+        }
+    }
+}
+
+fn show_ldt() {
+    outln!("Local Descriptor Table (LDT)");
+    outln!("");
+
+    unsafe {
+        let mut ldtr: u16 = 0;
+        core::arch::asm!("sldt {0:x}", out(reg) ldtr, options(nostack));
+
+        if ldtr == 0 {
+            outln!("LDTR: 0x0000 (no LDT active)");
+            outln!("");
+            outln!("Note: 64-bit long mode typically doesn't use LDT");
+        } else {
+            outln!("LDTR: 0x{:04X} (index {}, RPL {})", ldtr, ldtr >> 3, ldtr & 3);
+        }
+    }
+}
+
+fn show_current_selectors() {
+    outln!("Current Segment Selectors");
+    outln!("");
+
+    unsafe {
+        let cs: u16;
+        let ds: u16;
+        let es: u16;
+        let fs: u16;
+        let gs: u16;
+        let ss: u16;
+
+        core::arch::asm!("mov {0:x}, cs", out(reg) cs, options(nostack));
+        core::arch::asm!("mov {0:x}, ds", out(reg) ds, options(nostack));
+        core::arch::asm!("mov {0:x}, es", out(reg) es, options(nostack));
+        core::arch::asm!("mov {0:x}, fs", out(reg) fs, options(nostack));
+        core::arch::asm!("mov {0:x}, gs", out(reg) gs, options(nostack));
+        core::arch::asm!("mov {0:x}, ss", out(reg) ss, options(nostack));
+
+        fn describe_selector(sel: u16) -> (&'static str, u16, u16) {
+            let index = sel >> 3;
+            let rpl = sel & 3;
+            let ti = (sel >> 2) & 1;
+            let table = if ti == 0 { "GDT" } else { "LDT" };
+            (table, index, rpl)
+        }
+
+        let (cs_table, cs_idx, cs_rpl) = describe_selector(cs);
+        let (ds_table, ds_idx, ds_rpl) = describe_selector(ds);
+        let (es_table, es_idx, es_rpl) = describe_selector(es);
+        let (fs_table, fs_idx, fs_rpl) = describe_selector(fs);
+        let (gs_table, gs_idx, gs_rpl) = describe_selector(gs);
+        let (ss_table, ss_idx, ss_rpl) = describe_selector(ss);
+
+        outln!("CS: 0x{:04X}  ({}[{}], RPL={})", cs, cs_table, cs_idx, cs_rpl);
+        outln!("DS: 0x{:04X}  ({}[{}], RPL={})", ds, ds_table, ds_idx, ds_rpl);
+        outln!("ES: 0x{:04X}  ({}[{}], RPL={})", es, es_table, es_idx, es_rpl);
+        outln!("FS: 0x{:04X}  ({}[{}], RPL={})", fs, fs_table, fs_idx, fs_rpl);
+        outln!("GS: 0x{:04X}  ({}[{}], RPL={})", gs, gs_table, gs_idx, gs_rpl);
+        outln!("SS: 0x{:04X}  ({}[{}], RPL={})", ss, ss_table, ss_idx, ss_rpl);
+
+        outln!("");
+        outln!("Note: In 64-bit mode, CS/SS define privilege level;");
+        outln!("      DS/ES/FS/GS bases are ignored except for FS/GS");
+        outln!("      which use MSRs for their base addresses.");
+    }
 }
