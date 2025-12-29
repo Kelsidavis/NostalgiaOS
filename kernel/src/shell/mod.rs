@@ -1066,6 +1066,15 @@ impl Shell {
         // Object Manager
         } else if eq_ignore_case(cmd, "ob") {
             commands::cmd_ob(&args[1..argc]);
+        // Executive
+        } else if eq_ignore_case(cmd, "ex") {
+            commands::cmd_ex(&args[1..argc]);
+        // Security
+        } else if eq_ignore_case(cmd, "se") {
+            commands::cmd_se(&args[1..argc]);
+        // Kernel Executive
+        } else if eq_ignore_case(cmd, "ke") {
+            commands::cmd_ke(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

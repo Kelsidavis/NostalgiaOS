@@ -111,7 +111,10 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
         outln!("  Kernel Subsystems:");
+        outln!("    ke <cmd>       Kernel Executive (irql, dpc, apc, prcb)");
         outln!("    ob <cmd>       Object Manager (types, dir, handles)");
+        outln!("    ex <cmd>       Executive (worker, callback)");
+        outln!("    se <cmd>       Security (sids, privileges, token)");
         outln!("    rtl <cmd>      Runtime Library (time, random, crc32)");
         outln!("    ldr <cmd>      Loader (info, modules, dll)");
         outln!("    pe <file>      Parse PE/DLL file headers");
@@ -3152,5 +3155,314 @@ pub fn cmd_ob(args: &[&str]) {
         }
     } else {
         outln!("Unknown ob command: {}", cmd);
+    }
+}
+
+// ============================================================================
+// Executive (EX) Command
+// ============================================================================
+
+/// Executive (EX) shell command
+pub fn cmd_ex(args: &[&str]) {
+    use crate::ex;
+
+    if args.is_empty() {
+        outln!("Executive (EX) Commands");
+        outln!("");
+        outln!("Usage: ex <command> [args]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  info               Show executive information");
+        outln!("  worker             Show work queue status");
+        outln!("  callback           Show registered callbacks");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "info") {
+        outln!("Executive Subsystem Information");
+        outln!("");
+        outln!("Components:");
+        outln!("  ERESOURCE:       Reader-writer locks");
+        outln!("  Push Locks:      Lightweight RW locks");
+        outln!("  Fast Mutexes:    Efficient kernel mutexes");
+        outln!("  Lookaside Lists: Fixed-size allocators");
+        outln!("  Worker Threads:  Deferred work execution");
+        outln!("  Callbacks:       Notification callbacks");
+        outln!("  Rundown:         Safe resource cleanup");
+        outln!("  Keyed Events:    Synchronization primitives");
+        outln!("");
+        outln!("Constants:");
+        outln!("  LOOKASIDE_DEPTH: 256");
+        outln!("  MAX_WORKERS:     4 per queue");
+    } else if eq_ignore_case(cmd, "worker") {
+        outln!("Executive Work Queues");
+        outln!("");
+        outln!("{:<25} {:<10}", "Queue", "Pending");
+        outln!("-----------------------------------");
+
+        let critical = ex::ex_get_work_queue_depth(ex::WorkQueueType::CriticalWorkQueue);
+        let delayed = ex::ex_get_work_queue_depth(ex::WorkQueueType::DelayedWorkQueue);
+        let hyper = ex::ex_get_work_queue_depth(ex::WorkQueueType::HyperCriticalWorkQueue);
+
+        outln!("{:<25} {:<10}", "CriticalWorkQueue", critical);
+        outln!("{:<25} {:<10}", "DelayedWorkQueue", delayed);
+        outln!("{:<25} {:<10}", "HyperCriticalWorkQueue", hyper);
+        outln!("");
+        outln!("Total pending: {}", critical + delayed + hyper);
+    } else if eq_ignore_case(cmd, "callback") {
+        outln!("Executive Callback Objects");
+        outln!("");
+        outln!("Registered callback object types:");
+        outln!("  SetSystemTime         - System time changes");
+        outln!("  SetSystemState        - System state changes");
+        outln!("  PowerState            - Power state notifications");
+        outln!("  ProcessorAdd          - Processor hotplug");
+        outln!("");
+        outln!("(Callback registration info not yet implemented)");
+    } else {
+        outln!("Unknown ex command: {}", cmd);
+    }
+}
+
+// ============================================================================
+// Security (SE) Command
+// ============================================================================
+
+/// Security Reference Monitor (SE) shell command
+pub fn cmd_se(args: &[&str]) {
+    use crate::se;
+
+    if args.is_empty() {
+        outln!("Security Reference Monitor (SE) Commands");
+        outln!("");
+        outln!("Usage: se <command> [args]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  info               Show security information");
+        outln!("  sids               List well-known SIDs");
+        outln!("  privileges         List system privileges");
+        outln!("  token              Show system token info");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "info") {
+        outln!("Security Reference Monitor Information");
+        outln!("");
+        outln!("Components:");
+        outln!("  Access Tokens:    Security context for processes/threads");
+        outln!("  SIDs:             Security identifiers for users/groups");
+        outln!("  ACLs:             Access control lists");
+        outln!("  Privileges:       Special capabilities");
+        outln!("  Impersonation:    Thread security context switching");
+        outln!("");
+        outln!("Constants:");
+        outln!("  TOKEN_MAX_GROUPS: {}", se::TOKEN_MAX_GROUPS);
+        outln!("  MAX_TOKENS:       {}", se::MAX_TOKENS);
+        outln!("  MAX_ACE_COUNT:    {}", se::MAX_ACE_COUNT);
+        outln!("  MAX_PRIVILEGES:   {}", se::SE_MAX_PRIVILEGES);
+    } else if eq_ignore_case(cmd, "sids") {
+        outln!("Well-Known Security Identifiers (SIDs)");
+        outln!("");
+
+        // Helper function to display a SID
+        fn show_sid(name: &str, sid: &se::Sid) {
+            let auth = sid.identifier_authority;
+            let auth_val = ((auth[0] as u64) << 40)
+                | ((auth[1] as u64) << 32)
+                | ((auth[2] as u64) << 24)
+                | ((auth[3] as u64) << 16)
+                | ((auth[4] as u64) << 8)
+                | (auth[5] as u64);
+
+            outln!("{:<25} S-{}-{}", name, sid.revision, auth_val);
+        }
+
+        show_sid("Null SID", &se::SID_NULL);
+        show_sid("World (Everyone)", &se::SID_WORLD);
+        show_sid("Local System", &se::SID_LOCAL_SYSTEM);
+        show_sid("Local Service", &se::SID_LOCAL_SERVICE);
+        show_sid("Network Service", &se::SID_NETWORK_SERVICE);
+        show_sid("Administrators", &se::SID_BUILTIN_ADMINISTRATORS);
+        show_sid("Users", &se::SID_BUILTIN_USERS);
+        show_sid("Authenticated Users", &se::SID_AUTHENTICATED_USERS);
+    } else if eq_ignore_case(cmd, "privileges") {
+        outln!("System Privileges");
+        outln!("");
+        outln!("{:<30} {:<10}", "Privilege", "LUID");
+        outln!("------------------------------------------");
+
+        // Display well-known privileges
+        outln!("{:<30} {:<10}", "SeCreateTokenPrivilege", "2");
+        outln!("{:<30} {:<10}", "SeAssignPrimaryTokenPrivilege", "3");
+        outln!("{:<30} {:<10}", "SeLockMemoryPrivilege", "4");
+        outln!("{:<30} {:<10}", "SeIncreaseQuotaPrivilege", "5");
+        outln!("{:<30} {:<10}", "SeTcbPrivilege", "7");
+        outln!("{:<30} {:<10}", "SeSecurityPrivilege", "8");
+        outln!("{:<30} {:<10}", "SeLoadDriverPrivilege", "10");
+        outln!("{:<30} {:<10}", "SeDebugPrivilege", "20");
+        outln!("{:<30} {:<10}", "SeBackupPrivilege", "17");
+        outln!("{:<30} {:<10}", "SeRestorePrivilege", "18");
+        outln!("{:<30} {:<10}", "SeShutdownPrivilege", "19");
+        outln!("{:<30} {:<10}", "SeImpersonatePrivilege", "29");
+    } else if eq_ignore_case(cmd, "token") {
+        outln!("System Token Information");
+        outln!("");
+
+        unsafe {
+            let token = se::se_get_system_token();
+            if token.is_null() {
+                outln!("  (System token not available)");
+                return;
+            }
+
+            outln!("System Token:");
+            outln!("  Address:     {:p}", token);
+            outln!("  Type:        Primary");
+            outln!("  User:        SYSTEM (S-1-5-18)");
+            outln!("  Groups:      Administrators, Everyone");
+            outln!("  Privileges:  All enabled (privileged token)");
+        }
+    } else {
+        outln!("Unknown se command: {}", cmd);
+    }
+}
+
+// ============================================================================
+// Kernel Executive (KE) Command
+// ============================================================================
+
+/// Kernel Executive (KE) shell command
+pub fn cmd_ke(args: &[&str]) {
+    use crate::ke;
+
+    if args.is_empty() {
+        outln!("Kernel Executive (KE) Commands");
+        outln!("");
+        outln!("Usage: ke <command> [args]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  info               Show kernel executive information");
+        outln!("  irql               Show current IRQL levels");
+        outln!("  dpc                Show DPC queue status");
+        outln!("  apc                Show APC information");
+        outln!("  timer              Show timer information");
+        outln!("  prcb               Show processor control block");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "info") {
+        outln!("Kernel Executive Information");
+        outln!("");
+        outln!("Components:");
+        outln!("  Scheduler:      32 priority levels, per-CPU ready queues");
+        outln!("  Dispatcher:     KEVENT, KSEMAPHORE, KMUTANT, KTIMER");
+        outln!("  DPC:            Deferred Procedure Calls");
+        outln!("  APC:            Asynchronous Procedure Calls");
+        outln!("  Spinlocks:      Raw and queued spinlocks");
+        outln!("  Wait/Unwait:    Multi-object wait support");
+        outln!("  IPI:            Inter-processor interrupts");
+        outln!("");
+        outln!("IRQL Levels:");
+        outln!("  PASSIVE_LEVEL:  0 (Normal execution)");
+        outln!("  APC_LEVEL:      1 (APC delivery)");
+        outln!("  DISPATCH_LEVEL: 2 (DPC/Scheduler)");
+        outln!("  Device IRQLs:   3-26 (Hardware)");
+        outln!("  IPI_LEVEL:      29");
+        outln!("  HIGH_LEVEL:     31");
+    } else if eq_ignore_case(cmd, "irql") {
+        outln!("Current IRQL Status");
+        outln!("");
+
+        unsafe {
+            let current_irql = ke::ke_get_current_irql();
+            let irql_name = match current_irql {
+                0 => "PASSIVE_LEVEL",
+                1 => "APC_LEVEL",
+                2 => "DISPATCH_LEVEL",
+                29 => "IPI_LEVEL",
+                30 => "POWER_LEVEL",
+                31 => "HIGH_LEVEL",
+                _ => "Device IRQL",
+            };
+
+            outln!("Current IRQL: {} ({})", current_irql, irql_name);
+            outln!("");
+            outln!("IRQL thresholds:");
+            outln!("  DPC Level:  {}", ke::irql::DISPATCH_LEVEL);
+            outln!("  Synch Level: {}", ke::irql::SYNCH_LEVEL);
+            outln!("");
+
+            let is_dpc = ke::ke_is_dpc_active();
+            let is_intr = ke::ke_is_executing_interrupt();
+            outln!("DPC Active:       {}", if is_dpc { "Yes" } else { "No" });
+            outln!("In Interrupt:     {}", if is_intr { "Yes" } else { "No" });
+        }
+    } else if eq_ignore_case(cmd, "dpc") {
+        outln!("Deferred Procedure Call (DPC) Information");
+        outln!("");
+        outln!("DPC Importance Levels:");
+        outln!("  LowImportance:    Queue at tail");
+        outln!("  MediumImportance: Queue at tail (default)");
+        outln!("  HighImportance:   Queue at head");
+        outln!("");
+
+        unsafe {
+            let _prcb = ke::get_current_prcb();
+            outln!("Current processor DPC status:");
+            outln!("  DPC list:     (pending DPCs in queue)");
+            outln!("  DPC active:   {}", if ke::ke_is_dpc_active() { "Yes" } else { "No" });
+        }
+    } else if eq_ignore_case(cmd, "apc") {
+        outln!("Asynchronous Procedure Call (APC) Information");
+        outln!("");
+        outln!("APC Modes:");
+        outln!("  KernelMode: Runs at APC_LEVEL, cannot be disabled");
+        outln!("  UserMode:   Runs in user context, alertable waits");
+        outln!("");
+        outln!("APC Types:");
+        outln!("  Normal:   Full kernel/normal/rundown routine");
+        outln!("  Special:  Kernel routine only, higher priority");
+        outln!("");
+        outln!("(Per-thread APC queues not yet exposed)");
+    } else if eq_ignore_case(cmd, "timer") {
+        outln!("Kernel Timer Information");
+        outln!("");
+        outln!("Timer Types:");
+        outln!("  NotificationTimer: Signals all waiters");
+        outln!("  SynchronizationTimer: Signals one waiter");
+        outln!("");
+        outln!("Timer Resolution:");
+        outln!("  Standard:  ~15.6ms (64 Hz)");
+        outln!("  Maximum:   ~0.5ms (adjustable)");
+        outln!("");
+        outln!("(Active timer list not yet exposed)");
+    } else if eq_ignore_case(cmd, "prcb") {
+        outln!("Processor Control Block (PRCB) Information");
+        outln!("");
+
+        unsafe {
+            let active_cpus = ke::get_active_cpu_count();
+            outln!("Active Processors: {}", active_cpus);
+            outln!("Maximum CPUs:      {}", ke::MAX_CPUS);
+            outln!("");
+
+            let current_cpu = ke::ke_get_current_processor_number();
+            outln!("Current CPU:       {}", current_cpu);
+            outln!("");
+
+            let idle_summary = ke::ki_get_idle_summary();
+            outln!("Idle Summary:      {:#x}", idle_summary);
+
+            outln!("");
+            outln!("Queued Spinlock Queues: {}", ke::LOCK_QUEUE_MAXIMUM);
+        }
+    } else {
+        outln!("Unknown ke command: {}", cmd);
     }
 }
