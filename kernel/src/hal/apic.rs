@@ -323,9 +323,9 @@ impl LocalApic {
     /// This is the first step in starting an Application Processor (AP).
     pub fn send_init_ipi(&self, dest_apic_id: u8) {
         // Send INIT with level assert
+        // Bit 14: Level (1=Assert), Bit 15: Trigger (0=Edge)
         let icr_low: u32 = (IpiDeliveryMode::Init as u32) << 8
-            | (1 << 14)  // Level: Assert
-            | (0 << 15); // Trigger: Edge
+            | (1 << 14);  // Level: Assert (Trigger: Edge is default 0)
 
         let icr_high: u32 = (dest_apic_id as u32) << 24;
 
@@ -341,9 +341,9 @@ impl LocalApic {
     /// Send INIT IPI de-assert (level-triggered)
     pub fn send_init_ipi_deassert(&self) {
         // INIT de-assert is broadcast to all processors
+        // Bit 14: Level (0=De-assert), Bit 15: Trigger (1=Level)
         let icr_low: u32 = (IpiDeliveryMode::Init as u32) << 8
-            | (0 << 14)  // Level: De-assert
-            | (1 << 15)  // Trigger: Level
+            | (1 << 15)  // Trigger: Level (Level: De-assert is default 0)
             | (IpiDestination::AllIncludingSelf as u32) << 18;
 
         self.write(reg::ICR_LOW, icr_low);

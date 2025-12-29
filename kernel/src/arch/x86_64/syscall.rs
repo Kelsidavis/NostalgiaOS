@@ -15745,7 +15745,7 @@ fn sys_query_symbolic_link_object(
         return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
     }
 
-    let index = (link_handle as usize).wrapping_sub(1);
+    let index = link_handle.wrapping_sub(1);
     if index >= MAX_SYMLINKS {
         return 0xC0000008u32 as isize; // STATUS_INVALID_HANDLE
     }
@@ -15941,7 +15941,7 @@ fn sys_query_directory_object(
         return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
     }
 
-    let index = (directory_handle as usize).wrapping_sub(1);
+    let index = directory_handle.wrapping_sub(1);
     if index >= MAX_DIRECTORIES {
         return 0xC0000008u32 as isize; // STATUS_INVALID_HANDLE
     }
@@ -16067,7 +16067,7 @@ fn sys_access_check(
                 // Write granted access
                 core::ptr::write(granted_access as *mut u32, access);
                 // Write access status (TRUE = access granted)
-                let access_status = (granted_access as usize + 4) as *mut u32;
+                let access_status = (granted_access + 4) as *mut u32;
                 core::ptr::write(access_status, 1); // TRUE
             }
             crate::serial_println!("[SYSCALL] NtAccessCheck: granted access {:#x}", access);
@@ -16078,7 +16078,7 @@ fn sys_access_check(
                 // Write zero granted access
                 core::ptr::write(granted_access as *mut u32, 0);
                 // Write access status (FALSE = access denied)
-                let access_status = (granted_access as usize + 4) as *mut u32;
+                let access_status = (granted_access + 4) as *mut u32;
                 core::ptr::write(access_status, 0); // FALSE
             }
             crate::serial_println!("[SYSCALL] NtAccessCheck: access denied");
