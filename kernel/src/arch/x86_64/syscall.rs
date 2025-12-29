@@ -10945,7 +10945,10 @@ fn sys_set_information_thread(
 
             crate::serial_println!("[SYSCALL] SetInformationThread: I/O priority = {}", io_priority);
 
-            // TODO: Store I/O priority for I/O scheduling
+            // Store I/O priority in thread structure
+            if !ethread.is_null() {
+                unsafe { (*ethread).io_priority = io_priority as u8; }
+            }
 
             STATUS_SUCCESS
         }
@@ -10965,7 +10968,10 @@ fn sys_set_information_thread(
 
             crate::serial_println!("[SYSCALL] SetInformationThread: page priority = {}", page_priority);
 
-            // TODO: Store page priority for memory management
+            // Store page priority in thread structure
+            if !ethread.is_null() {
+                unsafe { (*ethread).page_priority = page_priority as u8; }
+            }
 
             STATUS_SUCCESS
         }
