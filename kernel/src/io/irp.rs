@@ -674,3 +674,191 @@ pub unsafe fn io_free_irp(irp: *mut Irp) {
 pub unsafe fn init_irp_system() {
     crate::serial_println!("[IO] IRP subsystem initialized ({} IRPs available)", MAX_IRPS);
 }
+
+// ============================================================================
+// IRP Pool Inspection (for debugging)
+// ============================================================================
+
+/// IRP pool statistics
+#[derive(Debug, Clone, Copy)]
+pub struct IrpPoolStats {
+    /// Total number of IRPs in pool
+    pub total_irps: usize,
+    /// Number of allocated IRPs
+    pub allocated_irps: usize,
+    /// Number of free IRPs
+    pub free_irps: usize,
+    /// Number of pending IRPs
+    pub pending_irps: usize,
+    /// Number of completed IRPs
+    pub completed_irps: usize,
+}
+
+/// Snapshot of an active IRP
+#[derive(Debug, Clone, Copy)]
+pub struct IrpSnapshot {
+    /// IRP address
+    pub address: u64,
+    /// Major function code
+    pub major_function: u8,
+    /// Minor function code
+    pub minor_function: u8,
+    /// IRP flags
+    pub flags: u32,
+    /// Current stack location
+    pub current_location: i8,
+    /// Total stack count
+    pub stack_count: i8,
+    /// Is pending
+    pub is_pending: bool,
+    /// Is cancelled
+    pub is_cancelled: bool,
+    /// Thread ID (if available)
+    pub thread_id: u32,
+}
+
+/// Get IRP pool statistics
+pub fn io_get_irp_stats() -> IrpPoolStats {
+    unsafe {
+        let _guard = IRP_POOL_LOCK.lock();
+
+        let mut allocated = 0usize;
+        let mut pending = 0usize;
+        let mut completed = 0usize;
+
+        for word_idx in 0..2 {
+            for bit_idx in 0..64 {
+                let global_idx = word_idx * 64 + bit_idx;
+                if global_idx >= MAX_IRPS {
+                    break;
+                }
+                if (IRP_POOL_BITMAP[word_idx] & (1 << bit_idx)) != 0 {
+                    allocated += 1;
+                    let irp = &IRP_POOL[global_idx];
+                    if irp.has_flag(irp_flags::IRP_PENDING) {
+                        pending += 1;
+                    }
+                    if irp.has_flag(irp_flags::IRP_COMPLETED) {
+                        completed += 1;
+                    }
+                }
+            }
+        }
+
+        IrpPoolStats {
+            total_irps: MAX_IRPS,
+            allocated_irps: allocated,
+            free_irps: MAX_IRPS - allocated,
+            pending_irps: pending,
+            completed_irps: completed,
+        }
+    }
+}
+
+/// Get snapshots of allocated IRPs
+pub fn io_get_irp_snapshots(max_count: usize) -> ([IrpSnapshot; 32], usize) {
+    let mut snapshots = [IrpSnapshot {
+        address: 0,
+        major_function: 0,
+        minor_function: 0,
+        flags: 0,
+        current_location: 0,
+        stack_count: 0,
+        is_pending: false,
+        is_cancelled: false,
+        thread_id: 0,
+    }; 32];
+
+    let max_count = max_count.min(32);
+    let mut count = 0;
+
+    unsafe {
+        let _guard = IRP_POOL_LOCK.lock();
+
+        for word_idx in 0..2 {
+            for bit_idx in 0..64 {
+                if count >= max_count {
+                    break;
+                }
+
+                let global_idx = word_idx * 64 + bit_idx;
+                if global_idx >= MAX_IRPS {
+                    break;
+                }
+
+                if (IRP_POOL_BITMAP[word_idx] & (1 << bit_idx)) != 0 {
+                    let irp = &IRP_POOL[global_idx];
+                    let flags = irp.flags.load(core::sync::atomic::Ordering::Relaxed);
+
+                    let major = if let Some(stack) = irp.get_current_stack_location() {
+                        stack.major_function as u8
+                    } else {
+                        0
+                    };
+
+                    let minor = if let Some(stack) = irp.get_current_stack_location() {
+                        stack.minor_function.0
+                    } else {
+                        0
+                    };
+
+                    let thread_id = if !irp.thread.is_null() {
+                        (*irp.thread).thread_id
+                    } else {
+                        0
+                    };
+
+                    snapshots[count] = IrpSnapshot {
+                        address: &IRP_POOL[global_idx] as *const _ as u64,
+                        major_function: major,
+                        minor_function: minor,
+                        flags,
+                        current_location: irp.current_location,
+                        stack_count: irp.stack_count,
+                        is_pending: (flags & irp_flags::IRP_PENDING) != 0,
+                        is_cancelled: irp.cancel,
+                        thread_id,
+                    };
+                    count += 1;
+                }
+            }
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get major function name
+pub fn irp_major_function_name(major: u8) -> &'static str {
+    match major {
+        0 => "Create",
+        1 => "CreateNamedPipe",
+        2 => "Close",
+        3 => "Read",
+        4 => "Write",
+        5 => "QueryInfo",
+        6 => "SetInfo",
+        7 => "QueryEA",
+        8 => "SetEA",
+        9 => "FlushBuffers",
+        10 => "QueryVolume",
+        11 => "SetVolume",
+        12 => "DirControl",
+        13 => "FsControl",
+        14 => "DeviceControl",
+        15 => "InternalDevCtl",
+        16 => "Shutdown",
+        17 => "LockControl",
+        18 => "Cleanup",
+        19 => "CreateMailslot",
+        20 => "QuerySecurity",
+        21 => "SetSecurity",
+        22 => "Power",
+        23 => "SystemControl",
+        24 => "DeviceChange",
+        25 => "QueryQuota",
+        26 => "SetQuota",
+        27 => "PnP",
+        _ => "Unknown",
+    }
+}

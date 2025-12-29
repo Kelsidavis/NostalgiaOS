@@ -58,6 +58,7 @@ pub use eprocess::{
 pub use ethread::{
     EThread, thread_flags,
     allocate_thread, free_thread, get_thread_by_index,
+    ps_get_thread_list, ps_get_ethread_list,
 };
 
 pub use create::{

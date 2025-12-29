@@ -151,19 +151,20 @@ const COMMANDS: &[&str] = &[
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "desc", "descriptor", "dir", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
     "hal", "handles", "help", "history", "hpet",
-    "int", "io", "irql", "irqstat",
+    "int", "io", "ioq", "irql", "irqstat",
     "ke",
     "ldr", "ls",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net",
     "ob", "obdir",
-    "pagetable", "pci", "pe", "pfn", "pool", "port", "prcb", "ps", "pwd",
+    "pagetable", "pci", "pe", "pfn", "pool", "pooltag", "port", "prcb", "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
     "sc", "sched", "se", "services", "smbios", "stack", "suspend", "sysinfo",
     "tasks", "time", "timer", "timerq", "touch", "type",
     "usertest",
     "veh", "ver", "version",
+    "waitq",
 ];
 
 /// Current working directory
@@ -1173,6 +1174,15 @@ impl Shell {
         // Scheduler viewer
         } else if eq_ignore_case(cmd, "sched") {
             commands::cmd_sched(&args[1..argc]);
+        // Wait block viewer
+        } else if eq_ignore_case(cmd, "waitq") {
+            commands::cmd_waitq(&args[1..argc]);
+        // Pool tag viewer
+        } else if eq_ignore_case(cmd, "pooltag") {
+            commands::cmd_pooltag(&args[1..argc]);
+        // I/O request queue viewer
+        } else if eq_ignore_case(cmd, "ioq") {
+            commands::cmd_ioq(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

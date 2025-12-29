@@ -65,6 +65,12 @@ impl<'a> Write for FmtWriter<'a> {
     }
 }
 
+/// Case-insensitive ASCII string comparison
+#[inline]
+fn eq_ignore_ascii_case(a: &str, b: &str) -> bool {
+    a.as_bytes().eq_ignore_ascii_case(b.as_bytes())
+}
+
 /// Display help information
 pub fn cmd_help(args: &[&str]) {
     if args.is_empty() {
@@ -11616,5 +11622,393 @@ fn show_sched_current() {
             outln!("");
             outln!("Process:           {:#018x}", thread.process as u64);
         }
+    }
+}
+
+// ============================================================================
+// Wait Block Viewer Command
+// ============================================================================
+
+/// Wait block viewer command
+pub fn cmd_waitq(args: &[&str]) {
+    if args.is_empty() {
+        show_waitq_help();
+        return;
+    }
+
+    let cmd = args[0];
+    if eq_ignore_ascii_case(cmd, "help") || cmd == "-h" || cmd == "--help" || cmd == "-?" {
+        show_waitq_help();
+    } else if eq_ignore_ascii_case(cmd, "threads") {
+        show_waiting_threads();
+    } else if eq_ignore_ascii_case(cmd, "reasons") {
+        show_wait_reasons();
+    } else {
+        outln!("Unknown subcommand: {}", args[0]);
+        show_waitq_help();
+    }
+}
+
+fn show_waitq_help() {
+    outln!("Wait Block Viewer");
+    outln!("");
+    outln!("Usage: waitq <subcommand>");
+    outln!("");
+    outln!("Subcommands:");
+    outln!("  threads   - Show threads in waiting state");
+    outln!("  reasons   - Show wait reason descriptions");
+    outln!("  help      - Show this help message");
+}
+
+fn show_waiting_threads() {
+    use crate::ke::thread::ThreadState;
+    use crate::ps::MAX_THREADS;
+
+    outln!("Waiting Threads");
+    outln!("===============");
+    outln!("");
+
+    // Get EThread list from process subsystem
+    let (threads, count) = crate::ps::ps_get_ethread_list();
+
+    if count == 0 {
+        outln!("No threads in system");
+        return;
+    }
+
+    outln!("{:<6} {:<6} {:<12} {:<10} {:<8}", "TID", "PID", "State", "WaitReason", "Alertable");
+    outln!("--------------------------------------------------");
+
+    let mut waiting_count = 0;
+    for i in 0..count.min(MAX_THREADS) {
+        let ethread = threads[i];
+        if ethread.is_null() {
+            continue;
+        }
+
+        unsafe {
+            let et = &*ethread;
+            let tcb = et.get_tcb();
+            if tcb.is_null() {
+                continue;
+            }
+            let t = &*tcb;
+            if t.state == ThreadState::Waiting {
+                waiting_count += 1;
+                let wait_reason = wait_reason_name(t.wait_reason);
+                let alertable = if t.alertable { "Yes" } else { "No" };
+
+                outln!("{:<6} {:<6} {:<12} {:<10} {:<8}",
+                    et.thread_id(),
+                    et.process_id(),
+                    "Waiting",
+                    wait_reason,
+                    alertable
+                );
+            }
+        }
+    }
+
+    outln!("");
+    outln!("Total waiting: {}", waiting_count);
+}
+
+fn show_wait_reasons() {
+    outln!("Wait Reasons");
+    outln!("============");
+    outln!("");
+    outln!("{:<3} {:<20} {}", "ID", "Name", "Description");
+    outln!("------------------------------------------------------------");
+    outln!("{:<3} {:<20} {}", 0, "Executive", "General purpose wait");
+    outln!("{:<3} {:<20} {}", 1, "FreePage", "Waiting for free page");
+    outln!("{:<3} {:<20} {}", 2, "PageIn", "Waiting for page in");
+    outln!("{:<3} {:<20} {}", 3, "PoolAllocation", "Waiting for pool memory");
+    outln!("{:<3} {:<20} {}", 4, "DelayExecution", "Sleep/delay");
+    outln!("{:<3} {:<20} {}", 5, "Suspended", "Thread suspended");
+    outln!("{:<3} {:<20} {}", 6, "UserRequest", "User-mode wait");
+    outln!("{:<3} {:<20} {}", 7, "WrExecutive", "Executive resource wait");
+    outln!("{:<3} {:<20} {}", 8, "WrQueue", "Queue wait");
+    outln!("{:<3} {:<20} {}", 9, "WrLpcReceive", "LPC receive wait");
+    outln!("{:<3} {:<20} {}", 10, "WrLpcReply", "LPC reply wait");
+    outln!("{:<3} {:<20} {}", 11, "WrVirtualMemory", "Virtual memory operation");
+    outln!("{:<3} {:<20} {}", 12, "WrPageOut", "Page out wait");
+}
+
+fn wait_reason_name(reason: u8) -> &'static str {
+    match reason {
+        0 => "Executive",
+        1 => "FreePage",
+        2 => "PageIn",
+        3 => "PoolAlloc",
+        4 => "Delay",
+        5 => "Suspended",
+        6 => "UserReq",
+        7 => "WrExec",
+        8 => "WrQueue",
+        9 => "LpcRecv",
+        10 => "LpcReply",
+        11 => "VirtMem",
+        12 => "PageOut",
+        _ => "Unknown",
+    }
+}
+
+// ============================================================================
+// Pool Tag Viewer Command
+// ============================================================================
+
+/// Pool tag viewer command
+pub fn cmd_pooltag(args: &[&str]) {
+    if args.is_empty() {
+        show_pooltag_help();
+        return;
+    }
+
+    let cmd = args[0];
+    if eq_ignore_ascii_case(cmd, "help") || cmd == "-h" || cmd == "--help" || cmd == "-?" {
+        show_pooltag_help();
+    } else if eq_ignore_ascii_case(cmd, "stats") {
+        show_pooltag_stats();
+    } else if eq_ignore_ascii_case(cmd, "classes") {
+        show_pooltag_classes();
+    } else if eq_ignore_ascii_case(cmd, "tags") {
+        show_common_tags();
+    } else {
+        outln!("Unknown subcommand: {}", args[0]);
+        show_pooltag_help();
+    }
+}
+
+fn show_pooltag_help() {
+    outln!("Pool Tag Viewer");
+    outln!("");
+    outln!("Usage: pooltag <subcommand>");
+    outln!("");
+    outln!("Subcommands:");
+    outln!("  stats     - Show pool allocation statistics");
+    outln!("  classes   - Show pool size class details");
+    outln!("  tags      - Show common pool tag definitions");
+    outln!("  help      - Show this help message");
+}
+
+fn show_pooltag_stats() {
+    use crate::mm::pool::mm_get_pool_stats;
+
+    let stats = mm_get_pool_stats();
+
+    outln!("Pool Allocation Statistics");
+    outln!("==========================");
+    outln!("");
+    outln!("Total Size:       {} KB", stats.total_size / 1024);
+    outln!("Bytes Allocated:  {} bytes", stats.bytes_allocated);
+    outln!("Bytes Free:       {} bytes", stats.bytes_free);
+    outln!("Allocation Count: {}", stats.allocation_count);
+    outln!("Free Count:       {}", stats.free_count);
+    outln!("");
+
+    let usage_pct = if stats.total_size > 0 {
+        (stats.bytes_allocated * 100) / stats.total_size
+    } else {
+        0
+    };
+    outln!("Usage: {}%", usage_pct);
+
+    // Visual bar
+    let bar_len = 40usize;
+    let filled = (usage_pct * bar_len) / 100;
+    let mut bar = [b' '; 40];
+    for i in 0..filled {
+        bar[i] = b'#';
+    }
+    let bar_str = core::str::from_utf8(&bar).unwrap_or("");
+    outln!("[{}]", bar_str);
+}
+
+fn show_pooltag_classes() {
+    use crate::mm::pool::{mm_get_pool_class_count, mm_get_pool_class_stats};
+
+    outln!("Pool Size Classes");
+    outln!("=================");
+    outln!("");
+    outln!("{:<6} {:<8} {:<8} {:<8} {:<12} {:<12}",
+        "Class", "Size", "Total", "Free", "Used", "UsedBytes");
+    outln!("------------------------------------------------------------");
+
+    let class_count = mm_get_pool_class_count();
+    for i in 0..class_count {
+        if let Some(stats) = mm_get_pool_class_stats(i) {
+            outln!("{:<6} {:<8} {:<8} {:<8} {:<12} {:<12}",
+                i,
+                stats.block_size,
+                stats.total_blocks,
+                stats.free_blocks,
+                stats.used_blocks,
+                stats.used_bytes
+            );
+        }
+    }
+}
+
+fn show_common_tags() {
+    outln!("Common Pool Tags");
+    outln!("================");
+    outln!("");
+    outln!("{:<10} {}", "Tag", "Description");
+    outln!("----------------------------------------");
+    outln!("{:<10} {}", "Gen ", "Generic allocation");
+    outln!("{:<10} {}", "Proc", "Process objects");
+    outln!("{:<10} {}", "Thrd", "Thread objects");
+    outln!("{:<10} {}", "File", "File objects");
+    outln!("{:<10} {}", "Drvr", "Driver objects");
+    outln!("{:<10} {}", "Irp ", "I/O Request Packets");
+    outln!("{:<10} {}", "Mdl ", "Memory Descriptor Lists");
+    outln!("{:<10} {}", "Sec ", "Security structures");
+    outln!("{:<10} {}", "Obj ", "Object Manager objects");
+    outln!("{:<10} {}", "Evnt", "Event objects");
+    outln!("{:<10} {}", "Mutx", "Mutex objects");
+    outln!("{:<10} {}", "Sema", "Semaphore objects");
+    outln!("{:<10} {}", "Timr", "Timer objects");
+    outln!("{:<10} {}", "Reg ", "Registry structures");
+    outln!("{:<10} {}", "Mm  ", "Memory manager");
+}
+
+// ============================================================================
+// I/O Request Queue Viewer Command
+// ============================================================================
+
+/// I/O request queue viewer command
+pub fn cmd_ioq(args: &[&str]) {
+    if args.is_empty() {
+        show_ioq_help();
+        return;
+    }
+
+    let cmd = args[0];
+    if eq_ignore_ascii_case(cmd, "help") || cmd == "-h" || cmd == "--help" || cmd == "-?" {
+        show_ioq_help();
+    } else if eq_ignore_ascii_case(cmd, "stats") {
+        show_irp_stats();
+    } else if eq_ignore_ascii_case(cmd, "list") {
+        show_irp_list();
+    } else if eq_ignore_ascii_case(cmd, "pending") {
+        show_pending_irps();
+    } else {
+        outln!("Unknown subcommand: {}", args[0]);
+        show_ioq_help();
+    }
+}
+
+fn show_ioq_help() {
+    outln!("I/O Request Queue Viewer");
+    outln!("");
+    outln!("Usage: ioq <subcommand>");
+    outln!("");
+    outln!("Subcommands:");
+    outln!("  stats     - Show IRP pool statistics");
+    outln!("  list      - List allocated IRPs");
+    outln!("  pending   - Show pending IRPs only");
+    outln!("  help      - Show this help message");
+}
+
+fn show_irp_stats() {
+    use crate::io::{io_get_irp_stats, IrpPoolStats};
+
+    let stats: IrpPoolStats = io_get_irp_stats();
+
+    outln!("IRP Pool Statistics");
+    outln!("===================");
+    outln!("");
+    outln!("Total IRPs:       {}", stats.total_irps);
+    outln!("Allocated:        {}", stats.allocated_irps);
+    outln!("Free:             {}", stats.free_irps);
+    outln!("Pending:          {}", stats.pending_irps);
+    outln!("Completed:        {}", stats.completed_irps);
+    outln!("");
+
+    let usage_pct = if stats.total_irps > 0 {
+        (stats.allocated_irps * 100) / stats.total_irps
+    } else {
+        0
+    };
+    outln!("Pool Usage: {}%", usage_pct);
+}
+
+fn show_irp_list() {
+    use crate::io::{io_get_irp_snapshots, irp_major_function_name};
+
+    outln!("Allocated IRPs");
+    outln!("==============");
+    outln!("");
+
+    let (snapshots, count) = io_get_irp_snapshots(32);
+
+    if count == 0 {
+        outln!("No IRPs currently allocated");
+        return;
+    }
+
+    outln!("{:<18} {:<14} {:<8} {:<8} {:<8}",
+        "Address", "MajorFunc", "Stack", "Pending", "TID");
+    outln!("------------------------------------------------------------");
+
+    for i in 0..count {
+        let irp = &snapshots[i];
+        let func_name = irp_major_function_name(irp.major_function);
+        let pending = if irp.is_pending { "Yes" } else { "No" };
+
+        outln!("{:#018x} {:<14} {}/{:<5} {:<8} {:<8}",
+            irp.address,
+            func_name,
+            irp.current_location,
+            irp.stack_count,
+            pending,
+            irp.thread_id
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} IRPs", count);
+}
+
+fn show_pending_irps() {
+    use crate::io::{io_get_irp_snapshots, irp_major_function_name};
+
+    outln!("Pending IRPs");
+    outln!("============");
+    outln!("");
+
+    let (snapshots, count) = io_get_irp_snapshots(32);
+
+    let mut pending_count = 0;
+    let mut first = true;
+
+    for i in 0..count {
+        let irp = &snapshots[i];
+        if irp.is_pending {
+            if first {
+                outln!("{:<18} {:<14} {:<10} {:<8}",
+                    "Address", "MajorFunc", "Cancelled", "TID");
+                outln!("-------------------------------------------------------");
+                first = false;
+            }
+
+            pending_count += 1;
+            let func_name = irp_major_function_name(irp.major_function);
+            let cancelled = if irp.is_cancelled { "Yes" } else { "No" };
+
+            outln!("{:#018x} {:<14} {:<10} {:<8}",
+                irp.address,
+                func_name,
+                cancelled,
+                irp.thread_id
+            );
+        }
+    }
+
+    if pending_count == 0 {
+        outln!("No pending IRPs");
+    } else {
+        outln!("");
+        outln!("Total pending: {}", pending_count);
     }
 }

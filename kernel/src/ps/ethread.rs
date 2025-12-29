@@ -422,3 +422,58 @@ pub unsafe fn get_thread_by_index(index: usize) -> Option<*mut EThread> {
     }
     None
 }
+
+/// Get list of all allocated threads
+///
+/// Returns an array of pointers to KThread (up to MAX_THREADS) and the count
+pub fn ps_get_thread_list() -> ([*mut crate::ke::KThread; MAX_THREADS], usize) {
+    let mut threads = [core::ptr::null_mut(); MAX_THREADS];
+    let mut count = 0;
+
+    unsafe {
+        let _guard = THREAD_POOL_LOCK.lock();
+
+        for word_idx in 0..4 {
+            for bit_idx in 0..64 {
+                let global_idx = word_idx * 64 + bit_idx;
+                if global_idx >= MAX_THREADS {
+                    break;
+                }
+                if THREAD_POOL_BITMAP[word_idx] & (1 << bit_idx) != 0 {
+                    let ethread = &THREAD_POOL[global_idx];
+                    threads[count] = ethread.get_tcb() as *mut crate::ke::KThread;
+                    count += 1;
+                }
+            }
+        }
+    }
+
+    (threads, count)
+}
+
+/// Get list of all allocated EThread pointers
+///
+/// Returns an array of pointers to EThread (up to MAX_THREADS) and the count
+pub fn ps_get_ethread_list() -> ([*mut EThread; MAX_THREADS], usize) {
+    let mut threads = [core::ptr::null_mut(); MAX_THREADS];
+    let mut count = 0;
+
+    unsafe {
+        let _guard = THREAD_POOL_LOCK.lock();
+
+        for word_idx in 0..4 {
+            for bit_idx in 0..64 {
+                let global_idx = word_idx * 64 + bit_idx;
+                if global_idx >= MAX_THREADS {
+                    break;
+                }
+                if THREAD_POOL_BITMAP[word_idx] & (1 << bit_idx) != 0 {
+                    threads[count] = &mut THREAD_POOL[global_idx] as *mut EThread;
+                    count += 1;
+                }
+            }
+        }
+    }
+
+    (threads, count)
+}

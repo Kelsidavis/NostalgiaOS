@@ -47,6 +47,11 @@ pub use irp::{
     sl_control,
     io_allocate_irp,
     io_free_irp,
+    IrpPoolStats,
+    IrpSnapshot,
+    io_get_irp_stats,
+    io_get_irp_snapshots,
+    irp_major_function_name,
 };
 
 pub use device::{
