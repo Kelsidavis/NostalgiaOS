@@ -153,7 +153,7 @@ const COMMANDS: &[&str] = &[
     "int", "io",
     "ke",
     "ldr", "ls",
-    "md", "mem", "memory", "mkdir", "mm", "mv",
+    "md", "mem", "memmap", "memory", "mkdir", "mm", "mv",
     "net",
     "ob",
     "pci", "pe", "ps", "pwd",
@@ -1106,6 +1106,9 @@ impl Shell {
         // Timer diagnostics
         } else if eq_ignore_case(cmd, "timer") {
             commands::cmd_timer(&args[1..argc]);
+        // Memory map
+        } else if eq_ignore_case(cmd, "memmap") {
+            commands::cmd_memmap(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

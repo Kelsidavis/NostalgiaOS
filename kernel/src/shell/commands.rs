@@ -113,6 +113,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    debug <cmd>    Kernel debug (bugcheck, break, regs)");
         outln!("    int <type>     Trigger interrupts (div0, break, gpf)");
         outln!("    timer <cmd>    Timer diagnostics (apic, tsc, pit)");
+        outln!("    memmap <cmd>   Physical memory map (regions, e820)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -5557,4 +5558,267 @@ fn show_pit_status() {
     outln!("Port 0x43: Mode/Command register");
     outln!("");
     outln!("Note: Modern systems use APIC timer instead of PIT.");
+}
+
+// ============================================================================
+// Memory Map Command
+// ============================================================================
+
+/// Memory map and physical memory diagnostics
+pub fn cmd_memmap(args: &[&str]) {
+    use crate::mm;
+
+    if args.is_empty() || eq_ignore_case(args[0], "regions") {
+        show_memory_regions();
+    } else if eq_ignore_case(args[0], "stats") {
+        show_memory_stats();
+    } else if eq_ignore_case(args[0], "e820") {
+        show_e820_style();
+    } else if eq_ignore_case(args[0], "phys") {
+        if args.len() < 2 {
+            outln!("Usage: memmap phys <address>");
+            return;
+        }
+        let addr_str = args[1].trim_start_matches("0x").trim_start_matches("0X");
+        match u64::from_str_radix(addr_str, 16) {
+            Ok(addr) => check_physical_address(addr),
+            Err(_) => outln!("Error: Invalid address '{}'", args[1]),
+        }
+    } else if eq_ignore_case(args[0], "help") {
+        outln!("Memory Map Diagnostics");
+        outln!("");
+        outln!("Usage: memmap [command]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  regions        List all memory regions (default)");
+        outln!("  stats          Show physical memory statistics");
+        outln!("  e820           Show E820-style memory map");
+        outln!("  phys <addr>    Check physical address type");
+        outln!("  help           Show this help");
+    } else {
+        outln!("Unknown memmap command: {}", args[0]);
+    }
+}
+
+/// Show all memory regions
+fn show_memory_regions() {
+    use crate::mm;
+
+    let count = mm::mm_get_region_count();
+
+    outln!("Physical Memory Regions ({} total)", count);
+    outln!("");
+    outln!("  Start            End              Pages       Size        Type");
+    outln!("  ---------------  ---------------  ----------  ----------  ----");
+
+    let mut total_usable = 0u64;
+    let mut total_reserved = 0u64;
+
+    for i in 0..count {
+        if let Some(region) = mm::mm_get_region(i) {
+            let type_name = memory_type_name(region.memory_type);
+            let size = region.page_count * 4096;
+
+            let size_str = format_size(size);
+
+            outln!("  {:016x}  {:016x}  {:10}  {:>10}  {}",
+                region.physical_start,
+                region.physical_end(),
+                region.page_count,
+                size_str,
+                type_name);
+
+            if region.memory_type.is_usable() {
+                total_usable += size;
+            } else {
+                total_reserved += size;
+            }
+        }
+    }
+
+    outln!("");
+    outln!("Summary:");
+    outln!("  Usable:   {} ({} pages)", format_size(total_usable), total_usable / 4096);
+    outln!("  Reserved: {} ({} pages)", format_size(total_reserved), total_reserved / 4096);
+}
+
+/// Show memory statistics
+fn show_memory_stats() {
+    use crate::mm;
+
+    let stats = mm::mm_get_physical_stats();
+
+    outln!("Physical Memory Statistics");
+    outln!("");
+    outln!("  Total Physical:   {} ({} pages)",
+        format_size(stats.total_bytes),
+        stats.total_pages);
+    outln!("  Usable Physical:  {} ({} pages)",
+        format_size(stats.usable_bytes),
+        stats.total_pages);
+    outln!("");
+    outln!("Page Frame Database:");
+    outln!("  Total Pages:      {}", stats.total_pages);
+    outln!("  Free Pages:       {}", stats.free_pages);
+    outln!("  Zeroed Pages:     {}", stats.zeroed_pages);
+    outln!("  Active Pages:     {}", stats.active_pages);
+    outln!("");
+    outln!("  Free Memory:      {}", format_size(stats.free_bytes()));
+    outln!("  Usage:            {}%", stats.usage_percent());
+
+    // Pool stats
+    let pool_stats = mm::mm_get_pool_stats();
+    outln!("");
+    outln!("Pool Allocator:");
+    outln!("  Total Size:       {} bytes", pool_stats.total_size);
+    outln!("  Bytes Allocated:  {} bytes", pool_stats.bytes_allocated);
+    outln!("  Bytes Free:       {} bytes", pool_stats.bytes_free);
+    outln!("  Allocations:      {}", pool_stats.allocation_count);
+    outln!("  Free Count:       {}", pool_stats.free_count);
+}
+
+/// Show E820-style memory map
+fn show_e820_style() {
+    use crate::mm;
+
+    let count = mm::mm_get_region_count();
+
+    outln!("E820-style Memory Map");
+    outln!("");
+    outln!("BIOS-e820: {} entries", count);
+    outln!("");
+
+    for i in 0..count {
+        if let Some(region) = mm::mm_get_region(i) {
+            let e820_type = match region.memory_type {
+                mm::MmMemoryType::Conventional |
+                mm::MmMemoryType::LoaderCode |
+                mm::MmMemoryType::LoaderData |
+                mm::MmMemoryType::BootServicesCode |
+                mm::MmMemoryType::BootServicesData => "usable",
+                mm::MmMemoryType::Reserved => "reserved",
+                mm::MmMemoryType::AcpiReclaim => "ACPI data",
+                mm::MmMemoryType::AcpiNvs => "ACPI NVS",
+                mm::MmMemoryType::Unusable => "unusable",
+                mm::MmMemoryType::RuntimeServicesCode |
+                mm::MmMemoryType::RuntimeServicesData => "runtime",
+                mm::MmMemoryType::Mmio |
+                mm::MmMemoryType::MmioPortSpace => "MMIO",
+                mm::MmMemoryType::PalCode => "PAL code",
+                mm::MmMemoryType::Persistent => "persistent",
+            };
+
+            outln!(" [{:016x}-{:016x}] {} {}",
+                region.physical_start,
+                region.physical_end().saturating_sub(1),
+                format_size(region.size()),
+                e820_type);
+        }
+    }
+}
+
+/// Check type of a physical address
+fn check_physical_address(addr: u64) {
+    use crate::mm;
+
+    outln!("Physical Address: {:#018x}", addr);
+    outln!("");
+
+    if let Some(mem_type) = mm::mm_get_physical_memory_type(addr) {
+        outln!("  Memory Type: {}", memory_type_name(mem_type));
+        outln!("  Usable:      {}", if mem_type.is_usable() { "Yes" } else { "No" });
+        outln!("  Preserved:   {}", if mem_type.must_preserve() { "Yes" } else { "No" });
+    } else {
+        outln!("  Not mapped to any memory region");
+    }
+
+    outln!("");
+    outln!("  Valid RAM:   {}", if mm::mm_is_valid_physical_address(addr) { "Yes" } else { "No" });
+
+    // Page info
+    let pfn = addr / 4096;
+    outln!("  Page Frame:  {:#x} ({})", pfn, pfn);
+}
+
+/// Get human-readable name for memory type
+fn memory_type_name(mem_type: crate::mm::MmMemoryType) -> &'static str {
+    use crate::mm::MmMemoryType;
+    match mem_type {
+        MmMemoryType::Reserved => "Reserved",
+        MmMemoryType::LoaderCode => "LoaderCode",
+        MmMemoryType::LoaderData => "LoaderData",
+        MmMemoryType::BootServicesCode => "BootCode",
+        MmMemoryType::BootServicesData => "BootData",
+        MmMemoryType::RuntimeServicesCode => "RuntimeCode",
+        MmMemoryType::RuntimeServicesData => "RuntimeData",
+        MmMemoryType::Conventional => "Conventional",
+        MmMemoryType::Unusable => "Unusable",
+        MmMemoryType::AcpiReclaim => "AcpiReclaim",
+        MmMemoryType::AcpiNvs => "AcpiNVS",
+        MmMemoryType::Mmio => "MMIO",
+        MmMemoryType::MmioPortSpace => "MMIOPort",
+        MmMemoryType::PalCode => "PalCode",
+        MmMemoryType::Persistent => "Persistent",
+    }
+}
+
+/// Format size in human-readable form
+fn format_size(bytes: u64) -> &'static str {
+    // Since we can't allocate strings, use static buffers
+    // This is a simplified version
+    static mut SIZE_BUFS: [[u8; 16]; 4] = [[0; 16]; 4];
+    static mut BUF_IDX: usize = 0;
+
+    unsafe {
+        let idx = BUF_IDX;
+        BUF_IDX = (BUF_IDX + 1) % 4;
+
+        let buf = &mut SIZE_BUFS[idx];
+        buf.fill(0);
+
+        let (value, suffix) = if bytes >= 1024 * 1024 * 1024 {
+            (bytes / (1024 * 1024 * 1024), "GB")
+        } else if bytes >= 1024 * 1024 {
+            (bytes / (1024 * 1024), "MB")
+        } else if bytes >= 1024 {
+            (bytes / 1024, "KB")
+        } else {
+            (bytes, "B")
+        };
+
+        // Format the number
+        let mut pos = 0;
+        let mut n = value;
+        let mut digits = [0u8; 12];
+        let mut digit_count = 0;
+
+        if n == 0 {
+            digits[0] = b'0';
+            digit_count = 1;
+        } else {
+            while n > 0 && digit_count < 12 {
+                digits[digit_count] = b'0' + (n % 10) as u8;
+                n /= 10;
+                digit_count += 1;
+            }
+        }
+
+        // Reverse digits into buffer
+        for i in (0..digit_count).rev() {
+            if pos < 12 {
+                buf[pos] = digits[i];
+                pos += 1;
+            }
+        }
+
+        // Add suffix
+        for c in suffix.bytes() {
+            if pos < 15 {
+                buf[pos] = c;
+                pos += 1;
+            }
+        }
+
+        core::str::from_utf8_unchecked(&buf[..pos])
+    }
 }
