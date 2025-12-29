@@ -54,6 +54,9 @@ pub mod wait;
 // Exception handling
 pub mod exception;
 
+// Debug object support
+pub mod debug;
+
 // Re-export key types
 pub use list::ListEntry;
 pub use thread::{KThread, ThreadState};
@@ -88,4 +91,17 @@ pub use exception::{
     Context, ExceptionRecord, M128A, LegacyFloatingSaveArea,
     ke_raise_exception, ke_continue, ke_get_context, ke_set_context,
     ContextFlags, ExceptionCode, ExceptionFlags, EXCEPTION_MAXIMUM_PARAMETERS,
+};
+
+// Re-export debug types
+pub use debug::{
+    DebugObject, DebugEvent, DebugEventType, DebugEventInfo,
+    ExceptionDebugInfo, CreateProcessDebugInfo, CreateThreadDebugInfo,
+    ExitProcessDebugInfo, ExitThreadDebugInfo, LoadDllDebugInfo,
+    UnloadDllDebugInfo, OutputDebugStringInfo, debug_flags,
+    dbgk_create_debug_object, dbgk_get_debug_object, dbgk_close_debug_object,
+    dbgk_attach_process, dbgk_detach_process, dbgk_queue_debug_event,
+    dbgk_wait_for_debug_event, dbgk_continue_debug_event,
+    dbgk_generate_initial_events,
+    MAX_DEBUG_OBJECTS, MAX_DEBUG_EVENTS,
 };

@@ -370,6 +370,67 @@ impl HandleTable {
         self.create_handle(source_entry.object, access, attributes)
     }
 
+    /// Duplicate a handle to another handle table (cross-process duplication)
+    ///
+    /// # Arguments
+    /// * `source_handle` - Handle to duplicate from this table
+    /// * `target_table` - Handle table to create the new handle in
+    /// * `desired_access` - Access rights for new handle (0 = same as source)
+    /// * `attributes` - Attributes for new handle
+    ///
+    /// # Returns
+    /// The new handle in the target table, or INVALID_HANDLE_VALUE on failure
+    pub unsafe fn duplicate_handle_to(
+        &mut self,
+        source_handle: Handle,
+        target_table: *mut HandleTable,
+        desired_access: u32,
+        attributes: u32,
+    ) -> Handle {
+        if target_table.is_null() {
+            return INVALID_HANDLE_VALUE;
+        }
+
+        let index = match Self::handle_to_index(source_handle) {
+            Some(i) => i,
+            None => return INVALID_HANDLE_VALUE,
+        };
+
+        let _guard = self.lock.lock();
+
+        let source_entry = &self.entries[index];
+        if !source_entry.is_used() {
+            return INVALID_HANDLE_VALUE;
+        }
+
+        // Use source access if 0
+        let access = if desired_access == 0 {
+            source_entry.access_mask
+        } else {
+            // Can only request subset of source access
+            desired_access & source_entry.access_mask
+        };
+
+        let object = source_entry.object;
+        drop(_guard);
+
+        // Create handle in target table
+        (*target_table).create_handle(object, access, attributes)
+    }
+
+    /// Get the object pointer for a handle (without referencing)
+    pub unsafe fn get_object_pointer(&self, handle: Handle) -> Option<*mut u8> {
+        let index = Self::handle_to_index(handle)?;
+
+        let _guard = self.lock.lock();
+        let entry = &self.entries[index];
+        if entry.is_used() {
+            Some(entry.object)
+        } else {
+            None
+        }
+    }
+
     /// Get number of handles in table
     #[inline]
     pub fn count(&self) -> u32 {

@@ -287,7 +287,17 @@ pub unsafe fn ke_set_priority(thread: *mut KThread, priority: i8) {
 ///
 /// # Safety
 /// Must be called from thread context
+/// Delay execution for the specified number of milliseconds
+///
+/// This is the proper timer-based implementation that puts the thread to sleep
+/// and wakes it when the timer expires, rather than busy-waiting.
+///
+/// Equivalent to KeDelayExecutionThread
 pub unsafe fn ki_delay_execution(delay_ms: u64) {
+    use super::timer::KTimer;
+    use super::wait::ke_wait_for_single_object;
+    use super::dispatcher::DispatcherHeader;
+
     if delay_ms == 0 {
         // Zero delay just yields
         ki_yield();
@@ -302,20 +312,24 @@ pub unsafe fn ki_delay_execution(delay_ms: u64) {
         return;
     }
 
-    // For now, simple busy-wait loop with yields
-    // TODO: Implement proper timer-based sleep
-    let start = crate::hal::apic::get_tick_count();
-    let target = start.saturating_add(delay_ms);
+    // Use a static timer for sleep operations
+    // In a full implementation, each thread would have its own wait timer
+    static SLEEP_TIMER: KTimer = KTimer::new();
 
-    while crate::hal::apic::get_tick_count() < target {
-        // Yield to let other threads run
-        ki_yield();
+    // Initialize and set the timer
+    SLEEP_TIMER.init();
+    SLEEP_TIMER.set(delay_ms as u32, 0, None);
 
-        // Small delay to prevent tight spinning
-        for _ in 0..1000 {
-            core::hint::spin_loop();
-        }
-    }
+    // Wait for the timer to expire
+    // The wait infrastructure handles putting the thread to sleep
+    // and waking it when the timer fires
+    let _ = ke_wait_for_single_object(
+        &SLEEP_TIMER.header as *const DispatcherHeader as *mut DispatcherHeader,
+        Some(delay_ms),
+    );
+
+    // Cancel timer in case wait returned early (e.g., due to APC)
+    SLEEP_TIMER.cancel();
 }
 
 /// List all active threads

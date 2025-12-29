@@ -219,6 +219,36 @@ pub enum SyscallNumber {
     // Time
     NtQuerySystemTime = 170,
     NtQueryPerformanceCounter = 171,
+
+    // APC and Alert operations
+    NtQueueApcThread = 180,
+    NtTestAlert = 181,
+    NtAlertThread = 182,
+    NtAlertResumeThread = 183,
+
+    // Extended file operations
+    NtDeviceIoControlFile = 190,
+    NtFsControlFile = 191,
+    NtFlushBuffersFile = 192,
+    NtCancelIoFile = 193,
+    NtUnlockFile = 194,
+
+    // Object namespace operations
+    NtCreateSymbolicLinkObject = 200,
+    NtOpenSymbolicLinkObject = 201,
+    NtQuerySymbolicLinkObject = 202,
+    NtCreateDirectoryObject = 203,
+    NtOpenDirectoryObject = 204,
+    NtQueryDirectoryObject = 205,
+
+    // Security operations
+    NtAccessCheck = 210,
+    NtPrivilegeCheck = 211,
+    NtAccessCheckAndAuditAlarm = 212,
+
+    // Power management
+    NtSetSystemPowerState = 220,
+    NtInitiatePowerAction = 221,
 }
 
 /// Syscall handler function type
@@ -464,6 +494,45 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtQuerySystemInformation as usize, sys_query_system_information);
     register_syscall(SyscallNumber::NtQuerySystemTime as usize, sys_query_system_time);
     register_syscall(SyscallNumber::NtQueryPerformanceCounter as usize, sys_query_performance_counter);
+
+    // APC and Alert syscalls
+    register_syscall(SyscallNumber::NtQueueApcThread as usize, sys_queue_apc_thread);
+    register_syscall(SyscallNumber::NtTestAlert as usize, sys_test_alert);
+    register_syscall(SyscallNumber::NtAlertThread as usize, sys_alert_thread);
+    register_syscall(SyscallNumber::NtAlertResumeThread as usize, sys_alert_resume_thread);
+
+    // Extended file syscalls
+    register_syscall(SyscallNumber::NtDeviceIoControlFile as usize, sys_device_io_control_file);
+    register_syscall(SyscallNumber::NtFsControlFile as usize, sys_fs_control_file);
+    register_syscall(SyscallNumber::NtFlushBuffersFile as usize, sys_flush_buffers_file);
+    register_syscall(SyscallNumber::NtCancelIoFile as usize, sys_cancel_io_file);
+
+    // Section syscalls (additional)
+    register_syscall(SyscallNumber::NtOpenSection as usize, sys_open_section);
+    register_syscall(SyscallNumber::NtExtendSection as usize, sys_extend_section);
+
+    // I/O Completion (additional)
+    register_syscall(SyscallNumber::NtQueryIoCompletion as usize, sys_query_io_completion);
+
+    // System information (additional)
+    register_syscall(SyscallNumber::NtSetSystemInformation as usize, sys_set_system_information);
+
+    // Object namespace syscalls
+    register_syscall(SyscallNumber::NtCreateSymbolicLinkObject as usize, sys_create_symbolic_link_object);
+    register_syscall(SyscallNumber::NtOpenSymbolicLinkObject as usize, sys_open_symbolic_link_object);
+    register_syscall(SyscallNumber::NtQuerySymbolicLinkObject as usize, sys_query_symbolic_link_object);
+    register_syscall(SyscallNumber::NtCreateDirectoryObject as usize, sys_create_directory_object);
+    register_syscall(SyscallNumber::NtOpenDirectoryObject as usize, sys_open_directory_object);
+    register_syscall(SyscallNumber::NtQueryDirectoryObject as usize, sys_query_directory_object);
+
+    // Security syscalls
+    register_syscall(SyscallNumber::NtAccessCheck as usize, sys_access_check);
+    register_syscall(SyscallNumber::NtPrivilegeCheck as usize, sys_privilege_check);
+    register_syscall(SyscallNumber::NtAccessCheckAndAuditAlarm as usize, sys_access_check_and_audit_alarm);
+
+    // Power management syscalls
+    register_syscall(SyscallNumber::NtSetSystemPowerState as usize, sys_set_system_power_state);
+    register_syscall(SyscallNumber::NtInitiatePowerAction as usize, sys_initiate_power_action);
 }
 
 /// Register a syscall handler
@@ -4384,6 +4453,68 @@ pub mod file_attributes {
     pub const NORMAL: u32 = 0x0080;
 }
 
+/// Windows-style wildcard pattern matching
+///
+/// Supports:
+/// - `*` matches zero or more characters
+/// - `?` matches exactly one character
+/// - Case insensitive matching
+fn wildcard_match(pattern: &str, name: &str) -> bool {
+    let pattern_bytes = pattern.as_bytes();
+    let name_bytes = name.as_bytes();
+
+    wildcard_match_impl(pattern_bytes, name_bytes)
+}
+
+fn wildcard_match_impl(pattern: &[u8], name: &[u8]) -> bool {
+    let mut pi = 0; // pattern index
+    let mut ni = 0; // name index
+    let mut star_pi = usize::MAX; // position after last '*' in pattern
+    let mut star_ni = usize::MAX; // position in name when we matched '*'
+
+    while ni < name.len() {
+        if pi < pattern.len() {
+            let pc = pattern[pi];
+            let nc = name[ni];
+
+            // Convert to lowercase for case-insensitive matching
+            let pc_lower = if pc >= b'A' && pc <= b'Z' { pc + 32 } else { pc };
+            let nc_lower = if nc >= b'A' && nc <= b'Z' { nc + 32 } else { nc };
+
+            if pc == b'*' {
+                // Star matches zero or more characters
+                star_pi = pi + 1;
+                star_ni = ni;
+                pi += 1;
+                continue;
+            } else if pc == b'?' || pc_lower == nc_lower {
+                // ? matches any single character, or exact match
+                pi += 1;
+                ni += 1;
+                continue;
+            }
+        }
+
+        // Mismatch - backtrack if we have a star
+        if star_pi != usize::MAX {
+            pi = star_pi;
+            star_ni += 1;
+            ni = star_ni;
+            continue;
+        }
+
+        // No star to backtrack to - pattern doesn't match
+        return false;
+    }
+
+    // Check remaining pattern characters (must all be stars)
+    while pi < pattern.len() && pattern[pi] == b'*' {
+        pi += 1;
+    }
+
+    pi == pattern.len()
+}
+
 /// NtQueryDirectoryFile - Enumerate directory contents
 ///
 /// NT-style directory enumeration. Returns one or more entries per call.
@@ -4391,25 +4522,34 @@ pub mod file_attributes {
 /// Arguments:
 /// - file_handle: Handle to an open directory
 /// - event: Optional event to signal on completion (async)
-/// - apc_routine: Optional APC callback
-/// - apc_context: Context for APC
-/// - io_status_block: Receives completion status
 /// - file_information: Output buffer for entries
+/// - length: Size of output buffer
+/// - return_single_entry: If true, return only one entry
+/// - file_name_pattern: Optional wildcard pattern (e.g., "*.txt")
 fn sys_query_directory_file(
     file_handle: usize,
     _event: usize,
     file_information: usize,
     length: usize,
-    _return_single_entry: usize,
+    return_single_entry: usize,
     file_name_pattern: usize,
 ) -> isize {
+    use crate::fs::vfs::{vfs_get_handle, vfs_get_fs, DirEntry};
+    use crate::mm::address::{probe_for_write, is_valid_user_range};
+
     // Validate parameters
     if file_handle == 0 || file_information == 0 || length == 0 {
         return -1; // STATUS_INVALID_PARAMETER
     }
 
-    // For now, use a simplified implementation using our fs module
-    // In a full implementation, we'd work with file handles properly
+    // Validate user buffer
+    if !is_valid_user_range(file_information as u64, length) {
+        return 0xC0000005u32 as isize; // STATUS_ACCESS_VIOLATION
+    }
+
+    if !probe_for_write(file_information as u64, length) {
+        return 0xC0000005u32 as isize; // STATUS_ACCESS_VIOLATION
+    }
 
     // Get the file name pattern (optional wildcard like "*.txt")
     let pattern_str: Option<&str> = if file_name_pattern != 0 {
@@ -4432,17 +4572,150 @@ fn sys_query_directory_file(
         None
     };
 
-    let _ = pattern_str; // TODO: Implement pattern matching
+    // Default pattern matches all files
+    let pattern = pattern_str.unwrap_or("*");
 
-    // For now, just log and return success with empty result
-    // A full implementation would enumerate the directory
-    crate::serial_println!(
-        "[SYSCALL] NtQueryDirectoryFile(handle={}, buf={:#x}, len={})",
-        file_handle, file_information, length
-    );
+    // Get handle from internal table (file_handle is our internal handle)
+    let (fs_index, vnode_id) = unsafe {
+        let fh = match vfs_get_handle(file_handle as u32) {
+            Some(h) => h,
+            None => return 0xC0000008u32 as isize, // STATUS_INVALID_HANDLE
+        };
+        (fh.flags as u16, fh.vnode_index as u64)
+    };
 
-    // Return STATUS_NO_MORE_FILES to indicate end of directory
-    0x80000006u32 as isize // STATUS_NO_MORE_FILES
+    // Get the filesystem
+    let fs = unsafe {
+        match vfs_get_fs(fs_index) {
+            Some(f) => f,
+            None => return 0xC000000Fu32 as isize, // STATUS_NO_SUCH_DEVICE
+        }
+    };
+
+    // Get readdir function
+    let readdir_fn = match fs.ops.readdir {
+        Some(f) => f,
+        None => return 0xC00000BBu32 as isize, // STATUS_NOT_SUPPORTED
+    };
+
+    let return_single = return_single_entry != 0;
+    let buf_ptr = file_information as *mut u8;
+    let mut offset: u32 = 0; // Directory enumeration offset
+    let mut buf_used: usize = 0;
+    let mut entries_returned = 0;
+    let mut last_entry_offset: usize = 0;
+
+    // Size of fixed part of FileDirectoryInformation
+    let fixed_size = core::mem::size_of::<FileDirectoryInformation>();
+
+    // Enumerate directory entries
+    loop {
+        let mut entry = DirEntry::empty();
+
+        // Read next directory entry
+        let status = unsafe { readdir_fn(fs_index, vnode_id, offset, &mut entry) };
+
+        if status != crate::fs::vfs::FsStatus::Success {
+            // No more entries or error
+            break;
+        }
+
+        // Get entry name
+        let name = entry.name_str();
+        if name.is_empty() {
+            break;
+        }
+
+        // Check if name matches pattern
+        if !wildcard_match(pattern, name) {
+            // Move to next entry
+            offset = entry.next_offset;
+            if offset == 0 {
+                break;
+            }
+            continue;
+        }
+
+        // Calculate space needed for this entry
+        // File name is stored as UTF-16 (2 bytes per char)
+        let name_len_bytes = name.len() * 2;
+        let entry_size = fixed_size + name_len_bytes;
+        // Align to 8 bytes
+        let aligned_size = (entry_size + 7) & !7;
+
+        // Check if we have space
+        if buf_used + aligned_size > length {
+            if entries_returned == 0 {
+                // Buffer too small for even one entry
+                return 0xC0000023u32 as isize; // STATUS_BUFFER_TOO_SMALL
+            }
+            break;
+        }
+
+        // Build FileDirectoryInformation
+        let file_attrs = if entry.is_directory() {
+            0x10 // FILE_ATTRIBUTE_DIRECTORY
+        } else {
+            entry.attributes
+        };
+
+        let info = FileDirectoryInformation {
+            next_entry_offset: 0, // Will be fixed up later
+            file_index: offset,
+            creation_time: 0, // TODO: Convert from entry times
+            last_access_time: 0,
+            last_write_time: 0,
+            change_time: 0,
+            end_of_file: entry.size as i64,
+            allocation_size: ((entry.size + 511) & !511) as i64, // Round up to sector
+            file_attributes: file_attrs,
+            file_name_length: name_len_bytes as u32,
+        };
+
+        // Write entry to buffer
+        unsafe {
+            let entry_ptr = buf_ptr.add(buf_used);
+
+            // Fix up previous entry's next_entry_offset
+            if entries_returned > 0 {
+                let prev_ptr = buf_ptr.add(last_entry_offset) as *mut FileDirectoryInformation;
+                (*prev_ptr).next_entry_offset = (buf_used - last_entry_offset) as u32;
+            }
+
+            // Copy fixed part
+            core::ptr::copy_nonoverlapping(
+                &info as *const FileDirectoryInformation as *const u8,
+                entry_ptr,
+                fixed_size
+            );
+
+            // Convert and copy file name as UTF-16
+            let name_ptr = entry_ptr.add(fixed_size) as *mut u16;
+            for (i, c) in name.chars().enumerate() {
+                *name_ptr.add(i) = c as u16;
+            }
+        }
+
+        last_entry_offset = buf_used;
+        buf_used += aligned_size;
+        entries_returned += 1;
+
+        // Move to next entry
+        offset = entry.next_offset;
+
+        // If returning single entry, stop now
+        if return_single || offset == 0 {
+            break;
+        }
+    }
+
+    if entries_returned == 0 {
+        // No entries found
+        return 0x80000006u32 as isize; // STATUS_NO_MORE_FILES
+    }
+
+    // Success
+    0 // STATUS_SUCCESS
 }
 
 /// File lock info for NtLockFile
@@ -5957,10 +6230,36 @@ fn sys_duplicate_handle(
         || target_process_handle == 0xFFFFFFFF
         || target_process_handle == 0;
 
+    // For cross-process operations, we currently use the system handle table for all
+    // processes since we don't have per-process handle tables fully implemented.
+    // In a full implementation, we'd look up each process's handle table.
     if !source_is_current || !target_is_current {
-        // TODO: Implement cross-process handle duplication
-        crate::serial_println!("[SYSCALL] NtDuplicateHandle: cross-process duplication not yet supported");
-        return STATUS_ACCESS_DENIED;
+        crate::serial_println!("[SYSCALL] NtDuplicateHandle: cross-process duplication");
+
+        // Get source and target process IDs (for logging/verification)
+        let source_pid = if source_is_current {
+            0 // Current process
+        } else {
+            unsafe { get_process_id(source_process_handle) }.unwrap_or(0xFFFFFFFF)
+        };
+
+        let target_pid = if target_is_current {
+            0
+        } else {
+            unsafe { get_process_id(target_process_handle) }.unwrap_or(0xFFFFFFFF)
+        };
+
+        crate::serial_println!("[SYSCALL] NtDuplicateHandle: source_pid={}, target_pid={}",
+            source_pid, target_pid);
+
+        // For now, all processes share the system handle table, so cross-process
+        // duplication is equivalent to same-process duplication
+        // In a full implementation, we'd:
+        // 1. Get source process's handle table
+        // 2. Get target process's handle table
+        // 3. Use duplicate_handle_to() between them
+
+        // Fall through to same-process handling since we use a shared table
     }
 
     // Handle pseudo-handles specially
@@ -10906,54 +11205,102 @@ fn sys_adjust_groups_token(
 }
 
 /// NtImpersonateThread - Impersonate another thread's security context
+///
+/// Causes the server thread to impersonate the security context of the client thread.
+///
+/// # Arguments
+/// * `server_thread_handle` - Handle to thread that will do the impersonating (usually current)
+/// * `client_thread_handle` - Handle to thread whose security context will be impersonated
+/// * `security_qos` - Pointer to SECURITY_QUALITY_OF_SERVICE structure
 fn sys_impersonate_thread(
     server_thread_handle: usize,
     client_thread_handle: usize,
     security_qos: usize,
     _: usize, _: usize, _: usize,
 ) -> isize {
-    let server_tid = if server_thread_handle == 0xFFFFFFFE || server_thread_handle == (usize::MAX - 1) {
+    use crate::ke::thread::{THREAD_POOL, THREAD_POOL_BITMAP, constants::MAX_THREADS};
+
+    // Get the server thread (the one that will impersonate)
+    let server_thread = if server_thread_handle == 0xFFFFFFFE || server_thread_handle == (usize::MAX - 1) {
         // Current thread
-        unsafe {
-            let prcb = crate::ke::prcb::get_current_prcb();
-            if !prcb.current_thread.is_null() {
-                (*prcb.current_thread).thread_id
-            } else {
-                0
-            }
+        let prcb = crate::ke::prcb::get_current_prcb();
+        if prcb.current_thread.is_null() {
+            return STATUS_INVALID_HANDLE;
         }
+        prcb.current_thread
     } else {
+        // Find thread by ID from handle
         match unsafe { get_thread_id(server_thread_handle) } {
-            Some(t) => t,
-            None => return -1,
+            Some(tid) => unsafe {
+                let mut found: *mut crate::ke::KThread = core::ptr::null_mut();
+                for i in 0..MAX_THREADS {
+                    if THREAD_POOL_BITMAP & (1 << i) != 0 && THREAD_POOL[i].thread_id == tid {
+                        found = &mut THREAD_POOL[i] as *mut _;
+                        break;
+                    }
+                }
+                if found.is_null() {
+                    return STATUS_INVALID_HANDLE;
+                }
+                found
+            },
+            None => return STATUS_INVALID_HANDLE,
         }
     };
 
-    let client_tid = match unsafe { get_thread_id(client_thread_handle) } {
-        Some(t) => t,
-        None => return -1, // STATUS_INVALID_HANDLE
+    // Get the client thread (the one whose token will be used)
+    let client_thread = match unsafe { get_thread_id(client_thread_handle) } {
+        Some(tid) => unsafe {
+            let mut found: *mut crate::ke::KThread = core::ptr::null_mut();
+            for i in 0..MAX_THREADS {
+                if THREAD_POOL_BITMAP & (1 << i) != 0 && THREAD_POOL[i].thread_id == tid {
+                    found = &mut THREAD_POOL[i] as *mut _;
+                    break;
+                }
+            }
+            if found.is_null() {
+                return STATUS_INVALID_HANDLE;
+            }
+            found
+        },
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtImpersonateThread(server={}, client={})",
-        server_tid, client_tid);
+        unsafe { (*server_thread).thread_id }, unsafe { (*client_thread).thread_id });
 
-    // security_qos points to SECURITY_QUALITY_OF_SERVICE
-    // Contains: Length, ImpersonationLevel, ContextTrackingMode, EffectiveOnly
+    // Parse SECURITY_QUALITY_OF_SERVICE
+    let mut impersonation_level: u32 = 2; // Default: SecurityImpersonation
+    let mut effective_only: bool = false;
+
     if security_qos != 0 {
         let length = unsafe { *(security_qos as *const u32) };
         if length >= 8 {
-            let impersonation_level = unsafe { *((security_qos + 4) as *const u32) };
-            crate::serial_println!("[SYSCALL] ImpersonateThread: level = {}", impersonation_level);
-            // Levels: 0=Anonymous, 1=Identification, 2=Impersonation, 3=Delegation
+            impersonation_level = unsafe { *((security_qos + 4) as *const u32) };
+            if length >= 12 {
+                effective_only = unsafe { *((security_qos + 9) as *const u8) } != 0;
+            }
+            crate::serial_println!("[SYSCALL] ImpersonateThread: level={}, effective_only={}",
+                impersonation_level, effective_only);
         }
     }
 
-    // TODO: Implement actual impersonation:
-    // 1. Get client thread's effective token
-    // 2. Duplicate it as an impersonation token
-    // 3. Set it on the server thread
+    // Validate impersonation level (0-3)
+    if impersonation_level > 3 {
+        return STATUS_INVALID_PARAMETER;
+    }
 
-    0
+    // Get client's effective token
+    let client_token = unsafe { (*client_thread).get_effective_token() };
+
+    // Set impersonation on server thread
+    unsafe {
+        (*server_thread).set_impersonation_token(client_token, impersonation_level);
+        (*server_thread).effective_only = effective_only;
+    }
+
+    crate::serial_println!("[SYSCALL] NtImpersonateThread: impersonation set successfully");
+    STATUS_SUCCESS
 }
 
 // ============================================================================
@@ -10988,17 +11335,38 @@ fn sys_flush_virtual_memory(
 }
 
 /// NtLockVirtualMemory - Lock pages in physical memory
+///
+/// Locks a range of virtual memory pages, preventing them from being paged out.
+///
+/// # Arguments
+/// * `process_handle` - Handle to the process (0xFFFFFFFF for current process)
+/// * `base_address_ptr` - Pointer to the starting virtual address (in/out)
+/// * `region_size_ptr` - Pointer to the size in bytes (in/out)
+/// * `map_type` - 1 = MAP_PROCESS (working set), 2 = MAP_SYSTEM (physical memory)
 fn sys_lock_virtual_memory(
-    process_handle: usize,
+    _process_handle: usize,
     base_address_ptr: usize,
     region_size_ptr: usize,
     map_type: usize,
     _: usize, _: usize,
 ) -> isize {
-    let _ = process_handle;
+    use crate::mm::{
+        mm_virtual_to_physical, mm_get_cr3, mm_lock_pages,
+        PAGE_SIZE,
+        address::{probe_for_write, is_valid_user_range},
+    };
 
+    // Validate pointer parameters
     if base_address_ptr == 0 || region_size_ptr == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Validate user-mode pointer accessibility
+    if !probe_for_write(base_address_ptr as u64, core::mem::size_of::<usize>()) {
+        return STATUS_ACCESS_VIOLATION;
+    }
+    if !probe_for_write(region_size_ptr as u64, core::mem::size_of::<usize>()) {
+        return STATUS_ACCESS_VIOLATION;
     }
 
     let base = unsafe { *(base_address_ptr as *const usize) };
@@ -11007,26 +11375,102 @@ fn sys_lock_virtual_memory(
     crate::serial_println!("[SYSCALL] NtLockVirtualMemory(base={:#x}, size={:#x}, type={})",
         base, size, map_type);
 
+    // Validate size
+    if size == 0 {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Validate the range is in user space
+    if !is_valid_user_range(base as u64, size) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
     // map_type: 1 = MAP_PROCESS (lock in working set), 2 = MAP_SYSTEM (lock in physical memory)
+    // For now, both lock pages in physical memory
+    if map_type != 1 && map_type != 2 {
+        return STATUS_INVALID_PARAMETER;
+    }
 
-    // TODO: Actually lock pages
-    // Would mark PTEs as non-pageable
+    // Page-align the base address and calculate region size
+    let page_base = base & !(PAGE_SIZE - 1);
+    let page_end = (base + size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+    let page_count = (page_end - page_base) / PAGE_SIZE;
 
-    0
+    // Get CR3 for address translation
+    let cr3 = mm_get_cr3();
+
+    // Lock each page
+    unsafe {
+        for i in 0..page_count {
+            let virt_addr = page_base + (i * PAGE_SIZE);
+
+            // Translate virtual address to physical
+            if let Some(phys_addr) = mm_virtual_to_physical(cr3, virt_addr as u64) {
+                // Lock this single page
+                if !mm_lock_pages(phys_addr, 1) {
+                    // Failed to lock - unlock previously locked pages and return error
+                    for j in 0..i {
+                        let prev_virt = page_base + (j * PAGE_SIZE);
+                        if let Some(prev_phys) = mm_virtual_to_physical(cr3, prev_virt as u64) {
+                            crate::mm::mm_unlock_pages(prev_phys, 1);
+                        }
+                    }
+                    return STATUS_INSUFFICIENT_RESOURCES;
+                }
+            } else {
+                // Page not mapped - unlock previously locked and return error
+                for j in 0..i {
+                    let prev_virt = page_base + (j * PAGE_SIZE);
+                    if let Some(prev_phys) = mm_virtual_to_physical(cr3, prev_virt as u64) {
+                        crate::mm::mm_unlock_pages(prev_phys, 1);
+                    }
+                }
+                return STATUS_ACCESS_VIOLATION;
+            }
+        }
+
+        // Update output parameters with page-aligned values
+        *(base_address_ptr as *mut usize) = page_base;
+        *(region_size_ptr as *mut usize) = page_end - page_base;
+    }
+
+    crate::serial_println!("[SYSCALL] NtLockVirtualMemory: locked {} pages", page_count);
+    STATUS_SUCCESS
 }
 
 /// NtUnlockVirtualMemory - Unlock previously locked pages
+///
+/// Unlocks a range of virtual memory pages that were previously locked.
+///
+/// # Arguments
+/// * `process_handle` - Handle to the process (0xFFFFFFFF for current process)
+/// * `base_address_ptr` - Pointer to the starting virtual address (in/out)
+/// * `region_size_ptr` - Pointer to the size in bytes (in/out)
+/// * `map_type` - 1 = MAP_PROCESS, 2 = MAP_SYSTEM (must match lock type)
 fn sys_unlock_virtual_memory(
-    process_handle: usize,
+    _process_handle: usize,
     base_address_ptr: usize,
     region_size_ptr: usize,
     map_type: usize,
     _: usize, _: usize,
 ) -> isize {
-    let _ = process_handle;
+    use crate::mm::{
+        mm_virtual_to_physical, mm_get_cr3, mm_unlock_pages,
+        PAGE_SIZE,
+        address::{probe_for_write, is_valid_user_range},
+    };
 
+    // Validate pointer parameters
     if base_address_ptr == 0 || region_size_ptr == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Validate user-mode pointer accessibility
+    if !probe_for_write(base_address_ptr as u64, core::mem::size_of::<usize>()) {
+        return STATUS_ACCESS_VIOLATION;
+    }
+    if !probe_for_write(region_size_ptr as u64, core::mem::size_of::<usize>()) {
+        return STATUS_ACCESS_VIOLATION;
     }
 
     let base = unsafe { *(base_address_ptr as *const usize) };
@@ -11035,9 +11479,49 @@ fn sys_unlock_virtual_memory(
     crate::serial_println!("[SYSCALL] NtUnlockVirtualMemory(base={:#x}, size={:#x}, type={})",
         base, size, map_type);
 
-    // TODO: Actually unlock pages
+    // Validate size
+    if size == 0 {
+        return STATUS_INVALID_PARAMETER;
+    }
 
-    0
+    // Validate the range is in user space
+    if !is_valid_user_range(base as u64, size) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Validate map_type
+    if map_type != 1 && map_type != 2 {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    // Page-align the base address and calculate region size
+    let page_base = base & !(PAGE_SIZE - 1);
+    let page_end = (base + size + PAGE_SIZE - 1) & !(PAGE_SIZE - 1);
+    let page_count = (page_end - page_base) / PAGE_SIZE;
+
+    // Get CR3 for address translation
+    let cr3 = mm_get_cr3();
+
+    // Unlock each page
+    unsafe {
+        for i in 0..page_count {
+            let virt_addr = page_base + (i * PAGE_SIZE);
+
+            // Translate virtual address to physical
+            if let Some(phys_addr) = mm_virtual_to_physical(cr3, virt_addr as u64) {
+                // Unlock this page
+                mm_unlock_pages(phys_addr, 1);
+            }
+            // Note: We silently skip unmapped pages during unlock (unlike lock)
+        }
+
+        // Update output parameters with page-aligned values
+        *(base_address_ptr as *mut usize) = page_base;
+        *(region_size_ptr as *mut usize) = page_end - page_base;
+    }
+
+    crate::serial_println!("[SYSCALL] NtUnlockVirtualMemory: unlocked {} pages", page_count);
+    STATUS_SUCCESS
 }
 
 /// NtReadVirtualMemory - Read memory from another process
@@ -11214,42 +11698,28 @@ fn sys_write_virtual_memory(
 
 /// Debug object handle base
 const DEBUG_HANDLE_BASE: usize = 0x7000;
-const MAX_DEBUG_HANDLES: usize = 64;
 
-/// Debug object table
-static mut DEBUG_OBJECTS: [u32; MAX_DEBUG_HANDLES] = [0; MAX_DEBUG_HANDLES];
-
-/// Allocate a debug handle
-unsafe fn alloc_debug_handle(debugged_pid: u32) -> Option<usize> {
-    for i in 0..MAX_DEBUG_HANDLES {
-        if DEBUG_OBJECTS[i] == 0 {
-            DEBUG_OBJECTS[i] = debugged_pid;
-            return Some(i + DEBUG_HANDLE_BASE);
-        }
-    }
-    None
+/// Convert debug object index to handle
+fn debug_index_to_handle(index: usize) -> usize {
+    index + DEBUG_HANDLE_BASE
 }
 
-/// Get debugged process from debug handle
-unsafe fn get_debug_object(handle: usize) -> Option<u32> {
-    if (DEBUG_HANDLE_BASE..DEBUG_HANDLE_BASE + MAX_DEBUG_HANDLES).contains(&handle) {
-        let idx = handle - DEBUG_HANDLE_BASE;
-        if DEBUG_OBJECTS[idx] != 0 {
-            return Some(DEBUG_OBJECTS[idx]);
-        }
-    }
-    None
-}
-
-/// Free a debug handle
-unsafe fn free_debug_handle(handle: usize) {
-    if (DEBUG_HANDLE_BASE..DEBUG_HANDLE_BASE + MAX_DEBUG_HANDLES).contains(&handle) {
-        let idx = handle - DEBUG_HANDLE_BASE;
-        DEBUG_OBJECTS[idx] = 0;
+/// Convert handle to debug object index
+fn handle_to_debug_index(handle: usize) -> Option<usize> {
+    if handle >= DEBUG_HANDLE_BASE && handle < DEBUG_HANDLE_BASE + crate::ke::MAX_DEBUG_OBJECTS {
+        Some(handle - DEBUG_HANDLE_BASE)
+    } else {
+        None
     }
 }
 
 /// NtCreateDebugObject - Create a debug object for debugging processes
+///
+/// # Arguments
+/// * `debug_object_handle` - Pointer to receive the debug object handle
+/// * `desired_access` - Access rights (DEBUG_ALL_ACCESS, etc.)
+/// * `object_attributes` - Object attributes (optional)
+/// * `flags` - DEBUG_KILL_ON_CLOSE (0x1) to terminate process when debug object closed
 fn sys_create_debug_object(
     debug_object_handle: usize,
     desired_access: usize,
@@ -11257,59 +11727,73 @@ fn sys_create_debug_object(
     flags: usize,
     _: usize, _: usize,
 ) -> isize {
+    use crate::ke::{dbgk_create_debug_object, debug_flags};
+
     if debug_object_handle == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     crate::serial_println!("[SYSCALL] NtCreateDebugObject(access={:#x}, flags={:#x})",
         desired_access, flags);
 
-    // flags: DEBUG_KILL_ON_CLOSE (0x1) - terminate debugged process when debug object closed
+    // Convert NT flags to internal flags
+    let internal_flags = if (flags & 0x1) != 0 {
+        debug_flags::DEBUG_KILL_ON_CLOSE
+    } else {
+        0
+    };
 
-    // Allocate debug object (placeholder PID 0 until attached)
-    let handle = unsafe { alloc_debug_handle(0) };
+    // Allocate debug object
+    let index = unsafe { dbgk_create_debug_object(internal_flags) };
 
-    match handle {
-        Some(h) => {
-            unsafe { *(debug_object_handle as *mut usize) = h; }
-            crate::serial_println!("[SYSCALL] NtCreateDebugObject -> handle {:#x}", h);
-            0
+    match index {
+        Some(idx) => {
+            let handle = debug_index_to_handle(idx);
+            unsafe { *(debug_object_handle as *mut usize) = handle; }
+            crate::serial_println!("[SYSCALL] NtCreateDebugObject -> handle {:#x}", handle);
+            STATUS_SUCCESS
         }
-        None => -1,
+        None => STATUS_INSUFFICIENT_RESOURCES,
     }
 }
 
 /// NtDebugActiveProcess - Attach debugger to a process
+///
+/// Attaches a debug object to a process, enabling debugging.
 fn sys_debug_active_process(
     process_handle: usize,
     debug_object_handle: usize,
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    use crate::ke::{dbgk_attach_process, dbgk_get_debug_object, dbgk_generate_initial_events};
+
     let pid = match unsafe { get_process_id(process_handle) } {
         Some(p) => p,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
-    match unsafe { get_debug_object(debug_object_handle) } {
-        Some(_) => (),
-        None => return -1,
+    let debug_idx = match handle_to_debug_index(debug_object_handle) {
+        Some(idx) => idx,
+        None => return STATUS_INVALID_HANDLE,
     };
+
+    // Verify debug object exists
+    if unsafe { dbgk_get_debug_object(debug_idx) }.is_none() {
+        return STATUS_INVALID_HANDLE;
+    }
 
     crate::serial_println!("[SYSCALL] NtDebugActiveProcess(pid={}, debug_handle={:#x})",
         pid, debug_object_handle);
 
-    // Update debug object with target PID
-    let idx = debug_object_handle - DEBUG_HANDLE_BASE;
-    unsafe {
-        if idx < MAX_DEBUG_HANDLES {
-            DEBUG_OBJECTS[idx] = pid;
-        }
+    // Attach debug object to process
+    if !unsafe { dbgk_attach_process(debug_idx, pid) } {
+        return STATUS_ACCESS_DENIED;
     }
 
-    // TODO: Actually attach debugger
-    // Would set process->debug_port and generate initial debug events
+    // Generate initial debug events (CREATE_PROCESS, etc.)
+    unsafe { dbgk_generate_initial_events(debug_idx, pid); }
 
-    0
+    STATUS_SUCCESS
 }
 
 /// NtRemoveProcessDebug - Detach debugger from process
@@ -11318,18 +11802,34 @@ fn sys_remove_process_debug(
     debug_object_handle: usize,
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    use crate::ke::dbgk_detach_process;
+
     let pid = match unsafe { get_process_id(process_handle) } {
         Some(p) => p,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
+    };
+
+    let debug_idx = match handle_to_debug_index(debug_object_handle) {
+        Some(idx) => idx,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtRemoveProcessDebug(pid={}, debug_handle={:#x})",
         pid, debug_object_handle);
 
-    // TODO: Actually detach debugger
-    // Would clear process->debug_port
+    if !unsafe { dbgk_detach_process(debug_idx) } {
+        return STATUS_ACCESS_DENIED;
+    }
 
-    0
+    STATUS_SUCCESS
+}
+
+/// Debug state change structure (simplified)
+#[repr(C)]
+struct DbgUiWaitStateChange {
+    new_state: u32,
+    app_client_id: [u32; 2], // Process ID, Thread ID
+    // Union of event-specific data follows
 }
 
 /// NtWaitForDebugEvent - Wait for debug event from debugged process
@@ -11340,23 +11840,67 @@ fn sys_wait_for_debug_event(
     wait_state_change: usize,
     _: usize, _: usize,
 ) -> isize {
-    let debugged_pid = match unsafe { get_debug_object(debug_object_handle) } {
-        Some(p) => p,
-        None => return -1,
+    use crate::ke::{dbgk_wait_for_debug_event, dbgk_get_debug_object, DebugEventType};
+
+    let debug_idx = match handle_to_debug_index(debug_object_handle) {
+        Some(idx) => idx,
+        None => return STATUS_INVALID_HANDLE,
     };
+
+    let obj = match unsafe { dbgk_get_debug_object(debug_idx) } {
+        Some(o) => o,
+        None => return STATUS_INVALID_HANDLE,
+    };
+
+    let debugged_pid = obj.get_debugged_pid();
 
     crate::serial_println!("[SYSCALL] NtWaitForDebugEvent(pid={}, alertable={}, timeout={:#x})",
         debugged_pid, alertable != 0, timeout);
 
     if wait_state_change == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
-    // TODO: Actually wait for and return debug events
-    // Would block until breakpoint, exception, thread create/exit, etc.
+    // Convert timeout
+    let timeout_ms = if timeout == 0 {
+        None
+    } else {
+        // NT timeout is in 100ns units, negative means relative
+        let timeout_val = timeout as i64;
+        if timeout_val < 0 {
+            Some((-timeout_val / 10000) as u64) // Convert to milliseconds
+        } else {
+            Some((timeout_val / 10000) as u64)
+        }
+    };
 
-    // For now, just return timeout
-    0x102 // STATUS_TIMEOUT
+    // Wait for debug event
+    let result = unsafe { dbgk_wait_for_debug_event(debug_idx, timeout_ms) };
+
+    match result {
+        Some((_event, event_type, pid, tid)) => {
+            // Fill in the wait state change structure
+            let state_change = wait_state_change as *mut DbgUiWaitStateChange;
+            unsafe {
+                (*state_change).new_state = match event_type {
+                    DebugEventType::Exception => 1,
+                    DebugEventType::CreateThread => 2,
+                    DebugEventType::CreateProcess => 3,
+                    DebugEventType::ExitThread => 4,
+                    DebugEventType::ExitProcess => 5,
+                    DebugEventType::LoadDll => 6,
+                    DebugEventType::UnloadDll => 7,
+                    DebugEventType::OutputDebugString => 8,
+                    DebugEventType::Rip => 9,
+                };
+                (*state_change).app_client_id[0] = pid;
+                (*state_change).app_client_id[1] = tid;
+            }
+            crate::serial_println!("[SYSCALL] NtWaitForDebugEvent: got {:?} event", event_type);
+            STATUS_SUCCESS
+        }
+        None => STATUS_TIMEOUT,
+    }
 }
 
 /// NtDebugContinue - Continue from debug event
@@ -11366,9 +11910,16 @@ fn sys_debug_continue(
     continue_status: usize,
     _: usize, _: usize, _: usize,
 ) -> isize {
-    let debugged_pid = match unsafe { get_debug_object(debug_object_handle) } {
-        Some(p) => p,
-        None => return -1,
+    use crate::ke::{dbgk_continue_debug_event, dbgk_get_debug_object};
+
+    let debug_idx = match handle_to_debug_index(debug_object_handle) {
+        Some(idx) => idx,
+        None => return STATUS_INVALID_HANDLE,
+    };
+
+    let obj = match unsafe { dbgk_get_debug_object(debug_idx) } {
+        Some(o) => o,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     let (pid, tid) = if client_id != 0 {
@@ -11376,7 +11927,7 @@ fn sys_debug_continue(
             (*(client_id as *const u32), *((client_id + 4) as *const u32))
         }
     } else {
-        (debugged_pid, 0)
+        (obj.get_debugged_pid(), 0)
     };
 
     crate::serial_println!("[SYSCALL] NtDebugContinue(pid={}, tid={}, status={:#x})",
@@ -11384,9 +11935,11 @@ fn sys_debug_continue(
 
     // continue_status: DBG_CONTINUE (0x10002) or DBG_EXCEPTION_NOT_HANDLED (0x80010001)
 
-    // TODO: Actually continue the debugged thread
+    if !unsafe { dbgk_continue_debug_event(debug_idx, pid, tid, continue_status as u32) } {
+        return STATUS_ACCESS_DENIED;
+    }
 
-    0
+    STATUS_SUCCESS
 }
 
 // ============================================================================
@@ -12744,4 +13297,1439 @@ fn sys_query_performance_counter(
     crate::serial_println!("[SYSCALL] NtQueryPerformanceCounter = {}", tsc);
 
     0
+}
+
+// ============================================================================
+// APC and Alert Syscalls
+// ============================================================================
+
+/// User-mode APC routine type
+pub type UserApcRoutine = unsafe extern "C" fn(apc_context: usize, arg1: usize, arg2: usize);
+
+/// NtQueueApcThread - Queue a user-mode APC to a thread
+///
+/// Queues an Asynchronous Procedure Call to be executed in the context
+/// of the specified thread when it next enters an alertable wait state.
+///
+/// # Arguments
+/// * `thread_handle` - Handle to the target thread
+/// * `apc_routine` - User-mode APC routine to call
+/// * `apc_context` - First argument to APC routine
+/// * `arg1` - Second argument to APC routine
+/// * `arg2` - Third argument to APC routine
+fn sys_queue_apc_thread(
+    thread_handle: usize,
+    apc_routine: usize,
+    apc_context: usize,
+    _arg1: usize,
+    _arg2: usize,
+    _arg6: usize,
+) -> isize {
+    use crate::ke::{KThread, thread::{THREAD_POOL, constants::MAX_THREADS}};
+
+    crate::serial_println!(
+        "[SYSCALL] NtQueueApcThread(thread={}, routine={:#x}, ctx={:#x})",
+        thread_handle, apc_routine, apc_context
+    );
+
+    // Validate parameters
+    if thread_handle == 0 || apc_routine == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Find the thread by handle (treat as thread ID for now)
+    let thread_id = thread_handle as u32;
+    let mut target_thread: *mut KThread = core::ptr::null_mut();
+
+    unsafe {
+        for i in 0..MAX_THREADS {
+            let thread = &mut THREAD_POOL[i];
+            if thread.thread_id == thread_id && thread.state != crate::ke::thread::ThreadState::Terminated {
+                target_thread = thread as *mut KThread;
+                break;
+            }
+        }
+    }
+
+    if target_thread.is_null() {
+        return 0xC000000Bu32 as isize; // STATUS_INVALID_HANDLE
+    }
+
+    // Check if thread accepts APCs
+    unsafe {
+        if !(*target_thread).apc_queueable {
+            return 0xC0000061u32 as isize; // STATUS_APC_NOT_ALLOWED
+        }
+
+        // Queue the APC to the thread's user APC queue
+        // The APC will be delivered when the thread enters an alertable wait
+        // For now, we store the APC info directly - a full implementation would
+        // use a proper APC queue structure
+
+        // Use the kernel APC infrastructure to queue the APC
+        let apc_state = &mut (*target_thread).apc_state;
+
+        // For a simple implementation, we'll just mark that there's a pending APC
+        // A full implementation would allocate a KAPC structure and queue it
+        if !apc_state.user_apc_pending {
+            apc_state.user_apc_pending = true;
+            // Store APC parameters (simplified - real impl would use APC queue)
+            // We're reusing some fields for now
+            crate::serial_println!(
+                "[APC] Queued user APC to thread {} (routine={:#x})",
+                thread_id, apc_routine
+            );
+        } else {
+            // APC queue full (simplified implementation)
+            return 0xC000009Au32 as isize; // STATUS_INSUFFICIENT_RESOURCES
+        }
+    }
+
+    0 // STATUS_SUCCESS
+}
+
+/// NtTestAlert - Test and clear the calling thread's alert status
+///
+/// If the current thread has a pending user alert, this function
+/// delivers pending user APCs and returns STATUS_ALERTED.
+fn sys_test_alert(
+    _arg1: usize,
+    _arg2: usize,
+    _arg3: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    use crate::ke::prcb::get_current_prcb;
+
+    crate::serial_println!("[SYSCALL] NtTestAlert");
+
+    // Get current thread
+    let prcb = get_current_prcb();
+    if prcb.current_thread.is_null() {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+    let current_thread = prcb.current_thread;
+
+    unsafe {
+        let apc_state = &mut (*current_thread).apc_state;
+
+        // Check if there's a pending user alert
+        if apc_state.user_apc_pending {
+            // Clear the pending flag
+            apc_state.user_apc_pending = false;
+
+            // Deliver any pending user APCs
+            // In a full implementation, we'd iterate the APC queue here
+            crate::serial_println!("[SYSCALL] NtTestAlert: alert was pending, delivering APCs");
+
+            // Return STATUS_ALERTED to indicate an alert was pending
+            return 0x00000101u32 as isize; // STATUS_ALERTED
+        }
+
+        // Check for pending user APCs even without explicit alert
+        // (This handles APCs queued via NtQueueApcThread)
+        // apc_list_head[1] is the user-mode APC list
+        if !apc_state.apc_list_head[1].is_empty() {
+            crate::serial_println!("[SYSCALL] NtTestAlert: user APCs pending");
+            return 0x00000101u32 as isize; // STATUS_ALERTED
+        }
+    }
+
+    // No alert pending
+    0 // STATUS_SUCCESS
+}
+
+/// NtAlertThread - Alert a thread
+///
+/// Sets the user-mode alert flag for the specified thread. If the thread
+/// is currently in an alertable wait state, it will be woken up.
+fn sys_alert_thread(
+    thread_handle: usize,
+    _arg2: usize,
+    _arg3: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    use crate::ke::{KThread, thread::{THREAD_POOL, constants::MAX_THREADS, ThreadState}};
+
+    crate::serial_println!("[SYSCALL] NtAlertThread(thread={})", thread_handle);
+
+    if thread_handle == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Find the thread by handle (treat as thread ID for now)
+    let thread_id = thread_handle as u32;
+    let mut target_thread: *mut KThread = core::ptr::null_mut();
+
+    unsafe {
+        for i in 0..MAX_THREADS {
+            let thread = &mut THREAD_POOL[i];
+            if thread.thread_id == thread_id && thread.state != ThreadState::Terminated {
+                target_thread = thread as *mut KThread;
+                break;
+            }
+        }
+    }
+
+    if target_thread.is_null() {
+        return 0xC000000Bu32 as isize; // STATUS_INVALID_HANDLE
+    }
+
+    unsafe {
+        // Set the user alert pending flag
+        (*target_thread).apc_state.user_apc_pending = true;
+
+        // If the thread is in an alertable wait, wake it up
+        if (*target_thread).state == ThreadState::Waiting && (*target_thread).alertable {
+            // Set wait status to indicate alerted
+            (*target_thread).wait_status = crate::ke::dispatcher::WaitStatus::Alerted;
+
+            // Make thread ready to run
+            (*target_thread).state = ThreadState::Ready;
+
+            crate::serial_println!("[SYSCALL] NtAlertThread: woke thread {} from alertable wait", thread_id);
+        }
+    }
+
+    0 // STATUS_SUCCESS
+}
+
+/// NtAlertResumeThread - Alert and resume a thread
+///
+/// Alerts the thread and decrements its suspend count, potentially
+/// resuming execution.
+///
+/// # Arguments
+/// * `thread_handle` - Handle to the thread
+/// * `previous_suspend_count` - Receives the previous suspend count
+fn sys_alert_resume_thread(
+    thread_handle: usize,
+    previous_suspend_count: usize,
+    _arg3: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    use crate::ke::{KThread, thread::{THREAD_POOL, constants::MAX_THREADS, ThreadState}};
+
+    crate::serial_println!("[SYSCALL] NtAlertResumeThread(thread={})", thread_handle);
+
+    if thread_handle == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Find the thread by handle
+    let thread_id = thread_handle as u32;
+    let mut target_thread: *mut KThread = core::ptr::null_mut();
+
+    unsafe {
+        for i in 0..MAX_THREADS {
+            let thread = &mut THREAD_POOL[i];
+            if thread.thread_id == thread_id && thread.state != ThreadState::Terminated {
+                target_thread = thread as *mut KThread;
+                break;
+            }
+        }
+    }
+
+    if target_thread.is_null() {
+        return 0xC000000Bu32 as isize; // STATUS_INVALID_HANDLE
+    }
+
+    unsafe {
+        // Get previous suspend count
+        let prev_count = (*target_thread).suspend_count;
+
+        // Write previous suspend count if requested
+        if previous_suspend_count != 0 {
+            core::ptr::write(previous_suspend_count as *mut u32, prev_count as u32);
+        }
+
+        // Alert the thread
+        (*target_thread).apc_state.user_apc_pending = true;
+
+        // Resume the thread (decrement suspend count)
+        let new_count = (*target_thread).resume();
+
+        crate::serial_println!(
+            "[SYSCALL] NtAlertResumeThread: thread {} prev_count={} new_count={}",
+            thread_id, prev_count, new_count
+        );
+
+        // If the thread was in an alertable wait, set alerted status
+        if (*target_thread).state == ThreadState::Waiting && (*target_thread).alertable {
+            (*target_thread).wait_status = crate::ke::dispatcher::WaitStatus::Alerted;
+            (*target_thread).state = ThreadState::Ready;
+        }
+    }
+
+    0 // STATUS_SUCCESS
+}
+
+// ============================================================================
+// Extended File I/O Syscalls
+// ============================================================================
+
+/// I/O Control codes use this format:
+/// Bits 31-16: Device type
+/// Bits 15-14: Required access
+/// Bits 13-2: Function code
+/// Bits 1-0: Transfer type (METHOD_BUFFERED, etc.)
+pub mod ioctl {
+    pub const METHOD_BUFFERED: u32 = 0;
+    pub const METHOD_IN_DIRECT: u32 = 1;
+    pub const METHOD_OUT_DIRECT: u32 = 2;
+    pub const METHOD_NEITHER: u32 = 3;
+
+    pub const FILE_ANY_ACCESS: u32 = 0;
+    pub const FILE_READ_ACCESS: u32 = 1;
+    pub const FILE_WRITE_ACCESS: u32 = 2;
+
+    /// Extract device type from IOCTL code
+    pub const fn device_type(code: u32) -> u32 {
+        (code >> 16) & 0xFFFF
+    }
+
+    /// Extract function code from IOCTL code
+    pub const fn function(code: u32) -> u32 {
+        (code >> 2) & 0xFFF
+    }
+
+    /// Extract transfer type from IOCTL code
+    pub const fn method(code: u32) -> u32 {
+        code & 0x3
+    }
+
+    /// Extract required access from IOCTL code
+    pub const fn access(code: u32) -> u32 {
+        (code >> 14) & 0x3
+    }
+}
+
+/// NtDeviceIoControlFile - Send control code to device driver
+///
+/// This is the primary interface for device-specific operations.
+///
+/// # Arguments
+/// * `file_handle` - Handle to the device
+/// * `event` - Optional event for async completion
+/// * `io_status_block` - Receives completion status
+/// * `io_control_code` - Device-specific control code
+/// * `input_buffer` - Input data for the operation
+/// * `input_buffer_length` - Size of input buffer
+fn sys_device_io_control_file(
+    file_handle: usize,
+    _event: usize,
+    io_status_block: usize,
+    io_control_code: usize,
+    input_buffer: usize,
+    output_buffer: usize,
+) -> isize {
+    // Note: This syscall has more parameters, we're using a simplified signature
+    // Real signature: (FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock,
+    //                  IoControlCode, InputBuffer, InputBufferLength, OutputBuffer, OutputBufferLength)
+
+    crate::serial_println!(
+        "[SYSCALL] NtDeviceIoControlFile(handle={}, ioctl={:#x})",
+        file_handle, io_control_code
+    );
+
+    if file_handle == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    let ctl_code = io_control_code as u32;
+    let device_type = ioctl::device_type(ctl_code);
+    let function = ioctl::function(ctl_code);
+    let method = ioctl::method(ctl_code);
+
+    crate::serial_println!(
+        "[SYSCALL] IOCTL: device_type={:#x}, function={}, method={}",
+        device_type, function, method
+    );
+
+    // For now, we'll handle a few common device types
+    match device_type {
+        // FILE_DEVICE_CONSOLE = 0x0050
+        0x0050 => {
+            // Console device IOCTLs
+            crate::serial_println!("[SYSCALL] Console IOCTL function {}", function);
+
+            // Write status if provided
+            if io_status_block != 0 {
+                unsafe {
+                    core::ptr::write(io_status_block as *mut i32, 0); // Status
+                    core::ptr::write((io_status_block + 8) as *mut usize, 0); // Information
+                }
+            }
+
+            0 // STATUS_SUCCESS
+        }
+
+        // FILE_DEVICE_DISK = 0x0007
+        0x0007 => {
+            // Disk device IOCTLs
+            crate::serial_println!("[SYSCALL] Disk IOCTL function {}", function);
+
+            match function {
+                // IOCTL_DISK_GET_DRIVE_GEOMETRY = 0x0000
+                0 => {
+                    // Would return disk geometry
+                    if io_status_block != 0 {
+                        unsafe {
+                            core::ptr::write(io_status_block as *mut i32, 0);
+                            core::ptr::write((io_status_block + 8) as *mut usize, 0);
+                        }
+                    }
+                    0
+                }
+                _ => {
+                    0xC00000BBu32 as isize // STATUS_NOT_SUPPORTED
+                }
+            }
+        }
+
+        // FILE_DEVICE_FILE_SYSTEM = 0x0009
+        0x0009 => {
+            // File system IOCTLs - forward to NtFsControlFile
+            sys_fs_control_file(
+                file_handle, 0, io_status_block,
+                io_control_code, input_buffer, output_buffer
+            )
+        }
+
+        _ => {
+            crate::serial_println!(
+                "[SYSCALL] NtDeviceIoControlFile: unsupported device type {:#x}",
+                device_type
+            );
+
+            // For unsupported devices, return success but do nothing
+            // A real implementation would route to the appropriate driver
+            if io_status_block != 0 {
+                unsafe {
+                    core::ptr::write(io_status_block as *mut i32, 0);
+                    core::ptr::write((io_status_block + 8) as *mut usize, 0);
+                }
+            }
+
+            0 // STATUS_SUCCESS
+        }
+    }
+}
+
+/// NtFsControlFile - Send file system control code
+///
+/// Similar to NtDeviceIoControlFile but specifically for file system operations.
+fn sys_fs_control_file(
+    file_handle: usize,
+    _event: usize,
+    io_status_block: usize,
+    fs_control_code: usize,
+    input_buffer: usize,
+    _output_buffer: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtFsControlFile(handle={}, fsctl={:#x})",
+        file_handle, fs_control_code
+    );
+
+    if file_handle == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    let ctl_code = fs_control_code as u32;
+    let function = ioctl::function(ctl_code);
+
+    // Common FSCTL codes
+    match function {
+        // FSCTL_LOCK_VOLUME = 6
+        6 => {
+            crate::serial_println!("[SYSCALL] FSCTL_LOCK_VOLUME");
+            // Lock the volume for exclusive access
+            // For now, just succeed
+            if io_status_block != 0 {
+                unsafe {
+                    core::ptr::write(io_status_block as *mut i32, 0);
+                    core::ptr::write((io_status_block + 8) as *mut usize, 0);
+                }
+            }
+            0
+        }
+
+        // FSCTL_UNLOCK_VOLUME = 7
+        7 => {
+            crate::serial_println!("[SYSCALL] FSCTL_UNLOCK_VOLUME");
+            if io_status_block != 0 {
+                unsafe {
+                    core::ptr::write(io_status_block as *mut i32, 0);
+                    core::ptr::write((io_status_block + 8) as *mut usize, 0);
+                }
+            }
+            0
+        }
+
+        // FSCTL_DISMOUNT_VOLUME = 8
+        8 => {
+            crate::serial_println!("[SYSCALL] FSCTL_DISMOUNT_VOLUME");
+            if io_status_block != 0 {
+                unsafe {
+                    core::ptr::write(io_status_block as *mut i32, 0);
+                    core::ptr::write((io_status_block + 8) as *mut usize, 0);
+                }
+            }
+            0
+        }
+
+        // FSCTL_IS_VOLUME_MOUNTED = 10
+        10 => {
+            crate::serial_println!("[SYSCALL] FSCTL_IS_VOLUME_MOUNTED");
+            // Check if volume is mounted
+            // For now, assume it is
+            if io_status_block != 0 {
+                unsafe {
+                    core::ptr::write(io_status_block as *mut i32, 0);
+                    core::ptr::write((io_status_block + 8) as *mut usize, 0);
+                }
+            }
+            0
+        }
+
+        // FSCTL_GET_COMPRESSION = 15
+        15 => {
+            crate::serial_println!("[SYSCALL] FSCTL_GET_COMPRESSION");
+            // Return compression state (0 = no compression)
+            if input_buffer != 0 {
+                unsafe {
+                    core::ptr::write(input_buffer as *mut u16, 0); // COMPRESSION_FORMAT_NONE
+                }
+            }
+            if io_status_block != 0 {
+                unsafe {
+                    core::ptr::write(io_status_block as *mut i32, 0);
+                    core::ptr::write((io_status_block + 8) as *mut usize, 2);
+                }
+            }
+            0
+        }
+
+        _ => {
+            crate::serial_println!(
+                "[SYSCALL] NtFsControlFile: unsupported FSCTL function {}",
+                function
+            );
+
+            // Return success for unknown FSCTLs
+            if io_status_block != 0 {
+                unsafe {
+                    core::ptr::write(io_status_block as *mut i32, 0);
+                    core::ptr::write((io_status_block + 8) as *mut usize, 0);
+                }
+            }
+            0
+        }
+    }
+}
+
+/// NtFlushBuffersFile - Flush file buffers to disk
+///
+/// Ensures all buffered data for the file has been written to the underlying storage.
+fn sys_flush_buffers_file(
+    file_handle: usize,
+    io_status_block: usize,
+    _arg3: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    use crate::fs::vfs::{vfs_get_handle, vfs_get_fs};
+
+    crate::serial_println!("[SYSCALL] NtFlushBuffersFile(handle={})", file_handle);
+
+    if file_handle == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Get file handle information
+    let (fs_index, vnode_id) = unsafe {
+        let fh = match vfs_get_handle(file_handle as u32) {
+            Some(h) => h,
+            None => return 0xC0000008u32 as isize, // STATUS_INVALID_HANDLE
+        };
+        (fh.flags as u16, fh.vnode_index as u64)
+    };
+
+    // Get filesystem and call sync
+    let status = unsafe {
+        match vfs_get_fs(fs_index) {
+            Some(fs) => {
+                if let Some(sync_fn) = fs.ops.sync {
+                    sync_fn(fs_index, vnode_id)
+                } else {
+                    // No sync function - that's okay, just succeed
+                    crate::fs::vfs::FsStatus::Success
+                }
+            }
+            None => return 0xC000000Fu32 as isize, // STATUS_NO_SUCH_DEVICE
+        }
+    };
+
+    // Write IO_STATUS_BLOCK if provided
+    if io_status_block != 0 {
+        unsafe {
+            if status == crate::fs::vfs::FsStatus::Success {
+                core::ptr::write(io_status_block as *mut i32, 0); // STATUS_SUCCESS
+            } else {
+                core::ptr::write(io_status_block as *mut i32, -1); // Error
+            }
+            core::ptr::write((io_status_block + 8) as *mut usize, 0); // Information
+        }
+    }
+
+    if status == crate::fs::vfs::FsStatus::Success {
+        crate::serial_println!("[SYSCALL] NtFlushBuffersFile: success");
+        0 // STATUS_SUCCESS
+    } else {
+        crate::serial_println!("[SYSCALL] NtFlushBuffersFile: failed");
+        0xC0000001u32 as isize // STATUS_UNSUCCESSFUL
+    }
+}
+
+/// NtCancelIoFile - Cancel pending I/O operations on a file
+///
+/// Cancels all pending asynchronous I/O operations for the file handle
+/// that were issued by the calling thread.
+fn sys_cancel_io_file(
+    file_handle: usize,
+    io_status_block: usize,
+    _arg3: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!("[SYSCALL] NtCancelIoFile(handle={})", file_handle);
+
+    if file_handle == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // In our simple implementation, we don't have async I/O yet,
+    // so there's nothing to cancel. Just return success.
+
+    // Write IO_STATUS_BLOCK if provided
+    if io_status_block != 0 {
+        unsafe {
+            core::ptr::write(io_status_block as *mut i32, 0); // STATUS_SUCCESS
+            core::ptr::write((io_status_block + 8) as *mut usize, 0); // Information
+        }
+    }
+
+    // Return STATUS_SUCCESS (no I/O was actually cancelled)
+    // A real implementation would iterate pending IRPs and cancel them
+    crate::serial_println!("[SYSCALL] NtCancelIoFile: no pending I/O to cancel");
+    0 // STATUS_SUCCESS
+}
+
+// ============================================================================
+// Section Syscalls (Additional)
+// ============================================================================
+
+/// NtOpenSection - Open an existing section object
+///
+/// Opens a handle to an existing section object by name.
+fn sys_open_section(
+    section_handle: usize,
+    desired_access: usize,
+    object_attributes: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtOpenSection(handle_out={:#x}, access={:#x}, attrs={:#x})",
+        section_handle, desired_access, object_attributes
+    );
+
+    if section_handle == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Parse object attributes to get the name
+    if object_attributes == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // For now, we don't have a section namespace, so we can't open by name
+    // In a full implementation, we'd look up the section in the object namespace
+
+    crate::serial_println!("[SYSCALL] NtOpenSection: section not found");
+    0xC0000034u32 as isize // STATUS_OBJECT_NAME_NOT_FOUND
+}
+
+/// NtExtendSection - Extend a section object
+///
+/// Extends the size of a section object (and its backing file if applicable).
+fn sys_extend_section(
+    section_handle: usize,
+    new_maximum_size: usize,
+    _arg3: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtExtendSection(handle={}, new_size={:#x})",
+        section_handle, new_maximum_size
+    );
+
+    if section_handle == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    if new_maximum_size == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Read the new maximum size from pointer
+    let new_size = if new_maximum_size != 0 {
+        unsafe { core::ptr::read(new_maximum_size as *const i64) }
+    } else {
+        return 0xC000000Du32 as isize;
+    };
+
+    crate::serial_println!("[SYSCALL] NtExtendSection: extending to {} bytes", new_size);
+
+    // For now, just succeed - a real implementation would extend the section
+    // and update the underlying file if it's a file-backed section
+    0 // STATUS_SUCCESS
+}
+
+// ============================================================================
+// I/O Completion Syscalls (Additional)
+// ============================================================================
+
+/// I/O Completion information structure
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct IoCompletionBasicInformation {
+    /// Current depth (number of pending completions)
+    pub depth: i32,
+}
+
+/// NtQueryIoCompletion - Query I/O completion port information
+fn sys_query_io_completion(
+    io_completion_handle: usize,
+    io_completion_info_class: usize,
+    io_completion_info: usize,
+    io_completion_info_length: usize,
+    return_length: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtQueryIoCompletion(handle={}, class={})",
+        io_completion_handle, io_completion_info_class
+    );
+
+    if io_completion_handle == 0 || io_completion_info == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    match io_completion_info_class as u32 {
+        // IoCompletionBasicInformation = 0
+        0 => {
+            let required_size = core::mem::size_of::<IoCompletionBasicInformation>();
+
+            if return_length != 0 {
+                unsafe {
+                    core::ptr::write(return_length as *mut u32, required_size as u32);
+                }
+            }
+
+            if io_completion_info_length < required_size {
+                return 0xC0000004u32 as isize; // STATUS_INFO_LENGTH_MISMATCH
+            }
+
+            // Return basic info - for now, just show depth as 0
+            let info = IoCompletionBasicInformation {
+                depth: 0,
+            };
+
+            unsafe {
+                core::ptr::write(io_completion_info as *mut IoCompletionBasicInformation, info);
+            }
+
+            0 // STATUS_SUCCESS
+        }
+        _ => {
+            0xC0000003u32 as isize // STATUS_INVALID_INFO_CLASS
+        }
+    }
+}
+
+// ============================================================================
+// System Information Syscalls (Additional)
+// ============================================================================
+
+/// NtSetSystemInformation - Set system-wide information
+///
+/// Allows privileged processes to modify system configuration.
+fn sys_set_system_information(
+    system_info_class: usize,
+    system_info: usize,
+    system_info_length: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtSetSystemInformation(class={}, info={:#x}, len={})",
+        system_info_class, system_info, system_info_length
+    );
+
+    // Most set operations require SeSystemEnvironmentPrivilege or similar
+    // For now, we'll just allow some basic operations
+
+    match system_info_class as u32 {
+        // SystemTimeSlipNotification = 46
+        46 => {
+            crate::serial_println!("[SYSCALL] NtSetSystemInformation: TimeSlipNotification");
+            0 // STATUS_SUCCESS
+        }
+
+        // SystemLoadGdiDriverInSystemSpace = 54
+        54 => {
+            crate::serial_println!("[SYSCALL] NtSetSystemInformation: LoadGdiDriver (not supported)");
+            0xC00000BBu32 as isize // STATUS_NOT_SUPPORTED
+        }
+
+        // SystemFileCacheInformation = 21
+        21 => {
+            crate::serial_println!("[SYSCALL] NtSetSystemInformation: FileCacheInformation");
+            // Would set cache limits - just succeed for now
+            0 // STATUS_SUCCESS
+        }
+
+        // SystemPrioritySeperation = 39
+        39 => {
+            if system_info_length < 4 {
+                return 0xC0000004u32 as isize; // STATUS_INFO_LENGTH_MISMATCH
+            }
+            let _separation = unsafe { core::ptr::read(system_info as *const u32) };
+            crate::serial_println!("[SYSCALL] NtSetSystemInformation: PrioritySeparation");
+            0 // STATUS_SUCCESS
+        }
+
+        // SystemRegistryQuotaInformation = 37
+        37 => {
+            crate::serial_println!("[SYSCALL] NtSetSystemInformation: RegistryQuota");
+            0 // STATUS_SUCCESS
+        }
+
+        _ => {
+            crate::serial_println!(
+                "[SYSCALL] NtSetSystemInformation: unsupported class {}",
+                system_info_class
+            );
+            0xC0000003u32 as isize // STATUS_INVALID_INFO_CLASS
+        }
+    }
+}
+
+// ============================================================================
+// Object Namespace Syscalls - Symbolic Links
+// ============================================================================
+
+/// Maximum symbolic link target length
+const MAX_SYMLINK_TARGET: usize = 512;
+
+/// Symbolic link object storage
+struct SymbolicLinkObject {
+    /// Target path
+    target: [u8; MAX_SYMLINK_TARGET],
+    /// Target length
+    target_len: usize,
+    /// Object name
+    name: [u8; 128],
+    /// Name length
+    name_len: usize,
+    /// In use
+    in_use: bool,
+}
+
+impl SymbolicLinkObject {
+    const fn new() -> Self {
+        Self {
+            target: [0; MAX_SYMLINK_TARGET],
+            target_len: 0,
+            name: [0; 128],
+            name_len: 0,
+            in_use: false,
+        }
+    }
+}
+
+/// Maximum number of symbolic links
+const MAX_SYMLINKS: usize = 64;
+
+/// Global symbolic link table
+static mut SYMLINK_TABLE: [SymbolicLinkObject; MAX_SYMLINKS] = {
+    const INIT: SymbolicLinkObject = SymbolicLinkObject::new();
+    [INIT; MAX_SYMLINKS]
+};
+
+/// NtCreateSymbolicLinkObject - Create a symbolic link in the object namespace
+fn sys_create_symbolic_link_object(
+    link_handle: usize,
+    desired_access: usize,
+    object_attributes: usize,
+    target_name: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtCreateSymbolicLinkObject(handle_out={:#x}, access={:#x})",
+        link_handle, desired_access
+    );
+
+    if link_handle == 0 || object_attributes == 0 || target_name == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Read target name (assume null-terminated ASCII for simplicity)
+    let target_ptr = target_name as *const u8;
+    let mut target_len = 0;
+    unsafe {
+        while *target_ptr.add(target_len) != 0 && target_len < MAX_SYMLINK_TARGET - 1 {
+            target_len += 1;
+        }
+    }
+
+    if target_len == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Find a free slot in the symlink table
+    unsafe {
+        for i in 0..MAX_SYMLINKS {
+            if !SYMLINK_TABLE[i].in_use {
+                // Initialize the symlink
+                SYMLINK_TABLE[i].in_use = true;
+                SYMLINK_TABLE[i].target_len = target_len;
+                core::ptr::copy_nonoverlapping(
+                    target_ptr,
+                    SYMLINK_TABLE[i].target.as_mut_ptr(),
+                    target_len
+                );
+
+                // Return handle (index + 1 to avoid 0)
+                let handle = (i + 1) as u32;
+                core::ptr::write(link_handle as *mut u32, handle);
+
+                crate::serial_println!(
+                    "[SYSCALL] NtCreateSymbolicLinkObject: created symlink handle {}",
+                    handle
+                );
+
+                return 0; // STATUS_SUCCESS
+            }
+        }
+    }
+
+    0xC000009Au32 as isize // STATUS_INSUFFICIENT_RESOURCES
+}
+
+/// NtOpenSymbolicLinkObject - Open an existing symbolic link
+fn sys_open_symbolic_link_object(
+    link_handle: usize,
+    desired_access: usize,
+    object_attributes: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtOpenSymbolicLinkObject(handle_out={:#x}, access={:#x})",
+        link_handle, desired_access
+    );
+
+    if link_handle == 0 || object_attributes == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // For now, we don't have name-based lookup implemented
+    // Return not found
+    0xC0000034u32 as isize // STATUS_OBJECT_NAME_NOT_FOUND
+}
+
+/// NtQuerySymbolicLinkObject - Query the target of a symbolic link
+fn sys_query_symbolic_link_object(
+    link_handle: usize,
+    target_name: usize,
+    return_length: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtQuerySymbolicLinkObject(handle={})",
+        link_handle
+    );
+
+    if link_handle == 0 || target_name == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    let index = (link_handle as usize).wrapping_sub(1);
+    if index >= MAX_SYMLINKS {
+        return 0xC0000008u32 as isize; // STATUS_INVALID_HANDLE
+    }
+
+    unsafe {
+        if !SYMLINK_TABLE[index].in_use {
+            return 0xC0000008u32 as isize; // STATUS_INVALID_HANDLE
+        }
+
+        let symlink = &SYMLINK_TABLE[index];
+
+        // Return length if requested
+        if return_length != 0 {
+            core::ptr::write(return_length as *mut u32, symlink.target_len as u32);
+        }
+
+        // Copy target to output buffer
+        // Assume target_name points to a UNICODE_STRING structure
+        // For simplicity, we'll just write the ASCII bytes
+        core::ptr::copy_nonoverlapping(
+            symlink.target.as_ptr(),
+            target_name as *mut u8,
+            symlink.target_len
+        );
+
+        crate::serial_println!(
+            "[SYSCALL] NtQuerySymbolicLinkObject: target_len={}",
+            symlink.target_len
+        );
+    }
+
+    0 // STATUS_SUCCESS
+}
+
+// ============================================================================
+// Object Namespace Syscalls - Directory Objects
+// ============================================================================
+
+/// Directory object entry
+struct DirectoryObjectEntry {
+    /// Object name
+    name: [u8; 128],
+    /// Name length
+    name_len: usize,
+    /// Object type name
+    type_name: [u8; 32],
+    /// Type name length
+    type_name_len: usize,
+}
+
+impl DirectoryObjectEntry {
+    const fn new() -> Self {
+        Self {
+            name: [0; 128],
+            name_len: 0,
+            type_name: [0; 32],
+            type_name_len: 0,
+        }
+    }
+}
+
+/// Directory object
+struct DirectoryObject {
+    /// Directory name
+    name: [u8; 128],
+    /// Name length
+    name_len: usize,
+    /// Entries in this directory
+    entries: [DirectoryObjectEntry; 32],
+    /// Number of entries
+    entry_count: usize,
+    /// In use
+    in_use: bool,
+}
+
+impl DirectoryObject {
+    const fn new() -> Self {
+        const ENTRY_INIT: DirectoryObjectEntry = DirectoryObjectEntry::new();
+        Self {
+            name: [0; 128],
+            name_len: 0,
+            entries: [ENTRY_INIT; 32],
+            entry_count: 0,
+            in_use: false,
+        }
+    }
+}
+
+/// Maximum number of directory objects
+const MAX_DIRECTORIES: usize = 32;
+
+/// Global directory object table
+static mut DIRECTORY_TABLE: [DirectoryObject; MAX_DIRECTORIES] = {
+    const INIT: DirectoryObject = DirectoryObject::new();
+    [INIT; MAX_DIRECTORIES]
+};
+
+/// NtCreateDirectoryObject - Create a directory in the object namespace
+fn sys_create_directory_object(
+    directory_handle: usize,
+    desired_access: usize,
+    _object_attributes: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtCreateDirectoryObject(handle_out={:#x}, access={:#x})",
+        directory_handle, desired_access
+    );
+
+    if directory_handle == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Find a free slot
+    unsafe {
+        for i in 0..MAX_DIRECTORIES {
+            if !DIRECTORY_TABLE[i].in_use {
+                DIRECTORY_TABLE[i].in_use = true;
+                DIRECTORY_TABLE[i].entry_count = 0;
+
+                // Return handle
+                let handle = (i + 1) as u32;
+                core::ptr::write(directory_handle as *mut u32, handle);
+
+                crate::serial_println!(
+                    "[SYSCALL] NtCreateDirectoryObject: created directory handle {}",
+                    handle
+                );
+
+                return 0; // STATUS_SUCCESS
+            }
+        }
+    }
+
+    0xC000009Au32 as isize // STATUS_INSUFFICIENT_RESOURCES
+}
+
+/// NtOpenDirectoryObject - Open an existing directory object
+fn sys_open_directory_object(
+    directory_handle: usize,
+    desired_access: usize,
+    object_attributes: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtOpenDirectoryObject(handle_out={:#x}, access={:#x})",
+        directory_handle, desired_access
+    );
+
+    if directory_handle == 0 || object_attributes == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // For well-known directories, return a handle
+    // Check if opening root directory "\"
+    // For now, just return not found
+    0xC0000034u32 as isize // STATUS_OBJECT_NAME_NOT_FOUND
+}
+
+/// Directory entry information returned by NtQueryDirectoryObject
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ObjectDirectoryInformation {
+    /// Object name (UNICODE_STRING)
+    pub name_length: u16,
+    pub name_max_length: u16,
+    pub name_buffer: u64,
+    /// Type name (UNICODE_STRING)
+    pub type_name_length: u16,
+    pub type_name_max_length: u16,
+    pub type_name_buffer: u64,
+}
+
+/// NtQueryDirectoryObject - Enumerate objects in a directory
+fn sys_query_directory_object(
+    directory_handle: usize,
+    buffer: usize,
+    _length: usize,
+    return_single_entry: usize,
+    restart_scan: usize,
+    context: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtQueryDirectoryObject(handle={}, single={}, restart={})",
+        directory_handle, return_single_entry, restart_scan
+    );
+
+    if directory_handle == 0 || buffer == 0 || context == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    let index = (directory_handle as usize).wrapping_sub(1);
+    if index >= MAX_DIRECTORIES {
+        return 0xC0000008u32 as isize; // STATUS_INVALID_HANDLE
+    }
+
+    unsafe {
+        if !DIRECTORY_TABLE[index].in_use {
+            return 0xC0000008u32 as isize; // STATUS_INVALID_HANDLE
+        }
+
+        let dir = &DIRECTORY_TABLE[index];
+
+        // Read current context (enumeration index)
+        let mut ctx = core::ptr::read(context as *const u32) as usize;
+        if restart_scan != 0 {
+            ctx = 0;
+        }
+
+        if ctx >= dir.entry_count {
+            // No more entries
+            return 0x8000001Au32 as isize; // STATUS_NO_MORE_ENTRIES
+        }
+
+        // For now, just update context and return no entries
+        // A full implementation would copy entry information to the buffer
+        core::ptr::write(context as *mut u32, (ctx + 1) as u32);
+    }
+
+    0x8000001Au32 as isize // STATUS_NO_MORE_ENTRIES
+}
+
+// ============================================================================
+// Security Syscalls
+// ============================================================================
+
+/// Access mask constants
+pub mod access_mask {
+    pub const DELETE: u32 = 0x00010000;
+    pub const READ_CONTROL: u32 = 0x00020000;
+    pub const WRITE_DAC: u32 = 0x00040000;
+    pub const WRITE_OWNER: u32 = 0x00080000;
+    pub const SYNCHRONIZE: u32 = 0x00100000;
+    pub const STANDARD_RIGHTS_ALL: u32 = DELETE | READ_CONTROL | WRITE_DAC | WRITE_OWNER | SYNCHRONIZE;
+    pub const GENERIC_READ: u32 = 0x80000000;
+    pub const GENERIC_WRITE: u32 = 0x40000000;
+    pub const GENERIC_EXECUTE: u32 = 0x20000000;
+    pub const GENERIC_ALL: u32 = 0x10000000;
+}
+
+/// NtAccessCheck - Check access rights against a security descriptor
+///
+/// Performs an access check against a security descriptor using the
+/// specified client token.
+fn sys_access_check(
+    security_descriptor: usize,
+    client_token: usize,
+    desired_access: usize,
+    _generic_mapping: usize,
+    _privilege_set: usize,
+    granted_access: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtAccessCheck(sd={:#x}, token={}, access={:#x})",
+        security_descriptor, client_token, desired_access
+    );
+
+    if security_descriptor == 0 || granted_access == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // For now, grant all requested access
+    // A real implementation would:
+    // 1. Parse the security descriptor
+    // 2. Get the token's SIDs and privileges
+    // 3. Walk the DACL checking ACEs
+    // 4. Compute granted access
+
+    unsafe {
+        // Write granted access
+        core::ptr::write(granted_access as *mut u32, desired_access as u32);
+
+        // Write access status (TRUE = access granted)
+        let access_status = (granted_access as usize + 4) as *mut u32;
+        core::ptr::write(access_status, 1); // TRUE
+    }
+
+    crate::serial_println!("[SYSCALL] NtAccessCheck: granting access {:#x}", desired_access);
+    0 // STATUS_SUCCESS
+}
+
+/// NtPrivilegeCheck - Check if token has required privileges
+fn sys_privilege_check(
+    client_token: usize,
+    required_privileges: usize,
+    result: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtPrivilegeCheck(token={}, privs={:#x})",
+        client_token, required_privileges
+    );
+
+    if client_token == 0 || required_privileges == 0 || result == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // For now, always return success (privileges held)
+    // A real implementation would check the token's privilege set
+    unsafe {
+        core::ptr::write(result as *mut u32, 1); // TRUE - privileges held
+    }
+
+    crate::serial_println!("[SYSCALL] NtPrivilegeCheck: privileges granted");
+    0 // STATUS_SUCCESS
+}
+
+/// NtAccessCheckAndAuditAlarm - Access check with audit generation
+fn sys_access_check_and_audit_alarm(
+    _subsystem_name: usize,
+    _handle_id: usize,
+    _object_type_name: usize,
+    _object_name: usize,
+    security_descriptor: usize,
+    desired_access: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtAccessCheckAndAuditAlarm(access={:#x})",
+        desired_access
+    );
+
+    // This syscall requires SeAuditPrivilege
+    // For now, just perform a basic access check
+
+    if security_descriptor == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Grant access for now
+    crate::serial_println!("[SYSCALL] NtAccessCheckAndAuditAlarm: access granted (no audit)");
+    0 // STATUS_SUCCESS
+}
+
+// ============================================================================
+// Power Management Syscalls
+// ============================================================================
+
+/// Power action type
+#[repr(u32)]
+#[derive(Clone, Copy, Debug)]
+pub enum PowerAction {
+    None = 0,
+    Reserved = 1,
+    Sleep = 2,
+    Hibernate = 3,
+    Shutdown = 4,
+    ShutdownReset = 5,
+    ShutdownOff = 6,
+    WarmEject = 7,
+}
+
+/// System power state
+#[repr(u32)]
+#[derive(Clone, Copy, Debug)]
+pub enum SystemPowerState {
+    Unspecified = 0,
+    Working = 1,     // S0
+    Sleeping1 = 2,   // S1
+    Sleeping2 = 3,   // S2
+    Sleeping3 = 4,   // S3 (Standby)
+    Hibernate = 5,   // S4
+    Shutdown = 6,    // S5
+    Maximum = 7,
+}
+
+/// NtSetSystemPowerState - Set the system power state
+///
+/// Initiates a transition to the specified system power state.
+/// Requires SeShutdownPrivilege.
+fn sys_set_system_power_state(
+    system_action: usize,
+    min_system_state: usize,
+    flags: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtSetSystemPowerState(action={}, min_state={}, flags={:#x})",
+        system_action, min_system_state, flags
+    );
+
+    // Check privilege (SeShutdownPrivilege required)
+    // For now, we'll allow the operations
+
+    match system_action as u32 {
+        // PowerActionShutdown = 4
+        4 => {
+            crate::serial_println!("[POWER] System shutdown requested");
+            // In a real implementation, we'd initiate shutdown sequence
+            // For now, just log it
+            0 // STATUS_SUCCESS
+        }
+
+        // PowerActionShutdownReset = 5
+        5 => {
+            crate::serial_println!("[POWER] System reboot requested");
+            // Would initiate reboot
+            0 // STATUS_SUCCESS
+        }
+
+        // PowerActionShutdownOff = 6
+        6 => {
+            crate::serial_println!("[POWER] System power off requested");
+            0 // STATUS_SUCCESS
+        }
+
+        // PowerActionSleep = 2
+        2 => {
+            crate::serial_println!("[POWER] System sleep requested (not supported)");
+            0xC00000BBu32 as isize // STATUS_NOT_SUPPORTED
+        }
+
+        // PowerActionHibernate = 3
+        3 => {
+            crate::serial_println!("[POWER] Hibernate requested (not supported)");
+            0xC00000BBu32 as isize // STATUS_NOT_SUPPORTED
+        }
+
+        _ => {
+            crate::serial_println!("[POWER] Unknown power action {}", system_action);
+            0xC000000Du32 as isize // STATUS_INVALID_PARAMETER
+        }
+    }
+}
+
+/// NtInitiatePowerAction - Initiate a power action with options
+fn sys_initiate_power_action(
+    system_action: usize,
+    min_system_state: usize,
+    flags: usize,
+    asynchronous: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtInitiatePowerAction(action={}, min_state={}, flags={:#x}, async={})",
+        system_action, min_system_state, flags, asynchronous
+    );
+
+    // Similar to NtSetSystemPowerState but with async option
+    // Forward to NtSetSystemPowerState for now
+    sys_set_system_power_state(system_action, min_system_state, flags, 0, 0, 0)
 }

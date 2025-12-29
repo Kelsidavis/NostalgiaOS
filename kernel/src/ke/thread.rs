@@ -185,6 +185,18 @@ pub struct KThread {
     pub suspend_count: i8,
     /// State to return to when resumed
     pub suspend_saved_state: ThreadState,
+
+    // Impersonation support
+    /// Impersonation token (when impersonating, points to impersonation token)
+    pub impersonation_token: *mut u8,
+    /// Impersonation level (Anonymous=0, Identification=1, Impersonation=2, Delegation=3)
+    pub impersonation_level: u32,
+    /// Is this thread currently impersonating?
+    pub impersonating: bool,
+    /// Copy-on-open flag for impersonation token
+    pub copy_on_open: bool,
+    /// Effective-only flag for impersonation
+    pub effective_only: bool,
 }
 
 impl KThread {
@@ -218,6 +230,40 @@ impl KThread {
             wait_count: 0,
             suspend_count: 0,
             suspend_saved_state: ThreadState::Initialized,
+            // Impersonation
+            impersonation_token: ptr::null_mut(),
+            impersonation_level: 2, // Default: Impersonation
+            impersonating: false,
+            copy_on_open: false,
+            effective_only: false,
+        }
+    }
+
+    /// Set impersonation token on thread
+    pub fn set_impersonation_token(&mut self, token: *mut u8, level: u32) {
+        self.impersonation_token = token;
+        self.impersonation_level = level;
+        self.impersonating = !token.is_null();
+    }
+
+    /// Clear impersonation (revert to process token)
+    pub fn clear_impersonation(&mut self) {
+        self.impersonation_token = ptr::null_mut();
+        self.impersonation_level = 2; // Default: Impersonation
+        self.impersonating = false;
+        self.copy_on_open = false;
+        self.effective_only = false;
+    }
+
+    /// Get the effective token for this thread
+    /// Returns impersonation token if impersonating, or process token otherwise
+    pub unsafe fn get_effective_token(&self) -> *mut u8 {
+        if self.impersonating && !self.impersonation_token.is_null() {
+            self.impersonation_token
+        } else if !self.process.is_null() {
+            (*self.process).token
+        } else {
+            ptr::null_mut()
         }
     }
 

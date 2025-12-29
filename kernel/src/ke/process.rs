@@ -53,6 +53,9 @@ pub struct KProcess {
 
     /// Process ID
     pub process_id: u32,
+
+    /// Primary token (security context for process)
+    pub token: *mut u8,
 }
 
 impl KProcess {
@@ -67,6 +70,7 @@ impl KProcess {
             active_threads: 0,
             directory_table_base: 0,
             process_id: 0,
+            token: core::ptr::null_mut(),
         }
     }
 
@@ -78,6 +82,17 @@ impl KProcess {
         self.thread_list_head.init_head();
         self.state = ProcessState::Initialized;
         self.active_threads = 0;
+        self.token = core::ptr::null_mut();
+    }
+
+    /// Set the process token
+    pub fn set_token(&mut self, token: *mut u8) {
+        self.token = token;
+    }
+
+    /// Get the process token
+    pub fn get_token(&self) -> *mut u8 {
+        self.token
     }
 }
 
