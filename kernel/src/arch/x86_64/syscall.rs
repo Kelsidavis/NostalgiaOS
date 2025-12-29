@@ -4832,11 +4832,13 @@ fn sys_map_view_of_section(
     _commit_size: usize,
     section_offset: usize,
 ) -> isize {
+    const STATUS_SECTION_NOT_IMAGE: isize = 0xC0000049u32 as isize;
+
     // Additional parameters would be in stack (view_size, protection, etc.)
     // For simplicity, we use defaults
 
     if section_handle == 0 || base_address == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let section = section_handle as *mut crate::mm::Section;
@@ -4866,9 +4868,9 @@ fn sys_map_view_of_section(
             unsafe {
                 *(base_address as *mut u64) = mapped_base;
             }
-            0
+            STATUS_SUCCESS
         }
-        None => -1,
+        None => STATUS_SECTION_NOT_IMAGE,
     }
 }
 
@@ -4914,12 +4916,14 @@ fn sys_query_section(
     return_length: usize,
     _: usize,
 ) -> isize {
+    const STATUS_BUFFER_TOO_SMALL: isize = 0xC0000023u32 as isize;
+
     if section_handle == 0 || buffer == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     if buffer_size < core::mem::size_of::<crate::mm::SectionInfo>() {
-        return -1; // STATUS_BUFFER_TOO_SMALL
+        return STATUS_BUFFER_TOO_SMALL;
     }
 
     let section = section_handle as *mut crate::mm::Section;
@@ -4936,9 +4940,9 @@ fn sys_query_section(
                     *(return_length as *mut usize) = core::mem::size_of::<crate::mm::SectionInfo>();
                 }
             }
-            0
+            STATUS_SUCCESS
         }
-        None => -1,
+        None => STATUS_INVALID_HANDLE,
     }
 }
 
@@ -4955,7 +4959,7 @@ fn sys_create_io_completion(
     _: usize, _: usize,
 ) -> isize {
     if completion_handle == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let port = unsafe {
@@ -4963,14 +4967,14 @@ fn sys_create_io_completion(
     };
 
     if port.is_null() {
-        return -1; // STATUS_INSUFFICIENT_RESOURCES
+        return STATUS_INSUFFICIENT_RESOURCES;
     }
 
     unsafe {
         *(completion_handle as *mut usize) = port as usize;
     }
 
-    0
+    STATUS_SUCCESS
 }
 
 /// NtSetIoCompletion - Post a completion to a port
@@ -4983,7 +4987,7 @@ fn sys_set_io_completion(
     _: usize,
 ) -> isize {
     if completion_handle == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let port = completion_handle as *mut crate::io::IoCompletionPort;
@@ -4992,7 +4996,7 @@ fn sys_set_io_completion(
         crate::io::io_set_completion(port, key, overlapped, status as i32, information)
     };
 
-    if result { 0 } else { -1 }
+    if result { STATUS_SUCCESS } else { STATUS_INSUFFICIENT_RESOURCES }
 }
 
 /// NtRemoveIoCompletion - Wait for and retrieve a completion
@@ -5005,7 +5009,7 @@ fn sys_remove_io_completion(
     _: usize,
 ) -> isize {
     if completion_handle == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let port = completion_handle as *mut crate::io::IoCompletionPort;
@@ -5422,7 +5426,7 @@ fn sys_lock_file(
 ) -> isize {
     // Validate parameters
     if file_handle == 0 || byte_offset == 0 || length == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Read the byte offset and length (passed as LARGE_INTEGER pointers)
@@ -5477,7 +5481,7 @@ fn sys_unlock_file(
     _: usize, _: usize,
 ) -> isize {
     if file_handle == 0 || byte_offset == 0 || length == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let offset = unsafe { *(byte_offset as *const i64) };
@@ -5576,7 +5580,7 @@ fn sys_create_key(
     create_options: usize,
 ) -> isize {
     if key_handle_ptr == 0 || object_attributes == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Read path from object_attributes (simplified - assume it's a path string)
@@ -5584,12 +5588,12 @@ fn sys_create_key(
 
     let (path_buf, path_len) = match path_result {
         Some((buf, len)) => (buf, len),
-        None => return -1,
+        None => return STATUS_INVALID_PARAMETER,
     };
 
     let path_str = match core::str::from_utf8(&path_buf[..path_len]) {
         Ok(s) => s,
-        Err(_) => return -1,
+        Err(_) => return STATUS_INVALID_PARAMETER,
     };
 
     crate::serial_println!("[SYSCALL] NtCreateKey(path='{}')", path_str);
@@ -5615,11 +5619,11 @@ fn sys_create_key(
                     };
                     crate::serial_println!("[SYSCALL] NtCreateKey -> handle {:#x}, disposition {}",
                         h, disp_value);
-                    0 // STATUS_SUCCESS
+                    STATUS_SUCCESS
                 }
                 None => {
                     let _ = crate::cm::cm_close_key(cm_handle);
-                    -1 // STATUS_INSUFFICIENT_RESOURCES
+                    STATUS_INSUFFICIENT_RESOURCES
                 }
             }
         }
@@ -5638,19 +5642,19 @@ fn sys_open_key(
     _: usize, _: usize, _: usize,
 ) -> isize {
     if key_handle_ptr == 0 || object_attributes == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let path_result = unsafe { read_user_path(object_attributes, 260) };
 
     let (path_buf, path_len) = match path_result {
         Some((buf, len)) => (buf, len),
-        None => return -1,
+        None => return STATUS_INVALID_PARAMETER,
     };
 
     let path_str = match core::str::from_utf8(&path_buf[..path_len]) {
         Ok(s) => s,
-        Err(_) => return -1,
+        Err(_) => return STATUS_INVALID_PARAMETER,
     };
 
     crate::serial_println!("[SYSCALL] NtOpenKey(path='{}')", path_str);
@@ -5664,11 +5668,11 @@ fn sys_open_key(
                 Some(h) => {
                     unsafe { *(key_handle_ptr as *mut usize) = h; }
                     crate::serial_println!("[SYSCALL] NtOpenKey -> handle {:#x}", h);
-                    0
+                    STATUS_SUCCESS
                 }
                 None => {
                     let _ = crate::cm::cm_close_key(cm_handle);
-                    -1
+                    STATUS_INSUFFICIENT_RESOURCES
                 }
             }
         }
@@ -5688,13 +5692,13 @@ fn sys_close_key(
 
     let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
         Some(h) => h,
-        None => return -1, // STATUS_INVALID_HANDLE
+        None => return STATUS_INVALID_HANDLE,
     };
 
     let _ = crate::cm::cm_close_key(cm_handle);
     unsafe { free_key_handle(key_handle); }
 
-    0 // STATUS_SUCCESS
+    STATUS_SUCCESS
 }
 
 /// Key value information class
@@ -5723,24 +5727,24 @@ fn sys_query_value_key(
     result_length: usize,
 ) -> isize {
     if key_handle == 0 || value_name_ptr == 0 || key_value_info == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
         Some(h) => h,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     // Read value name
     let name_result = unsafe { read_user_path(value_name_ptr, 260) };
     let (name_buf, name_len) = match name_result {
         Some((buf, len)) => (buf, len),
-        None => return -1,
+        None => return STATUS_INVALID_PARAMETER,
     };
 
     let value_name = match core::str::from_utf8(&name_buf[..name_len]) {
         Ok(s) => s,
-        Err(_) => return -1,
+        Err(_) => return STATUS_INVALID_PARAMETER,
     };
 
     crate::serial_println!("[SYSCALL] NtQueryValueKey(handle={:#x}, name='{}')",
