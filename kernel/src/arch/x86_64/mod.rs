@@ -22,6 +22,7 @@ pub use context::{KTrapFrame, UserContext, ProcessorMode};
 pub use context::{setup_user_thread_context, setup_user_thread_context_with_teb, ki_return_to_user};
 pub use context::{MSR_GS_BASE, MSR_KERNEL_GS_BASE, MSR_FS_BASE};
 pub use context::{write_msr, read_msr, set_user_gs_base, set_kernel_gs_base};
+pub use context::{PerCpuSyscallData, init_percpu_syscall_data, get_percpu_syscall_data};
 
 use x86_64::instructions::{hlt, interrupts};
 
@@ -39,6 +40,11 @@ pub fn init_phase0() {
     // Initialize SYSCALL/SYSRET support
     unsafe {
         syscall::init();
+    }
+
+    // Initialize per-CPU syscall data for user-mode support
+    unsafe {
+        init_percpu_syscall_data();
     }
 
     // TODO: Initialize paging structures

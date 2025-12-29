@@ -433,6 +433,63 @@ pub unsafe fn setup_initial_context(
 }
 
 // ============================================================================
+// Per-CPU Data for Syscall Handling
+// ============================================================================
+
+/// Per-CPU syscall data structure
+/// GS base points to this structure when in kernel mode
+/// gs:[0] contains the kernel syscall stack pointer
+#[repr(C, align(16))]
+pub struct PerCpuSyscallData {
+    /// Kernel stack pointer for syscalls (at offset 0)
+    pub kernel_stack: u64,
+    /// Current thread TEB address (at offset 8)
+    pub current_teb: u64,
+    /// Reserved for future use
+    pub _reserved: [u64; 6],
+}
+
+/// Size of kernel syscall stack
+const KERNEL_SYSCALL_STACK_SIZE: usize = 16384; // 16KB
+
+/// Kernel syscall stack (aligned for performance)
+#[repr(C, align(16))]
+struct KernelSyscallStack {
+    data: [u8; KERNEL_SYSCALL_STACK_SIZE],
+}
+
+/// Static per-CPU syscall data (for BSP)
+static mut PERCPU_SYSCALL_DATA: PerCpuSyscallData = PerCpuSyscallData {
+    kernel_stack: 0,
+    current_teb: 0,
+    _reserved: [0; 6],
+};
+
+/// Static kernel syscall stack
+static mut KERNEL_SYSCALL_STACK: KernelSyscallStack = KernelSyscallStack {
+    data: [0; KERNEL_SYSCALL_STACK_SIZE],
+};
+
+/// Initialize per-CPU syscall data
+///
+/// # Safety
+/// Must be called once during kernel initialization
+pub unsafe fn init_percpu_syscall_data() {
+    // Set up the syscall stack pointer
+    PERCPU_SYSCALL_DATA.kernel_stack =
+        KERNEL_SYSCALL_STACK.data.as_ptr().add(KERNEL_SYSCALL_STACK_SIZE) as u64;
+
+    crate::serial_println!("[CONTEXT] Per-CPU syscall data initialized at {:p}",
+        &PERCPU_SYSCALL_DATA as *const _);
+    crate::serial_println!("[CONTEXT]   Kernel stack: {:#x}", PERCPU_SYSCALL_DATA.kernel_stack);
+}
+
+/// Get the per-CPU syscall data address
+pub fn get_percpu_syscall_data() -> u64 {
+    unsafe { &PERCPU_SYSCALL_DATA as *const _ as u64 }
+}
+
+// ============================================================================
 // User-Mode Context Switching
 // ============================================================================
 
@@ -475,6 +532,10 @@ pub unsafe fn setup_user_thread_context_with_teb(
     // Store TEB address in p1_home - this will be used by ki_return_to_user
     // to set GS base before IRETQ
     trap_frame.p1_home = teb_address;
+
+    // Store per-CPU syscall data address in p2_home - used to set KERNEL_GS_BASE
+    // This allows SWAPGS to work properly when user code does a syscall
+    trap_frame.p2_home = get_percpu_syscall_data();
 
     // Calculate where to place the trap frame on the kernel stack
     let frame_size = core::mem::size_of::<KTrapFrame>();
@@ -519,14 +580,29 @@ pub unsafe fn setup_user_thread_context_with_teb(
 ///
 /// This is called when a user-mode thread is scheduled.
 /// The trap frame is already set up on the stack above us.
-/// The TEB address is stored in p1_home (offset 0 in trap frame).
+/// - p1_home (offset 0): TEB address for GS_BASE
+/// - p2_home (offset 8): Per-CPU data address for KERNEL_GS_BASE
 #[unsafe(naked)]
 pub unsafe extern "C" fn ki_return_to_user() {
     naked_asm!(
         // At this point, RSP points just below the trap frame
-        // The trap frame starts at RSP, with p1_home at offset 0
+        // The trap frame starts at RSP, with p1_home at offset 0, p2_home at offset 8
 
-        // First, set up GS base for user-mode TEB access
+        // First, set up KERNEL_GS_BASE for SWAPGS in syscall entry
+        // Read per-CPU data address from p2_home (offset 8)
+        "mov rax, [rsp + 8]",       // rax = per-CPU data address from p2_home
+        "test rax, rax",            // Check if address is non-zero
+        "jz 1f",                    // Skip MSR write if zero
+
+        // Write KERNEL_GS_BASE MSR (MSR_KERNEL_GS_BASE = 0xC0000102)
+        "mov ecx, 0xC0000102",      // MSR number in ECX
+        "mov rdx, rax",             // Copy address
+        "shr rdx, 32",              // High 32 bits in EDX
+        // RAX already has low 32 bits
+        "wrmsr",                    // Write MSR
+
+        "1:",
+        // Now set up GS base for user-mode TEB access
         // Read TEB address from p1_home (offset 0)
         "mov rax, [rsp]",           // rax = TEB address from p1_home
         "test rax, rax",            // Check if TEB address is non-zero
