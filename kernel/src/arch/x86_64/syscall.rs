@@ -722,10 +722,12 @@ extern "C" fn syscall_dispatcher(
     arg5: usize,
     arg6: usize,
 ) -> isize {
+    const STATUS_INVALID_SYSTEM_SERVICE: isize = 0xC000001Cu32 as isize;
+
     // Validate syscall number
     if syscall_num >= MAX_SYSCALLS {
         crate::serial_println!("[SYSCALL] Invalid syscall number: {}", syscall_num);
-        return -1; // STATUS_INVALID_SYSTEM_SERVICE
+        return STATUS_INVALID_SYSTEM_SERVICE;
     }
 
     // Get handler from table
@@ -738,7 +740,7 @@ extern "C" fn syscall_dispatcher(
         }
         None => {
             crate::serial_println!("[SYSCALL] Unimplemented syscall: {}", syscall_num);
-            -1 // STATUS_NOT_IMPLEMENTED
+            STATUS_NOT_IMPLEMENTED
         }
     }
 }
@@ -870,8 +872,10 @@ fn sys_create_thread(
     client_id_ptr: usize,
     thread_context_ptr: usize,
 ) -> isize {
+    const STATUS_UNSUCCESSFUL: isize = 0xC0000001u32 as isize;
+
     if thread_handle_ptr == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     crate::serial_println!("[SYSCALL] NtCreateThread()");
@@ -889,7 +893,7 @@ fn sys_create_thread(
             (rip, rsp)
         }
     } else {
-        return -1; // Need a context with at least RIP
+        return STATUS_INVALID_PARAMETER; // Need a context with at least RIP
     };
 
     crate::serial_println!("[SYSCALL] NtCreateThread: start_address={:#x}, rsp={:#x}",
@@ -921,7 +925,7 @@ fn sys_create_thread(
 
     if thread.is_null() {
         crate::serial_println!("[SYSCALL] NtCreateThread: failed to create thread");
-        return -1; // STATUS_UNSUCCESSFUL
+        return STATUS_UNSUCCESSFUL;
     }
 
     // Get thread ID
@@ -1401,8 +1405,10 @@ fn sys_create_file(
     _allocation_size: usize,
     file_attributes: usize,
 ) -> isize {
+    const STATUS_OBJECT_NAME_NOT_FOUND: isize = 0xC0000034u32 as isize;
+
     if file_handle_ptr == 0 || object_attributes == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     // OBJECT_ATTRIBUTES layout (simplified):
@@ -1417,12 +1423,12 @@ fn sys_create_file(
 
     let (path_buf, path_len) = match path_result {
         Some((buf, len)) => (buf, len),
-        None => return -1, // STATUS_INVALID_PARAMETER
+        None => return STATUS_INVALID_PARAMETER,
     };
 
     let path_str = match core::str::from_utf8(&path_buf[..path_len]) {
         Ok(s) => s,
-        Err(_) => return -1,
+        Err(_) => return STATUS_INVALID_PARAMETER,
     };
 
     crate::serial_println!("[SYSCALL] NtCreateFile(path='{}', access={:#x})", path_str, desired_access);
@@ -1444,11 +1450,11 @@ fn sys_create_file(
                             *((io_status_block + 8) as *mut usize) = 1; // FILE_CREATED
                         }
                     }
-                    0 // STATUS_SUCCESS
+                    STATUS_SUCCESS
                 }
                 None => {
                     let _ = crate::fs::close(fs_handle);
-                    -1 // STATUS_INSUFFICIENT_RESOURCES
+                    STATUS_INSUFFICIENT_RESOURCES
                 }
             }
         }
@@ -1466,15 +1472,15 @@ fn sys_create_file(
                                     *((io_status_block + 8) as *mut usize) = 2; // FILE_OPENED
                                 }
                             }
-                            0
+                            STATUS_SUCCESS
                         }
                         None => {
                             let _ = crate::fs::close(fs_handle);
-                            -1
+                            STATUS_INSUFFICIENT_RESOURCES
                         }
                     }
                 }
-                Err(_) => -1, // STATUS_OBJECT_NAME_NOT_FOUND
+                Err(_) => STATUS_OBJECT_NAME_NOT_FOUND,
             }
         }
     }
@@ -1489,8 +1495,10 @@ fn sys_open_file(
     share_access: usize,
     open_options: usize,
 ) -> isize {
+    const STATUS_OBJECT_NAME_NOT_FOUND: isize = 0xC0000034u32 as isize;
+
     if file_handle_ptr == 0 || object_attributes == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let _ = share_access;
@@ -1500,12 +1508,12 @@ fn sys_open_file(
 
     let (path_buf, path_len) = match path_result {
         Some((buf, len)) => (buf, len),
-        None => return -1,
+        None => return STATUS_INVALID_PARAMETER,
     };
 
     let path_str = match core::str::from_utf8(&path_buf[..path_len]) {
         Ok(s) => s,
-        Err(_) => return -1,
+        Err(_) => return STATUS_INVALID_PARAMETER,
     };
 
     crate::serial_println!("[SYSCALL] NtOpenFile(path='{}', access={:#x})", path_str, desired_access);
@@ -1522,15 +1530,15 @@ fn sys_open_file(
                             *((io_status_block + 8) as *mut usize) = 2; // FILE_OPENED
                         }
                     }
-                    0
+                    STATUS_SUCCESS
                 }
                 None => {
                     let _ = crate::fs::close(fs_handle);
-                    -1
+                    STATUS_INSUFFICIENT_RESOURCES
                 }
             }
         }
-        Err(_) => -1, // STATUS_OBJECT_NAME_NOT_FOUND
+        Err(_) => STATUS_OBJECT_NAME_NOT_FOUND,
     }
 }
 
@@ -1553,14 +1561,15 @@ fn sys_query_information_file(
     _: usize,
 ) -> isize {
     use file_info_class::*;
+    const STATUS_IO_DEVICE_ERROR: isize = 0xC0000185u32 as isize;
 
     if file_handle == 0 || file_information == 0 || length == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let fs_handle = match unsafe { get_fs_handle(file_handle) } {
         Some(h) => h,
-        None => return -1, // STATUS_INVALID_HANDLE
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!(
@@ -1661,9 +1670,9 @@ fn sys_query_information_file(
                     *((io_status_block + 8) as *mut usize) = bytes_written;
                 }
             }
-            0
+            STATUS_SUCCESS
         }
-        Err(_) => -1,
+        Err(_) => STATUS_IO_DEVICE_ERROR,
     }
 }
 
@@ -1677,12 +1686,12 @@ fn sys_set_information_file(
     _: usize,
 ) -> isize {
     if file_handle == 0 || file_information == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let fs_handle = match unsafe { get_fs_handle(file_handle) } {
         Some(h) => h,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!(
@@ -1712,7 +1721,7 @@ fn sys_set_information_file(
         }
     }
 
-    0
+    STATUS_SUCCESS
 }
 
 /// NtDeleteFile - Delete a file
@@ -1720,27 +1729,29 @@ fn sys_delete_file(
     object_attributes: usize,
     _: usize, _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
+    const STATUS_OBJECT_NAME_NOT_FOUND: isize = 0xC0000034u32 as isize;
+
     if object_attributes == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let path_result = unsafe { read_user_path(object_attributes, 260) };
 
     let (path_buf, path_len) = match path_result {
         Some((buf, len)) => (buf, len),
-        None => return -1,
+        None => return STATUS_INVALID_PARAMETER,
     };
 
     let path_str = match core::str::from_utf8(&path_buf[..path_len]) {
         Ok(s) => s,
-        Err(_) => return -1,
+        Err(_) => return STATUS_INVALID_PARAMETER,
     };
 
     crate::serial_println!("[SYSCALL] NtDeleteFile(path='{}')", path_str);
 
     match crate::fs::delete(path_str) {
-        Ok(()) => 0,
-        Err(_) => -1,
+        Ok(()) => STATUS_SUCCESS,
+        Err(_) => STATUS_OBJECT_NAME_NOT_FOUND,
     }
 }
 
@@ -4286,8 +4297,10 @@ fn sys_allocate_virtual_memory(
     allocation_type: usize,
     protect: usize,
 ) -> isize {
+    const STATUS_NO_MEMORY: isize = 0xC0000017u32 as isize;
+
     if base_address == 0 || region_size == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Read the requested base address and size
@@ -4314,9 +4327,9 @@ fn sys_allocate_virtual_memory(
                 *(base_address as *mut usize) = actual_base as usize;
                 // Region size is page-aligned by the allocator
             }
-            0 // STATUS_SUCCESS
+            STATUS_SUCCESS
         }
-        None => -1, // STATUS_NO_MEMORY
+        None => STATUS_NO_MEMORY,
     }
 }
 
@@ -4328,8 +4341,10 @@ fn sys_free_virtual_memory(
     free_type: usize,
     _: usize, _: usize,
 ) -> isize {
+    const STATUS_MEMORY_NOT_ALLOCATED: isize = 0xC00000A0u32 as isize;
+
     if base_address == 0 || region_size == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let addr = unsafe { *(base_address as *const usize) };
@@ -4342,7 +4357,7 @@ fn sys_free_virtual_memory(
         crate::mm::mm_free_virtual_memory(aspace, addr as u64, size as u64, free_type as u32)
     };
 
-    if result { 0 } else { -1 }
+    if result { STATUS_SUCCESS } else { STATUS_MEMORY_NOT_ALLOCATED }
 }
 
 /// NtProtectVirtualMemory - Change memory protection
@@ -4354,10 +4369,11 @@ fn sys_protect_virtual_memory(
     old_protect: usize,
     _: usize,
 ) -> isize {
+    const STATUS_INVALID_PAGE_PROTECTION: isize = 0xC0000045u32 as isize;
     let _ = process_handle;
 
     if base_address == 0 || region_size == 0 || old_protect == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let addr = unsafe { *(base_address as *const usize) };
@@ -4372,9 +4388,9 @@ fn sys_protect_virtual_memory(
             unsafe {
                 *(old_protect as *mut u32) = old;
             }
-            0
+            STATUS_SUCCESS
         }
-        Err(_) => -1,
+        Err(_) => STATUS_INVALID_PAGE_PROTECTION,
     }
 }
 
