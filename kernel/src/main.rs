@@ -72,6 +72,7 @@ pub mod fsrtl;
 pub mod hal;
 pub mod io;
 pub mod ke;
+pub mod ldr;
 pub mod lpc;
 pub mod mm;
 pub mod ob;
@@ -405,6 +406,9 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing Service Control Manager...");
     svc::scm_initialize();
     kprintln!("  Service Control Manager initialized");
+
+    // Initialize Loader
+    ldr::init();
 
     // Test file system by reading C:\TEST.TXT
     test_file_read();
