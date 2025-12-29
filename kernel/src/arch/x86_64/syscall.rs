@@ -1509,6 +1509,15 @@ fn sys_open_file(
     }
 }
 
+/// File information class constants
+mod file_info_class {
+    pub const FILE_BASIC_INFORMATION: usize = 4;
+    pub const FILE_STANDARD_INFORMATION: usize = 5;
+    pub const FILE_NAME_INFORMATION: usize = 9;
+    pub const FILE_POSITION_INFORMATION: usize = 14;
+    pub const FILE_ALL_INFORMATION: usize = 18;
+}
+
 /// NtQueryInformationFile - Query file information
 fn sys_query_information_file(
     file_handle: usize,
@@ -1518,6 +1527,8 @@ fn sys_query_information_file(
     file_information_class: usize,
     _: usize,
 ) -> isize {
+    use file_info_class::*;
+
     if file_handle == 0 || file_information == 0 || length == 0 {
         return -1;
     }
@@ -1535,27 +1546,94 @@ fn sys_query_information_file(
     // Get file info via fs::fstat
     match crate::fs::fstat(fs_handle) {
         Ok(info) => {
-            // File information class 5 = FileStandardInformation
-            // File information class 18 = FileAllInformation
-            // For now, return basic info for all classes
+            let is_dir = matches!(info.file_type, crate::fs::FileType::Directory);
+            let mut bytes_written: usize = 0;
+
             unsafe {
-                if length >= 24 {
-                    // FileStandardInformation layout:
-                    // AllocationSize: i64
-                    // EndOfFile: i64
-                    // NumberOfLinks: u32
-                    // DeletePending: u8
-                    // Directory: u8
-                    *(file_information as *mut i64) = info.size as i64; // AllocationSize
-                    *((file_information + 8) as *mut i64) = info.size as i64; // EndOfFile
-                    *((file_information + 16) as *mut u32) = 1; // NumberOfLinks
-                    *((file_information + 20) as *mut u8) = 0; // DeletePending
-                    *((file_information + 21) as *mut u8) = if matches!(info.file_type, crate::fs::FileType::Directory) { 1 } else { 0 }; // Directory
+                match file_information_class {
+                    FILE_BASIC_INFORMATION => {
+                        // FILE_BASIC_INFORMATION layout (40 bytes):
+                        // CreationTime: i64, LastAccessTime: i64, LastWriteTime: i64
+                        // ChangeTime: i64, FileAttributes: u32
+                        if length < 40 {
+                            return 0xC0000023u32 as isize; // STATUS_BUFFER_TOO_SMALL
+                        }
+                        *(file_information as *mut i64) = 0; // CreationTime
+                        *((file_information + 8) as *mut i64) = 0; // LastAccessTime
+                        *((file_information + 16) as *mut i64) = 0; // LastWriteTime
+                        *((file_information + 24) as *mut i64) = 0; // ChangeTime
+                        // File attributes: 0x10 = directory, 0x20 = archive (normal file)
+                        *((file_information + 32) as *mut u32) = if is_dir { 0x10 } else { 0x20 };
+                        bytes_written = 40;
+                    }
+
+                    FILE_STANDARD_INFORMATION => {
+                        // FileStandardInformation layout (24 bytes):
+                        // AllocationSize: i64, EndOfFile: i64, NumberOfLinks: u32
+                        // DeletePending: u8, Directory: u8
+                        if length < 24 {
+                            return 0xC0000023u32 as isize; // STATUS_BUFFER_TOO_SMALL
+                        }
+                        *(file_information as *mut i64) = info.size as i64;
+                        *((file_information + 8) as *mut i64) = info.size as i64;
+                        *((file_information + 16) as *mut u32) = 1;
+                        *((file_information + 20) as *mut u8) = 0;
+                        *((file_information + 21) as *mut u8) = if is_dir { 1 } else { 0 };
+                        bytes_written = 24;
+                    }
+
+                    FILE_NAME_INFORMATION => {
+                        // FILE_NAME_INFORMATION layout:
+                        // FileNameLength: u32, FileName: WCHAR[]
+                        // We don't have the full path, so return empty name for now
+                        if length < 8 {
+                            return 0xC0000023u32 as isize;
+                        }
+                        *(file_information as *mut u32) = 0; // FileNameLength = 0
+                        bytes_written = 4;
+                    }
+
+                    FILE_POSITION_INFORMATION => {
+                        // FILE_POSITION_INFORMATION: CurrentByteOffset: i64
+                        if length < 8 {
+                            return 0xC0000023u32 as isize;
+                        }
+                        // Get current position via seek(0, Cur)
+                        let pos = crate::fs::seek(fs_handle, 0, crate::fs::SeekWhence::Cur).unwrap_or(0);
+                        *(file_information as *mut i64) = pos as i64;
+                        bytes_written = 8;
+                    }
+
+                    FILE_ALL_INFORMATION => {
+                        // Combination of several info classes - return minimum required
+                        if length < 24 {
+                            return 0xC0000023u32 as isize;
+                        }
+                        // Just return standard info for now
+                        *(file_information as *mut i64) = info.size as i64;
+                        *((file_information + 8) as *mut i64) = info.size as i64;
+                        *((file_information + 16) as *mut u32) = 1;
+                        *((file_information + 20) as *mut u8) = 0;
+                        *((file_information + 21) as *mut u8) = if is_dir { 1 } else { 0 };
+                        bytes_written = 24;
+                    }
+
+                    _ => {
+                        // Unknown class - return standard info as fallback
+                        if length >= 24 {
+                            *(file_information as *mut i64) = info.size as i64;
+                            *((file_information + 8) as *mut i64) = info.size as i64;
+                            *((file_information + 16) as *mut u32) = 1;
+                            *((file_information + 20) as *mut u8) = 0;
+                            *((file_information + 21) as *mut u8) = if is_dir { 1 } else { 0 };
+                            bytes_written = 24;
+                        }
+                    }
                 }
 
                 if io_status_block != 0 {
                     *(io_status_block as *mut i32) = 0;
-                    *((io_status_block + 8) as *mut usize) = 24;
+                    *((io_status_block + 8) as *mut usize) = bytes_written;
                 }
             }
             0
