@@ -2382,3 +2382,63 @@ pub fn cmd_dump(args: &[&str]) {
         }
     }
 }
+
+// ============================================================================
+// User-Mode Test Command
+// ============================================================================
+
+/// Test user-mode execution
+pub fn cmd_usertest(args: &[&str]) {
+    outln!("User-Mode Test");
+    outln!("");
+
+    if args.is_empty() {
+        outln!("Usage: usertest <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  run      Run user-mode test (IRETQ to ring 3)");
+        outln!("  info     Show user-mode page table info");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "run") {
+        outln!("Testing user-mode execution...");
+        outln!("This will:");
+        outln!("  1. Switch to user page tables");
+        outln!("  2. IRETQ to ring 3 test code");
+        outln!("  3. Test code calls SYSCALL to return");
+        outln!("");
+
+        unsafe {
+            if !crate::mm::user_pages_initialized() {
+                outln!("Error: User page tables not initialized!");
+                outln!("Run 'mm init' first to set up user-mode mappings.");
+                return;
+            }
+
+            outln!("Entering user mode...");
+            crate::arch::x86_64::syscall::test_user_mode();
+            outln!("User mode test completed.");
+        }
+    } else if eq_ignore_case(cmd, "info") {
+        outln!("User-Mode Page Table Info:");
+        outln!("");
+        unsafe {
+            if crate::mm::user_pages_initialized() {
+                let cr3 = crate::mm::get_user_cr3();
+                outln!("  User CR3:     {:#x}", cr3);
+                outln!("  Test Base:    {:#x}", crate::mm::USER_TEST_BASE);
+                outln!("  Stack Top:    {:#x}", crate::mm::USER_STACK_TOP);
+                outln!("  Status:       Initialized");
+            } else {
+                outln!("  Status:       Not initialized");
+                outln!("");
+                outln!("Use 'mm init' to initialize user-mode page tables.");
+            }
+        }
+    } else {
+        outln!("Unknown usertest command: {}", cmd);
+    }
+}

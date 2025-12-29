@@ -157,6 +157,7 @@ const COMMANDS: &[&str] = &[
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir",
     "sc", "services", "suspend",
     "tasks", "time", "touch", "type",
+    "usertest",
     "ver", "version",
 ];
 
@@ -1057,6 +1058,9 @@ impl Shell {
             commands::cmd_pe(&args[1..argc]);
         } else if eq_ignore_case(cmd, "dump") {
             commands::cmd_dump(&args[1..argc]);
+        // User-mode test
+        } else if eq_ignore_case(cmd, "usertest") {
+            commands::cmd_usertest(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
