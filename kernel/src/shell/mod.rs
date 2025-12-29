@@ -1075,6 +1075,12 @@ impl Shell {
         // Kernel Executive
         } else if eq_ignore_case(cmd, "ke") {
             commands::cmd_ke(&args[1..argc]);
+        // Memory Manager
+        } else if eq_ignore_case(cmd, "mm") {
+            commands::cmd_mm(&args[1..argc]);
+        // I/O Manager
+        } else if eq_ignore_case(cmd, "io") {
+            commands::cmd_io(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

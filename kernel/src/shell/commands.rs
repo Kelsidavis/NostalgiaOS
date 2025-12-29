@@ -112,7 +112,9 @@ pub fn cmd_help(args: &[&str]) {
         outln!("");
         outln!("  Kernel Subsystems:");
         outln!("    ke <cmd>       Kernel Executive (irql, dpc, apc, prcb)");
+        outln!("    mm <cmd>       Memory Manager (stats, pool, vad)");
         outln!("    ob <cmd>       Object Manager (types, dir, handles)");
+        outln!("    io <cmd>       I/O Manager (block, volumes, pipes)");
         outln!("    ex <cmd>       Executive (worker, callback)");
         outln!("    se <cmd>       Security (sids, privileges, token)");
         outln!("    rtl <cmd>      Runtime Library (time, random, crc32)");
@@ -3464,5 +3466,244 @@ pub fn cmd_ke(args: &[&str]) {
         }
     } else {
         outln!("Unknown ke command: {}", cmd);
+    }
+}
+
+// ============================================================================
+// Memory Manager (MM) Command
+// ============================================================================
+
+/// Memory Manager (MM) shell command
+pub fn cmd_mm(args: &[&str]) {
+    use crate::mm;
+
+    if args.is_empty() {
+        outln!("Memory Manager (MM) Commands");
+        outln!("");
+        outln!("Usage: mm <command> [args]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  info               Show memory manager information");
+        outln!("  stats              Show memory statistics");
+        outln!("  pool               Show pool allocator status");
+        outln!("  physical           Show physical memory info");
+        outln!("  vad                Show VAD statistics");
+        outln!("  section            Show section statistics");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "info") {
+        outln!("Memory Manager Information");
+        outln!("");
+        outln!("Components:");
+        outln!("  Virtual Memory:    4-level page tables");
+        outln!("  PFN Database:      Physical page tracking");
+        outln!("  VAD Tree:          Virtual address descriptors");
+        outln!("  Working Sets:      Per-process page sets");
+        outln!("  Section Objects:   Shared memory/file mapping");
+        outln!("  Pool Allocator:    Paged/NonPaged pools");
+        outln!("");
+        outln!("Address Space Layout (x86_64):");
+        outln!("  User space:   0x0000_0000_0000 - 0x7FFF_FFFF_FFFF");
+        outln!("  Kernel space: 0xFFFF_8000_0000 - 0xFFFF_FFFF_FFFF");
+        outln!("");
+        outln!("Constants:");
+        outln!("  PAGE_SIZE:       {:#x} ({} bytes)", mm::PAGE_SIZE, mm::PAGE_SIZE);
+        outln!("  LARGE_PAGE_SIZE: {:#x} ({} MB)", mm::LARGE_PAGE_SIZE, mm::LARGE_PAGE_SIZE / 1024 / 1024);
+    } else if eq_ignore_case(cmd, "stats") {
+        outln!("Memory Statistics");
+        outln!("");
+
+        let stats = mm::mm_get_stats();
+        outln!("PFN Database:");
+        outln!("  Total pages:     {}", stats.total_pages);
+        outln!("  Free pages:      {}", stats.free_pages);
+        outln!("  Active pages:    {}", stats.active_pages);
+        outln!("  Zeroed pages:    {}", stats.zeroed_pages);
+        outln!("");
+
+        let total_mb = (stats.total_pages as usize * mm::PAGE_SIZE) / (1024 * 1024);
+        let free_mb = (stats.free_pages as usize * mm::PAGE_SIZE) / (1024 * 1024);
+        let used_mb = total_mb - free_mb;
+        outln!("Memory Usage:");
+        outln!("  Total:  {} MB", total_mb);
+        outln!("  Used:   {} MB", used_mb);
+        outln!("  Free:   {} MB", free_mb);
+    } else if eq_ignore_case(cmd, "pool") {
+        outln!("Pool Allocator Status");
+        outln!("");
+
+        let pool_stats = mm::mm_get_pool_stats();
+        outln!("Pool Statistics:");
+        outln!("  Total size:        {} bytes", pool_stats.total_size);
+        outln!("  Bytes allocated:   {} bytes", pool_stats.bytes_allocated);
+        outln!("  Bytes free:        {} bytes", pool_stats.bytes_free);
+        outln!("  Allocation count:  {}", pool_stats.allocation_count);
+        outln!("  Free count:        {}", pool_stats.free_count);
+    } else if eq_ignore_case(cmd, "physical") {
+        outln!("Physical Memory Information");
+        outln!("");
+
+        let phys_stats = mm::mm_get_physical_stats();
+        outln!("Physical Memory:");
+        outln!("  Total pages:     {}", phys_stats.total_pages);
+        outln!("  Free pages:      {}", phys_stats.free_pages);
+        outln!("  Active pages:    {}", phys_stats.active_pages);
+        outln!("  Zeroed pages:    {}", phys_stats.zeroed_pages);
+        outln!("  Total bytes:     {} MB", phys_stats.total_bytes / 1024 / 1024);
+        outln!("  Usable bytes:    {} MB", phys_stats.usable_bytes / 1024 / 1024);
+        outln!("");
+
+        let region_count = mm::mm_get_region_count();
+        outln!("Memory Regions: {}", region_count);
+        outln!("(Region enumeration not yet implemented)");
+    } else if eq_ignore_case(cmd, "vad") {
+        outln!("Virtual Address Descriptor (VAD) Statistics");
+        outln!("");
+
+        let vad_stats = mm::mm_get_vad_stats();
+        outln!("VAD Allocations:");
+        outln!("  Total VADs:      {}", vad_stats.total_vads);
+        outln!("  Allocated VADs:  {}", vad_stats.allocated_vads);
+        outln!("  Free VADs:       {}", vad_stats.free_vads);
+        outln!("");
+        outln!("Max VADs:          {}", mm::MAX_VADS);
+    } else if eq_ignore_case(cmd, "section") {
+        outln!("Section Object Statistics");
+        outln!("");
+
+        let section_stats = mm::mm_get_section_stats();
+        outln!("Sections:");
+        outln!("  Total:           {}", section_stats.total_sections);
+        outln!("  Active:          {}", section_stats.active_sections);
+        outln!("");
+        outln!("Views:");
+        outln!("  Total views:     {}", section_stats.total_views);
+        outln!("");
+        outln!("Max Sections:      {}", mm::MAX_SECTIONS);
+    } else {
+        outln!("Unknown mm command: {}", cmd);
+    }
+}
+
+// ============================================================================
+// I/O Manager (IO) Command
+// ============================================================================
+
+/// I/O Manager (IO) shell command
+pub fn cmd_io(args: &[&str]) {
+    use crate::io;
+
+    if args.is_empty() {
+        outln!("I/O Manager (IO) Commands");
+        outln!("");
+        outln!("Usage: io <command> [args]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  info               Show I/O manager information");
+        outln!("  block              Show block device status");
+        outln!("  volumes            List disk volumes");
+        outln!("  ramdisk            Show RAM disk status");
+        outln!("  pipes              Show named pipe status");
+        outln!("  iocp               Show I/O completion ports");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "info") {
+        outln!("I/O Manager Information");
+        outln!("");
+        outln!("Components:");
+        outln!("  IRP:              I/O Request Packets");
+        outln!("  Driver Objects:   Driver dispatch tables");
+        outln!("  Device Objects:   Device stack representation");
+        outln!("  File Objects:     Open file handles");
+        outln!("  Block Devices:    Disk/storage abstraction");
+        outln!("  Named Pipes:      Inter-process communication");
+        outln!("  IOCP:             I/O Completion Ports");
+        outln!("");
+        outln!("IRP Major Functions:");
+        outln!("  IRP_MJ_CREATE (0), CLOSE (2), READ (3), WRITE (4)");
+        outln!("  IRP_MJ_DEVICE_CONTROL (14)");
+        outln!("");
+        outln!("Constants:");
+        outln!("  SECTOR_SIZE:      {}", io::SECTOR_SIZE);
+        outln!("  MAX_RAM_DISKS:    {}", io::MAX_RAM_DISKS);
+        outln!("  MAX_NAMED_PIPES:  {}", io::MAX_NAMED_PIPES);
+        outln!("  MAX_IOCP:         {}", io::MAX_COMPLETION_PORTS);
+    } else if eq_ignore_case(cmd, "block") {
+        outln!("Block Device Status");
+        outln!("");
+
+        let count = io::block_device_count();
+        outln!("Registered block devices: {}", count);
+        outln!("");
+
+        if count > 0 {
+            outln!("{:<10} {:<15} {:<12}", "Device", "Type", "Sectors");
+            outln!("---------------------------------------");
+            for i in 0..count.min(10) {
+                if let Some(dev) = io::get_block_device(i as u8) {
+                    let type_str = match dev.device_type {
+                        io::BlockDeviceType::Unknown => "Unknown",
+                        io::BlockDeviceType::HardDisk => "Hard Disk",
+                        io::BlockDeviceType::SSD => "SSD",
+                        io::BlockDeviceType::Optical => "CD/DVD",
+                        io::BlockDeviceType::Floppy => "Floppy",
+                        io::BlockDeviceType::USB => "USB",
+                        io::BlockDeviceType::RamDisk => "RAM Disk",
+                        _ => "Other",
+                    };
+                    outln!("{:<10} {:<15} {:<12}", i, type_str, dev.geometry.total_sectors);
+                }
+            }
+        }
+    } else if eq_ignore_case(cmd, "volumes") {
+        outln!("Disk Volumes");
+        outln!("");
+
+        let count = io::volume_count();
+        outln!("Detected volumes: {}", count);
+        outln!("");
+
+        if count > 0 {
+            io::list_volumes();
+        }
+    } else if eq_ignore_case(cmd, "ramdisk") {
+        outln!("RAM Disk Status");
+        outln!("");
+
+        let count = io::ramdisk_count();
+        outln!("Active RAM disks: {}", count);
+        outln!("Maximum RAM disks: {}", io::MAX_RAM_DISKS);
+        outln!("Default size: {} MB", io::DEFAULT_RAMDISK_SIZE / 1024 / 1024);
+        outln!("Maximum size: {} MB", io::MAX_RAMDISK_SIZE / 1024 / 1024);
+    } else if eq_ignore_case(cmd, "pipes") {
+        outln!("Named Pipe Status");
+        outln!("");
+
+        let stats = io::get_pipe_stats();
+        outln!("Pipe Statistics:");
+        outln!("  Total pipes:          {}", stats.total_pipes);
+        outln!("  Active pipes:         {}", stats.active_pipes);
+        outln!("  Total instances:      {}", stats.total_instances);
+        outln!("  Connected instances:  {}", stats.connected_instances);
+        outln!("");
+        outln!("Limits:");
+        outln!("  Max pipes:       {}", io::MAX_NAMED_PIPES);
+        outln!("  Max instances:   {}", io::MAX_PIPE_INSTANCES);
+        outln!("  Buffer size:     {}", io::DEFAULT_BUFFER_SIZE);
+    } else if eq_ignore_case(cmd, "iocp") {
+        outln!("I/O Completion Port Status");
+        outln!("");
+        outln!("Max completion ports: {}", io::MAX_COMPLETION_PORTS);
+        outln!("Max queued completions: {}", io::MAX_QUEUED_COMPLETIONS);
+        outln!("");
+        outln!("(Detailed IOCP status not yet implemented)");
+    } else {
+        outln!("Unknown io command: {}", cmd);
     }
 }
