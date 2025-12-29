@@ -234,6 +234,7 @@ pub enum SyscallNumber {
     NtFlushBuffersFile = 192,
     NtCancelIoFile = 193,
     NtUnlockFile = 194,
+    NtSetFileCompletionNotificationModes = 195,
 
     // Object namespace operations
     NtCreateSymbolicLinkObject = 200,
@@ -510,6 +511,7 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtFsControlFile as usize, sys_fs_control_file);
     register_syscall(SyscallNumber::NtFlushBuffersFile as usize, sys_flush_buffers_file);
     register_syscall(SyscallNumber::NtCancelIoFile as usize, sys_cancel_io_file);
+    register_syscall(SyscallNumber::NtSetFileCompletionNotificationModes as usize, sys_set_file_completion_notification_modes);
 
     // Section syscalls (additional)
     register_syscall(SyscallNumber::NtOpenSection as usize, sys_open_section);
@@ -12598,6 +12600,7 @@ fn sys_create_process_internal(
     use crate::ps::create::ps_create_process;
     use crate::ps::eprocess::get_system_process;
     use crate::ps::cid::ps_lookup_process_by_id;
+    use crate::ps::job::{Job, job_limit_flags};
 
     if process_handle_ptr == 0 {
         return -1; // STATUS_INVALID_PARAMETER
@@ -12629,6 +12632,44 @@ fn sys_create_process_internal(
         }
     };
 
+    // Check job limits if parent is in a job
+    let parent_job: *mut Job = unsafe {
+        let job_ptr = (*parent).job;
+        if !job_ptr.is_null() {
+            let job = job_ptr as *mut Job;
+
+            // Check if breakaway is allowed
+            let breakaway_ok = (flags & 0x01) != 0; // CREATE_BREAKAWAY_FROM_JOB flag
+            let limit_flags = (*job).limits.basic_limit_information.limit_flags;
+
+            if breakaway_ok {
+                // Check if job allows breakaway
+                if limit_flags & job_limit_flags::JOB_OBJECT_LIMIT_BREAKAWAY_OK == 0 {
+                    // Breakaway not allowed
+                    crate::serial_println!("[SYSCALL] NtCreateProcess: breakaway not allowed by job");
+                    return 0xC000048Au32 as isize; // STATUS_ACCESS_DENIED
+                }
+                core::ptr::null_mut() // Process won't be in job
+            } else {
+                // Check active process limit
+                if limit_flags & job_limit_flags::JOB_OBJECT_LIMIT_ACTIVE_PROCESS != 0 {
+                    let limit = (*job).limits.basic_limit_information.active_process_limit;
+                    let current = (*job).active_process_count();
+                    if current >= limit {
+                        crate::serial_println!(
+                            "[SYSCALL] NtCreateProcess: job active process limit reached ({}/{})",
+                            current, limit
+                        );
+                        return 0xC0000045u32 as isize; // STATUS_TOO_MANY_THREADS (close enough)
+                    }
+                }
+                job // Process will inherit job
+            }
+        } else {
+            core::ptr::null_mut()
+        }
+    };
+
     // Extract process name from object attributes if available
     let name = if object_attributes != 0 {
         // OBJECT_ATTRIBUTES contains a UNICODE_STRING for object name
@@ -12652,6 +12693,21 @@ fn sys_create_process_internal(
     // For now, we just note it
     if section_handle != 0 {
         crate::serial_println!("[SYSCALL] NtCreateProcess: section {:#x} (not yet mapped)", section_handle);
+    }
+
+    // Assign process to parent's job if applicable
+    unsafe {
+        if !parent_job.is_null() {
+            if (*parent_job).assign_process(new_process) {
+                crate::serial_println!(
+                    "[SYSCALL] NtCreateProcess: assigned to job {}",
+                    (*parent_job).job_id
+                );
+            } else {
+                // Job assignment failed (shouldn't happen since we checked limits)
+                crate::serial_println!("[SYSCALL] NtCreateProcess: job assignment failed");
+            }
+        }
     }
 
     // Allocate a handle for the new process
@@ -12757,12 +12813,70 @@ fn sys_open_job_object(
     object_attributes: usize,
     _: usize, _: usize, _: usize,
 ) -> isize {
+    use crate::ps::job::ps_lookup_job_by_name;
+
     if job_handle_ptr == 0 || object_attributes == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     crate::serial_println!("[SYSCALL] NtOpenJobObject(access={:#x})", desired_access);
-    0xC0000034u32 as isize // STATUS_OBJECT_NAME_NOT_FOUND
+
+    // Parse OBJECT_ATTRIBUTES to get the name
+    // OBJECT_ATTRIBUTES structure:
+    //   Length: u32
+    //   RootDirectory: HANDLE (8 bytes)
+    //   ObjectName: *UNICODE_STRING (8 bytes)
+    //   Attributes: u32
+    //   SecurityDescriptor: *void
+    //   SecurityQualityOfService: *void
+
+    let object_name_ptr = unsafe { *((object_attributes + 16) as *const u64) };
+    if object_name_ptr == 0 {
+        crate::serial_println!("[SYSCALL] NtOpenJobObject: no object name");
+        return 0xC0000034u32 as isize; // STATUS_OBJECT_NAME_NOT_FOUND
+    }
+
+    // Parse UNICODE_STRING: Length (u16), MaxLength (u16), Buffer (*u16)
+    let name_len = unsafe { *(object_name_ptr as *const u16) } as usize;
+    let name_buffer = unsafe { *((object_name_ptr as usize + 8) as *const u64) };
+
+    if name_len == 0 || name_buffer == 0 {
+        return 0xC0000034u32 as isize; // STATUS_OBJECT_NAME_NOT_FOUND
+    }
+
+    // Convert wide string to bytes (simple ASCII conversion)
+    let mut name_bytes = [0u8; 64];
+    let char_count = (name_len / 2).min(63);
+    for i in 0..char_count {
+        let wide_char = unsafe { *((name_buffer as usize + i * 2) as *const u16) };
+        name_bytes[i] = wide_char as u8;
+    }
+
+    crate::serial_println!("[SYSCALL] NtOpenJobObject: looking up job '{}'",
+        core::str::from_utf8(&name_bytes[..char_count]).unwrap_or("?"));
+
+    // Look up the job by name
+    let job = unsafe { ps_lookup_job_by_name(&name_bytes[..char_count]) };
+    if job.is_null() {
+        crate::serial_println!("[SYSCALL] NtOpenJobObject: job not found");
+        return 0xC0000034u32 as isize; // STATUS_OBJECT_NAME_NOT_FOUND
+    }
+
+    // Allocate a handle for the job
+    let job_id = unsafe { (*job).job_id };
+    let handle = unsafe { alloc_job_handle(job_id) };
+    match handle {
+        Some(h) => {
+            unsafe { *(job_handle_ptr as *mut usize) = h; }
+            crate::serial_println!("[SYSCALL] NtOpenJobObject: opened job handle {:#x}", h);
+            let _ = desired_access; // Would validate access rights
+            STATUS_SUCCESS
+        }
+        None => {
+            crate::serial_println!("[SYSCALL] NtOpenJobObject: failed to allocate handle");
+            STATUS_INSUFFICIENT_RESOURCES
+        }
+    }
 }
 
 /// NtAssignProcessToJobObject - Assign a process to a job
@@ -14386,6 +14500,71 @@ fn sys_cancel_io_file(
     0 // STATUS_SUCCESS
 }
 
+/// File completion notification mode flags
+mod file_completion_notification_flags {
+    /// Skip I/O completion port notification if operation completes synchronously
+    pub const FILE_SKIP_COMPLETION_PORT_ON_SUCCESS: u8 = 0x01;
+    /// Skip signaling the file handle event if operation completes
+    pub const FILE_SKIP_SET_EVENT_ON_HANDLE: u8 = 0x02;
+}
+
+/// NtSetFileCompletionNotificationModes - Set file completion notification behavior
+///
+/// This syscall controls how I/O completion notifications are delivered for a file handle.
+/// - FILE_SKIP_COMPLETION_PORT_ON_SUCCESS: Skip IOCP notification for synchronous completions
+/// - FILE_SKIP_SET_EVENT_ON_HANDLE: Skip signaling the file handle for completions
+fn sys_set_file_completion_notification_modes(
+    file_handle: usize,
+    flags: usize,
+    _arg3: usize,
+    _arg4: usize,
+    _arg5: usize,
+    _arg6: usize,
+) -> isize {
+    use file_completion_notification_flags::*;
+
+    crate::serial_println!(
+        "[SYSCALL] NtSetFileCompletionNotificationModes(handle={:#x}, flags={:#x})",
+        file_handle, flags
+    );
+
+    if file_handle == 0 {
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Validate flags - only known flags allowed
+    let valid_flags = FILE_SKIP_COMPLETION_PORT_ON_SUCCESS | FILE_SKIP_SET_EVENT_ON_HANDLE;
+    if (flags as u8) & !valid_flags != 0 {
+        crate::serial_println!("[SYSCALL] NtSetFileCompletionNotificationModes: invalid flags");
+        return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+    }
+
+    // Look up the file handle and set the notification modes
+    unsafe {
+        if let Some(fs_handle) = get_fs_handle(file_handle) {
+            // In a full implementation, we would:
+            // 1. Look up the FILE_OBJECT by handle
+            // 2. Set the completion notification flags on it
+            // For now, we just log and accept the request
+
+            let skip_iocp = (flags as u8) & FILE_SKIP_COMPLETION_PORT_ON_SUCCESS != 0;
+            let skip_event = (flags as u8) & FILE_SKIP_SET_EVENT_ON_HANDLE != 0;
+
+            crate::serial_println!(
+                "[SYSCALL] NtSetFileCompletionNotificationModes: fs_handle {} skip_iocp={} skip_event={}",
+                fs_handle, skip_iocp, skip_event
+            );
+
+            // TODO: Store these flags on the file object for use during I/O completion
+
+            0 // STATUS_SUCCESS
+        } else {
+            crate::serial_println!("[SYSCALL] NtSetFileCompletionNotificationModes: invalid handle");
+            0xC0000008u32 as isize // STATUS_INVALID_HANDLE
+        }
+    }
+}
+
 // ============================================================================
 // Section Syscalls (Additional)
 // ============================================================================
@@ -14505,16 +14684,24 @@ fn sys_query_io_completion(
                 return 0xC0000004u32 as isize; // STATUS_INFO_LENGTH_MISMATCH
             }
 
-            // Return basic info - for now, just show depth as 0
-            let info = IoCompletionBasicInformation {
-                depth: 0,
+            // Get actual queue depth from the completion port
+            let port = io_completion_handle as *mut crate::io::iocp::IoCompletionPort;
+            let depth = unsafe {
+                if let Some(info) = crate::io::iocp::io_query_completion(port) {
+                    info.queue_depth as i32
+                } else {
+                    0
+                }
             };
+
+            let info = IoCompletionBasicInformation { depth };
 
             unsafe {
                 core::ptr::write(io_completion_info as *mut IoCompletionBasicInformation, info);
             }
 
-            0 // STATUS_SUCCESS
+            crate::serial_println!("[SYSCALL] NtQueryIoCompletion: depth={}", depth);
+            STATUS_SUCCESS
         }
         _ => {
             0xC0000003u32 as isize // STATUS_INVALID_INFO_CLASS

@@ -472,3 +472,26 @@ pub unsafe fn ps_lookup_job(job_id: u32) -> *mut Job {
     }
     ptr::null_mut()
 }
+
+/// Look up a job by name
+///
+/// Returns a pointer to the job if found, null otherwise.
+pub unsafe fn ps_lookup_job_by_name(name: &[u8]) -> *mut Job {
+    if name.is_empty() {
+        return ptr::null_mut();
+    }
+
+    for i in 0..MAX_JOBS {
+        if JOB_POOL_BITMAP & (1 << i) != 0 {
+            let job = &JOB_POOL[i];
+            // Find end of job name
+            let job_name_len = job.name.iter().position(|&b| b == 0).unwrap_or(64);
+            if job_name_len > 0 && job_name_len == name.len() {
+                if &job.name[..job_name_len] == name {
+                    return &mut JOB_POOL[i] as *mut Job;
+                }
+            }
+        }
+    }
+    ptr::null_mut()
+}
