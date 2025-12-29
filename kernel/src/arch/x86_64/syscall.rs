@@ -8244,6 +8244,30 @@ fn sys_query_information_process(
             STATUS_SUCCESS
         }
 
+        // Class 12: ProcessDefaultHardErrorMode
+        process_info_class::ProcessDefaultHardErrorMode => {
+            let required = 4usize;
+
+            if return_length != 0 {
+                unsafe { *(return_length as *mut usize) = required; }
+            }
+
+            if process_information_length < required {
+                return STATUS_INFO_LENGTH_MISMATCH;
+            }
+
+            unsafe {
+                let error_mode = if !eprocess.is_null() {
+                    (*eprocess).hard_error_mode
+                } else {
+                    0
+                };
+                *(process_information as *mut u32) = error_mode;
+            }
+
+            STATUS_SUCCESS
+        }
+
         // Class 18: ProcessPriorityClass
         process_info_class::ProcessPriorityClass => {
             let required = core::mem::size_of::<ProcessPriorityClassInfo>();
@@ -8516,8 +8540,12 @@ fn sys_query_information_process(
             }
 
             unsafe {
-                // Default I/O priority (Normal = 2)
-                *(process_information as *mut u32) = 2;
+                let io_priority = if !eprocess.is_null() {
+                    (*eprocess).io_priority as u32
+                } else {
+                    2 // Normal
+                };
+                *(process_information as *mut u32) = io_priority;
             }
 
             STATUS_SUCCESS
@@ -10182,6 +10210,10 @@ pub mod ProcessInfoClassSet {
     pub const ProcessExecuteFlags: u32 = 34;
     /// Set break on termination flag
     pub const ProcessBreakOnTermination: u32 = 29;
+    /// Set I/O priority
+    pub const ProcessIoPriority: u32 = 33;
+    /// Set page priority
+    pub const ProcessPagePriority: u32 = 39;
     /// Set instrumentation callback
     pub const ProcessInstrumentationCallback: u32 = 40;
 }
@@ -10369,7 +10401,8 @@ fn sys_set_information_process(
             let error_mode = unsafe { *(process_information as *const u32) };
             crate::serial_println!("[SYSCALL] SetInformationProcess: hard error mode = {:#x}", error_mode);
 
-            // TODO: Store in process structure
+            // Store in process structure
+            process.hard_error_mode = error_mode;
             0
         }
 
@@ -10483,6 +10516,44 @@ fn sys_set_information_process(
             let debug_port = unsafe { *(process_information as *const usize) };
             process.debug_port = debug_port as *mut u8;
             crate::serial_println!("[SYSCALL] SetInformationProcess: debug port = {:#x}", debug_port);
+
+            0
+        }
+
+        // ProcessIoPriority = 33
+        ProcessInfoClassSet::ProcessIoPriority => {
+            if process_information_length < core::mem::size_of::<u32>() {
+                return 0xC0000004u32 as isize;
+            }
+
+            let io_priority = unsafe { *(process_information as *const u32) };
+
+            // Validate I/O priority (0=VeryLow, 1=Low, 2=Normal, 3=High, 4=Critical)
+            if io_priority > 4 {
+                return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+            }
+
+            process.io_priority = io_priority as u8;
+            crate::serial_println!("[SYSCALL] SetInformationProcess: I/O priority = {}", io_priority);
+
+            0
+        }
+
+        // ProcessPagePriority = 39
+        ProcessInfoClassSet::ProcessPagePriority => {
+            if process_information_length < core::mem::size_of::<u32>() {
+                return 0xC0000004u32 as isize;
+            }
+
+            let page_priority = unsafe { *(process_information as *const u32) };
+
+            // Validate page priority (0-7)
+            if page_priority > 7 {
+                return 0xC000000Du32 as isize; // STATUS_INVALID_PARAMETER
+            }
+
+            process.page_priority = page_priority as u8;
+            crate::serial_println!("[SYSCALL] SetInformationProcess: page priority = {}", page_priority);
 
             0
         }
