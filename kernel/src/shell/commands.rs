@@ -90,6 +90,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    touch [file]   Create empty file");
         outln!("");
         outln!("  System:");
+        outln!("    sysinfo        Comprehensive system overview");
         outln!("    mem            Show memory usage");
         outln!("    time           Show system time");
         outln!("    ps <cmd>       Process subsystem (list, proc, thread)");
@@ -3945,4 +3946,102 @@ pub fn cmd_hal(args: &[&str]) {
     } else {
         outln!("Unknown hal command: {}", cmd);
     }
+}
+
+// ============================================================================
+// System Information Command
+// ============================================================================
+
+/// System information command - gives comprehensive system overview
+pub fn cmd_sysinfo() {
+    use crate::{mm, ps, ke, hal, io, ob};
+
+    outln!("============================================================");
+    outln!("                   NOSTALGOS SYSTEM INFO");
+    outln!("============================================================");
+    outln!("");
+
+    // OS Information
+    outln!("Operating System:");
+    outln!("  Name:         Nostalgia OS (NT 5.2 Compatible)");
+    outln!("  Architecture: x86_64");
+    outln!("  Build:        Development");
+    outln!("");
+
+    // Time Information
+    let dt = hal::rtc::get_datetime();
+    let uptime = hal::rtc::get_uptime_seconds();
+    outln!("Time:");
+    outln!("  Current:      {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+           dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second);
+    outln!("  Uptime:       {} seconds", uptime);
+    outln!("");
+
+    // CPU Information
+    unsafe {
+        let cpu_count = ke::get_active_cpu_count();
+        let current_cpu = ke::ke_get_current_processor_number();
+        let irql = ke::ke_get_current_irql();
+
+        outln!("Processor:");
+        outln!("  Active CPUs:  {}", cpu_count);
+        outln!("  Current CPU:  {}", current_cpu);
+        outln!("  Current IRQL: {}", irql);
+        outln!("");
+    }
+
+    // Memory Information
+    let mem_stats = mm::mm_get_stats();
+    let total_mb = (mem_stats.total_pages as usize * mm::PAGE_SIZE) / (1024 * 1024);
+    let free_mb = (mem_stats.free_pages as usize * mm::PAGE_SIZE) / (1024 * 1024);
+
+    outln!("Memory:");
+    outln!("  Total:        {} MB ({} pages)", total_mb, mem_stats.total_pages);
+    outln!("  Free:         {} MB ({} pages)", free_mb, mem_stats.free_pages);
+    outln!("  Active:       {} pages", mem_stats.active_pages);
+    outln!("");
+
+    // Process Information
+    outln!("Processes:");
+    outln!("  Max Processes: {}", ps::MAX_PROCESSES);
+    outln!("  Max Threads:   {}", ps::MAX_THREADS);
+    unsafe {
+        let list_head = ps::get_active_process_list();
+        let mut count = 0;
+        let mut entry = (*list_head).flink;
+        while entry != list_head && count < 100 {
+            entry = (*entry).flink;
+            count += 1;
+        }
+        outln!("  Active:        {} processes", count);
+    }
+    outln!("");
+
+    // Object Manager
+    outln!("Objects:");
+    outln!("  Max Types:     {}", ob::MAX_OBJECT_TYPES);
+    outln!("  Max Handles:   {}", ob::MAX_HANDLES);
+    outln!("");
+
+    // I/O Subsystem
+    let block_count = io::block_device_count();
+    let volume_count = io::volume_count();
+    let ramdisk_count = io::ramdisk_count();
+
+    outln!("Storage:");
+    outln!("  Block Devices: {}", block_count);
+    outln!("  Volumes:       {}", volume_count);
+    outln!("  RAM Disks:     {}", ramdisk_count);
+    outln!("");
+
+    // Timer/Tick Information
+    let ticks = hal::apic::get_tick_count();
+    outln!("Timers:");
+    outln!("  APIC Ticks:    {}", ticks);
+    if uptime > 0 {
+        outln!("  Ticks/sec:     ~{}", ticks / uptime);
+    }
+    outln!("");
+
+    outln!("============================================================");
 }

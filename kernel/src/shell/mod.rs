@@ -1084,6 +1084,9 @@ impl Shell {
         // Hardware Abstraction Layer
         } else if eq_ignore_case(cmd, "hal") {
             commands::cmd_hal(&args[1..argc]);
+        // System Information
+        } else if eq_ignore_case(cmd, "sysinfo") {
+            commands::cmd_sysinfo();
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
