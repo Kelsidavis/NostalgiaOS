@@ -38,6 +38,8 @@ pub mod create;
 pub mod eprocess;
 pub mod ethread;
 pub mod job;
+pub mod peb;
+pub mod teb;
 
 // Re-exports for convenience
 pub use cid::{
@@ -71,6 +73,19 @@ pub use job::{
     job_limit_flags, job_security_flags, job_ui_flags,
     ps_create_job, ps_lookup_job, allocate_job, free_job,
     MAX_JOBS, MAX_PROCESSES_PER_JOB,
+};
+
+pub use peb::{
+    Peb, PebLdrData, LdrDataTableEntry,
+    RtlUserProcessParameters, UnicodeString,
+    ListEntry64, peb_flags,
+};
+
+pub use teb::{
+    Teb, NtTib, GdiTebBatch,
+    TLS_MINIMUM_AVAILABLE, TLS_EXPANSION_SLOTS,
+    get_current_teb, get_current_peb,
+    get_last_error, set_last_error,
 };
 
 /// Initialize the Process Manager

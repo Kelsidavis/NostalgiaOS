@@ -20,6 +20,7 @@ use crate::ke::{KProcess, ProcessState, list::ListEntry, SpinLock};
 use crate::ob::HandleTable;
 use crate::se::Token;
 use super::cid::ClientId;
+use super::peb::Peb;
 
 /// Maximum length of process image name
 pub const PS_IMAGE_NAME_LENGTH: usize = 16;
@@ -116,7 +117,7 @@ pub struct EProcess {
     pub session_id: u32,
 
     /// PEB (Process Environment Block) address (user mode)
-    pub peb: *mut u8,
+    pub peb: *mut Peb,
 
     /// Exception port
     pub exception_port: *mut u8,

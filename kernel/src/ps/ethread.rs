@@ -18,6 +18,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use crate::ke::{KThread, list::ListEntry, SpinLock};
 use super::cid::ClientId;
 use super::eprocess::EProcess;
+use super::teb::Teb;
 
 /// Thread flags
 pub mod thread_flags {
@@ -88,7 +89,7 @@ pub struct EThread {
     pub pending_irp_count: AtomicU32,
 
     /// TEB (Thread Environment Block) address (user mode)
-    pub teb: *mut u8,
+    pub teb: *mut Teb,
 
     /// Impersonation info
     pub impersonation_info: *mut u8,
