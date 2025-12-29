@@ -65,6 +65,8 @@ pub use create::{
     ps_create_process, ps_create_system_process,
     ps_create_thread, ps_create_system_thread,
     ps_start_thread, ps_create_and_start_system_thread,
+    // User-mode thread/process creation
+    ps_create_user_thread, ps_create_user_process, ps_start_user_thread,
 };
 
 pub use job::{

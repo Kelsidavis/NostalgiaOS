@@ -16,7 +16,7 @@ use crate::ke::{
     scheduler::ki_ready_thread,
     SpinLock,
 };
-use crate::arch::x86_64::context::setup_initial_context;
+use crate::arch::x86_64::context::{setup_initial_context, setup_user_thread_context};
 use super::cid::{ps_allocate_process_id, ps_allocate_thread_id};
 use super::eprocess::{EProcess, allocate_process, process_flags};
 use super::ethread::{EThread, allocate_thread, thread_flags};
@@ -287,4 +287,149 @@ pub unsafe fn ps_create_and_start_system_thread(
         ps_start_thread(thread);
     }
     thread
+}
+
+// ============================================================================
+// User-Mode Thread Creation
+// ============================================================================
+
+/// Create a user-mode thread
+///
+/// Creates a thread that will execute in ring 3 (user mode).
+/// The thread will have a kernel stack for syscall handling and
+/// will IRETQ into user mode upon first scheduling.
+///
+/// # Arguments
+/// * `process` - Owning process (must have user-mode address space)
+/// * `entry_point` - Virtual address of user-mode entry point
+/// * `user_stack` - Virtual address of user-mode stack top
+/// * `priority` - Thread priority
+///
+/// # Returns
+/// Pointer to new ETHREAD, or null on failure
+///
+/// # Safety
+/// - process must have valid user-mode page tables
+/// - entry_point and user_stack must be valid in the process's address space
+pub unsafe fn ps_create_user_thread(
+    process: *mut EProcess,
+    entry_point: u64,
+    user_stack: u64,
+    priority: i8,
+) -> *mut EThread {
+    if process.is_null() {
+        return ptr::null_mut();
+    }
+
+    // Allocate a thread structure
+    let thread = match allocate_thread() {
+        Some(t) => t,
+        None => return ptr::null_mut(),
+    };
+
+    // Allocate a kernel stack for this thread
+    let (kernel_stack_top, _stack_index) = match allocate_stack() {
+        Some((base, idx)) => (base, idx),
+        None => {
+            super::ethread::free_thread(thread);
+            return ptr::null_mut();
+        }
+    };
+
+    // Allocate a thread ID
+    let tid = ps_allocate_thread_id(thread as *mut u8);
+    if tid == 0 {
+        super::ethread::free_thread(thread);
+        return ptr::null_mut();
+    }
+
+    // Initialize the thread (using a dummy kernel-mode routine since we'll IRETQ to user)
+    fn dummy_start(_: *mut u8) { loop { core::hint::spin_loop(); } }
+    (*thread).init(
+        process,
+        tid,
+        kernel_stack_top,
+        constants::THREAD_STACK_SIZE,
+        dummy_start,
+        ptr::null_mut(),
+        priority,
+    );
+
+    // Set user-mode entry point
+    (*thread).start_address = entry_point as *mut u8;
+    (*thread).win32_start_address = entry_point as *mut u8;
+
+    // Set up the kernel stack with trap frame for IRETQ to user mode
+    setup_user_thread_context(
+        (*thread).get_tcb_mut(),
+        kernel_stack_top,
+        entry_point,
+        user_stack,
+    );
+
+    // Add thread to process's thread list
+    (*process).thread_list_head.insert_tail(&mut (*thread).thread_list_entry);
+    (*process).increment_thread_count();
+
+    crate::serial_println!("[PS] Created user-mode thread {} in process {} (entry={:#x})",
+        tid, (*process).unique_process_id, entry_point);
+
+    thread
+}
+
+/// Create a user-mode process with initial thread
+///
+/// Creates a process with its user-mode address space and creates
+/// an initial thread to execute at the given entry point.
+///
+/// # Arguments
+/// * `parent` - Parent process
+/// * `name` - Process image name
+/// * `entry_point` - Virtual address of user-mode entry point
+/// * `user_stack` - Virtual address of user-mode stack top
+/// * `cr3` - Page table physical address for this process
+///
+/// # Returns
+/// Tuple of (process, thread) pointers, or (null, null) on failure
+///
+/// # Safety
+/// - entry_point and user_stack must be valid in the new address space
+/// - cr3 must be a valid page table with user-mode mappings
+pub unsafe fn ps_create_user_process(
+    parent: *mut EProcess,
+    name: &[u8],
+    entry_point: u64,
+    user_stack: u64,
+    _cr3: u64,
+) -> (*mut EProcess, *mut EThread) {
+    // Create the process
+    let process = ps_create_process(parent, name, 8);
+    if process.is_null() {
+        return (ptr::null_mut(), ptr::null_mut());
+    }
+
+    // Create the initial thread
+    let thread = ps_create_user_thread(process, entry_point, user_stack, 8);
+    if thread.is_null() {
+        // TODO: Clean up the process
+        return (process, ptr::null_mut());
+    }
+
+    (process, thread)
+}
+
+/// Start a user-mode thread
+///
+/// Makes the user-mode thread ready to run. When scheduled, it will
+/// IRETQ into user mode at its entry point.
+///
+/// # Safety
+/// Thread must be properly initialized via ps_create_user_thread
+pub unsafe fn ps_start_user_thread(thread: *mut EThread) {
+    if thread.is_null() {
+        return;
+    }
+
+    // Ready the thread in the scheduler
+    ki_ready_thread((*thread).get_tcb_mut());
 }
