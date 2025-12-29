@@ -1026,7 +1026,7 @@ impl Shell {
         } else if eq_ignore_case(cmd, "time") {
             commands::cmd_time();
         } else if eq_ignore_case(cmd, "ps") || eq_ignore_case(cmd, "tasks") {
-            commands::cmd_ps();
+            commands::cmd_ps(&args[1..argc]);
         } else if eq_ignore_case(cmd, "history") {
             self.print_history();
         } else if eq_ignore_case(cmd, "reboot") {

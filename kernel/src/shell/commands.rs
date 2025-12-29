@@ -92,7 +92,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("  System:");
         outln!("    mem            Show memory usage");
         outln!("    time           Show system time");
-        outln!("    ps, tasks      Show running threads");
+        outln!("    ps <cmd>       Process subsystem (list, proc, thread)");
         outln!("    history        Show command history");
         outln!("    reboot         Restart the system");
         outln!("");
@@ -932,17 +932,164 @@ pub fn cmd_time() {
     );
 }
 
-/// Show running threads
-pub fn cmd_ps() {
-    outln!("");
-    outln!("  TID  State      Priority  Name");
-    outln!("  ---  -----      --------  ----");
+/// Process Subsystem (PS) shell command
+pub fn cmd_ps(args: &[&str]) {
+    use crate::ps;
+    use crate::ke::list::ListEntry;
 
-    // Get thread list from scheduler
-    unsafe {
-        crate::ke::scheduler::list_threads();
+    if args.is_empty() {
+        // Default: show threads (backwards compatible)
+        outln!("");
+        outln!("  TID  State      Priority  Name");
+        outln!("  ---  -----      --------  ----");
+        unsafe {
+            crate::ke::scheduler::list_threads();
+        }
+        outln!("");
+        outln!("Use 'ps help' for more options.");
+        return;
     }
-    outln!("");
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "help") {
+        outln!("Process Subsystem (PS) Commands");
+        outln!("");
+        outln!("Usage: ps [command] [args]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  (none)             List threads (default)");
+        outln!("  info               Show PS subsystem info");
+        outln!("  list               List all processes");
+        outln!("  threads            List all threads");
+        outln!("  proc <pid>         Show process details");
+        outln!("  thread <tid>       Show thread details");
+    } else if eq_ignore_case(cmd, "info") {
+        outln!("Process Subsystem Information");
+        outln!("");
+        outln!("Components:");
+        outln!("  EPROCESS:    Executive Process Object");
+        outln!("  ETHREAD:     Executive Thread Object");
+        outln!("  KPROCESS:    Kernel Process Object (PCB)");
+        outln!("  KTHREAD:     Kernel Thread Object (TCB)");
+        outln!("  PEB:         Process Environment Block");
+        outln!("  TEB:         Thread Environment Block");
+        outln!("  Job Objects: Process grouping and limits");
+        outln!("");
+        outln!("Constants:");
+        outln!("  MAX_PROCESSES:  {}", ps::MAX_PROCESSES);
+        outln!("  MAX_THREADS:    {}", ps::MAX_THREADS);
+        outln!("  MAX_JOBS:       {}", ps::MAX_JOBS);
+    } else if eq_ignore_case(cmd, "list") {
+        outln!("Active Processes");
+        outln!("");
+        outln!("{:<6} {:<6} {:<8} {:<16}", "PID", "PPID", "Threads", "Name");
+        outln!("----------------------------------------------");
+
+        unsafe {
+            let list_head = ps::get_active_process_list();
+            if (*list_head).is_empty() {
+                outln!("  (No processes)");
+            } else {
+                let mut count = 0;
+                let mut entry = (*list_head).flink;
+                while entry != list_head && count < 50 {
+                    let process = crate::containing_record!(entry, ps::EProcess, active_process_links);
+
+                    let pid = (*process).process_id();
+                    let ppid = (*process).parent_process_id();
+                    let thread_count = (*process).thread_count();
+                    let name = (*process).image_name();
+                    let name_str = core::str::from_utf8(name).unwrap_or("?");
+
+                    outln!("{:<6} {:<6} {:<8} {:<16}", pid, ppid, thread_count, name_str);
+
+                    entry = (*entry).flink;
+                    count += 1;
+                }
+                outln!("");
+                outln!("Total: {} processes", count);
+            }
+        }
+    } else if eq_ignore_case(cmd, "threads") {
+        outln!("");
+        outln!("  TID  State      Priority  Name");
+        outln!("  ---  -----      --------  ----");
+        unsafe {
+            crate::ke::scheduler::list_threads();
+        }
+        outln!("");
+    } else if eq_ignore_case(cmd, "proc") {
+        if args.len() < 2 {
+            outln!("Usage: ps proc <pid>");
+            return;
+        }
+
+        let pid_str = args[1];
+        let pid: u32 = match pid_str.parse() {
+            Ok(p) => p,
+            Err(_) => {
+                outln!("Invalid PID: {}", pid_str);
+                return;
+            }
+        };
+
+        unsafe {
+            let process = ps::ps_lookup_process_by_id(pid) as *mut ps::EProcess;
+            if process.is_null() {
+                outln!("Process {} not found", pid);
+                return;
+            }
+
+            outln!("Process Details (PID {})", pid);
+            outln!("");
+            outln!("EPROCESS:    {:p}", process);
+            outln!("Name:        {}", core::str::from_utf8((*process).image_name()).unwrap_or("?"));
+            outln!("Parent PID:  {}", (*process).parent_process_id());
+            outln!("Threads:     {}", (*process).thread_count());
+            outln!("System:      {}", if (*process).is_system() { "Yes" } else { "No" });
+            outln!("Exiting:     {}", if (*process).is_exiting() { "Yes" } else { "No" });
+        }
+    } else if eq_ignore_case(cmd, "thread") {
+        if args.len() < 2 {
+            outln!("Usage: ps thread <tid>");
+            return;
+        }
+
+        let tid_str = args[1];
+        let tid: u32 = match tid_str.parse() {
+            Ok(t) => t,
+            Err(_) => {
+                outln!("Invalid TID: {}", tid_str);
+                return;
+            }
+        };
+
+        unsafe {
+            let thread = ps::ps_lookup_thread_by_id(tid) as *mut ps::EThread;
+            if thread.is_null() {
+                outln!("Thread {} not found", tid);
+                return;
+            }
+
+            outln!("Thread Details (TID {})", tid);
+            outln!("");
+            outln!("ETHREAD:     {:p}", thread);
+            outln!("Process ID:  {}", (*thread).process_id());
+            outln!("System:      {}", if (*thread).is_system() { "Yes" } else { "No" });
+            outln!("Terminating: {}", if (*thread).is_terminating() { "Yes" } else { "No" });
+            outln!("Suspended:   {}", if (*thread).is_suspended() { "Yes" } else { "No" });
+        }
+    } else {
+        // Treat unknown arg as "list threads" for compatibility
+        outln!("");
+        outln!("  TID  State      Priority  Name");
+        outln!("  ---  -----      --------  ----");
+        unsafe {
+            crate::ke::scheduler::list_threads();
+        }
+        outln!("");
+    }
 }
 
 /// Reboot the system
