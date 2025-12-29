@@ -156,7 +156,7 @@ const COMMANDS: &[&str] = &[
     "md", "mem", "memmap", "memory", "mkdir", "mm", "mv",
     "net",
     "ob",
-    "pci", "pe", "ps", "pwd",
+    "pagetable", "pci", "pe", "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
     "sc", "se", "services", "suspend", "sysinfo",
@@ -1112,6 +1112,9 @@ impl Shell {
         // CPU features
         } else if eq_ignore_case(cmd, "cpufeatures") {
             commands::cmd_cpufeatures(&args[1..argc]);
+        // Page table walker
+        } else if eq_ignore_case(cmd, "pagetable") {
+            commands::cmd_pagetable(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

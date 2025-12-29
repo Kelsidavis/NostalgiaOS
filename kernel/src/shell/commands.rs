@@ -115,6 +115,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    timer <cmd>    Timer diagnostics (apic, tsc, pit)");
         outln!("    memmap <cmd>   Physical memory map (regions, e820)");
         outln!("    cpufeatures    CPU feature detection (CPUID)");
+        outln!("    pagetable      Page table walker (cr3, walk, translate)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -6198,4 +6199,309 @@ fn show_raw_cpuid(leaf: u32, subleaf: u32) {
     outln!("  EBX: {:032b}", ebx);
     outln!("  ECX: {:032b}", ecx);
     outln!("  EDX: {:032b}", edx);
+}
+
+// ============================================================================
+// Page Table Walker Command
+// ============================================================================
+
+/// Page table walker and virtual address diagnostics
+pub fn cmd_pagetable(args: &[&str]) {
+    if args.is_empty() || eq_ignore_case(args[0], "cr3") {
+        show_cr3_info();
+    } else if eq_ignore_case(args[0], "walk") {
+        if args.len() < 2 {
+            outln!("Usage: pagetable walk <virtual_address>");
+            return;
+        }
+        let addr_str = args[1].trim_start_matches("0x").trim_start_matches("0X");
+        match u64::from_str_radix(addr_str, 16) {
+            Ok(addr) => walk_page_tables(addr),
+            Err(_) => outln!("Error: Invalid address '{}'", args[1]),
+        }
+    } else if eq_ignore_case(args[0], "translate") {
+        if args.len() < 2 {
+            outln!("Usage: pagetable translate <virtual_address>");
+            return;
+        }
+        let addr_str = args[1].trim_start_matches("0x").trim_start_matches("0X");
+        match u64::from_str_radix(addr_str, 16) {
+            Ok(addr) => translate_address(addr),
+            Err(_) => outln!("Error: Invalid address '{}'", args[1]),
+        }
+    } else if eq_ignore_case(args[0], "kernel") {
+        show_kernel_mappings();
+    } else if eq_ignore_case(args[0], "help") {
+        outln!("Page Table Walker");
+        outln!("");
+        outln!("Usage: pagetable [command]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  cr3              Show CR3 register info (default)");
+        outln!("  walk <addr>      Walk page tables for address");
+        outln!("  translate <addr> Translate virtual to physical");
+        outln!("  kernel           Show kernel mapping summary");
+        outln!("  help             Show this help");
+    } else {
+        outln!("Unknown pagetable command: {}", args[0]);
+    }
+}
+
+/// Show CR3 register information
+fn show_cr3_info() {
+    outln!("Page Table Base Register (CR3)");
+    outln!("");
+
+    let cr3: u64;
+    unsafe {
+        core::arch::asm!("mov {}, cr3", out(reg) cr3);
+    }
+
+    outln!("  CR3 Value:      {:#018x}", cr3);
+    outln!("");
+
+    // Decode CR3 bits
+    let pml4_base = cr3 & 0x000F_FFFF_FFFF_F000;
+    let pcid = cr3 & 0xFFF;
+    let pwt = (cr3 >> 3) & 1;
+    let pcd = (cr3 >> 4) & 1;
+
+    outln!("  PML4 Base:      {:#018x}", pml4_base);
+    outln!("  PCID:           {:#x} (if CR4.PCIDE=1)", pcid);
+    outln!("  PWT:            {} (Page-level Write-Through)", pwt);
+    outln!("  PCD:            {} (Page-level Cache Disable)", pcd);
+
+    // Read CR4 to check PCIDE
+    let cr4: u64;
+    unsafe {
+        core::arch::asm!("mov {}, cr4", out(reg) cr4);
+    }
+    let pcide = (cr4 >> 17) & 1;
+    outln!("");
+    outln!("  CR4.PCIDE:      {} (PCID Enable)", pcide);
+
+    // Show CR0 paging bits
+    let cr0: u64;
+    unsafe {
+        core::arch::asm!("mov {}, cr0", out(reg) cr0);
+    }
+    outln!("");
+    outln!("  Paging Status:");
+    outln!("    CR0.PG:       {} (Paging Enabled)", (cr0 >> 31) & 1);
+    outln!("    CR0.WP:       {} (Write Protect)", (cr0 >> 16) & 1);
+    outln!("    CR4.PAE:      {} (Physical Address Extension)", (cr4 >> 5) & 1);
+    outln!("    CR4.PSE:      {} (Page Size Extensions)", (cr4 >> 4) & 1);
+    outln!("    CR4.PGE:      {} (Page Global Enable)", (cr4 >> 7) & 1);
+    outln!("    CR4.SMEP:     {} (Supervisor Mode Exec Protection)", (cr4 >> 20) & 1);
+    outln!("    CR4.SMAP:     {} (Supervisor Mode Access Prevention)", (cr4 >> 21) & 1);
+}
+
+/// Walk page tables for a virtual address
+fn walk_page_tables(vaddr: u64) {
+    outln!("Page Table Walk for Virtual Address {:#018x}", vaddr);
+    outln!("");
+
+    // Check canonical address
+    let sign_ext = (vaddr >> 47) & 1;
+    let upper_bits = vaddr >> 48;
+    let is_canonical = (sign_ext == 0 && upper_bits == 0) ||
+                       (sign_ext == 1 && upper_bits == 0xFFFF);
+
+    if !is_canonical {
+        outln!("  ERROR: Non-canonical address!");
+        return;
+    }
+
+    // Get CR3
+    let cr3: u64;
+    unsafe {
+        core::arch::asm!("mov {}, cr3", out(reg) cr3);
+    }
+    let pml4_base = cr3 & 0x000F_FFFF_FFFF_F000;
+
+    // Calculate indices
+    let pml4_idx = (vaddr >> 39) & 0x1FF;
+    let pdpt_idx = (vaddr >> 30) & 0x1FF;
+    let pd_idx = (vaddr >> 21) & 0x1FF;
+    let pt_idx = (vaddr >> 12) & 0x1FF;
+    let offset = vaddr & 0xFFF;
+
+    outln!("  Address Breakdown:");
+    outln!("    PML4 Index:   {} ({:#x})", pml4_idx, pml4_idx);
+    outln!("    PDPT Index:   {} ({:#x})", pdpt_idx, pdpt_idx);
+    outln!("    PD Index:     {} ({:#x})", pd_idx, pd_idx);
+    outln!("    PT Index:     {} ({:#x})", pt_idx, pt_idx);
+    outln!("    Page Offset:  {} ({:#x})", offset, offset);
+    outln!("");
+
+    // Walk page tables
+    outln!("  Page Table Walk:");
+
+    // Level 4: PML4
+    let pml4e_addr = pml4_base + pml4_idx * 8;
+    let pml4e = unsafe { core::ptr::read_volatile(pml4e_addr as *const u64) };
+    outln!("    PML4E @ {:#x}: {:#018x}", pml4e_addr, pml4e);
+    decode_pte(pml4e, "PML4E");
+
+    if (pml4e & 1) == 0 {
+        outln!("    -> Not Present!");
+        return;
+    }
+
+    // Level 3: PDPT
+    let pdpt_base = pml4e & 0x000F_FFFF_FFFF_F000;
+    let pdpte_addr = pdpt_base + pdpt_idx * 8;
+    let pdpte = unsafe { core::ptr::read_volatile(pdpte_addr as *const u64) };
+    outln!("");
+    outln!("    PDPTE @ {:#x}: {:#018x}", pdpte_addr, pdpte);
+    decode_pte(pdpte, "PDPTE");
+
+    if (pdpte & 1) == 0 {
+        outln!("    -> Not Present!");
+        return;
+    }
+
+    // Check for 1GB page
+    if (pdpte & 0x80) != 0 {
+        let phys = (pdpte & 0x000F_FFFF_C000_0000) | (vaddr & 0x3FFF_FFFF);
+        outln!("");
+        outln!("    -> 1GB Page!");
+        outln!("    Physical Address: {:#018x}", phys);
+        return;
+    }
+
+    // Level 2: PD
+    let pd_base = pdpte & 0x000F_FFFF_FFFF_F000;
+    let pde_addr = pd_base + pd_idx * 8;
+    let pde = unsafe { core::ptr::read_volatile(pde_addr as *const u64) };
+    outln!("");
+    outln!("    PDE @ {:#x}: {:#018x}", pde_addr, pde);
+    decode_pte(pde, "PDE");
+
+    if (pde & 1) == 0 {
+        outln!("    -> Not Present!");
+        return;
+    }
+
+    // Check for 2MB page
+    if (pde & 0x80) != 0 {
+        let phys = (pde & 0x000F_FFFF_FFE0_0000) | (vaddr & 0x1F_FFFF);
+        outln!("");
+        outln!("    -> 2MB Page!");
+        outln!("    Physical Address: {:#018x}", phys);
+        return;
+    }
+
+    // Level 1: PT
+    let pt_base = pde & 0x000F_FFFF_FFFF_F000;
+    let pte_addr = pt_base + pt_idx * 8;
+    let pte = unsafe { core::ptr::read_volatile(pte_addr as *const u64) };
+    outln!("");
+    outln!("    PTE @ {:#x}: {:#018x}", pte_addr, pte);
+    decode_pte(pte, "PTE");
+
+    if (pte & 1) == 0 {
+        outln!("    -> Not Present!");
+        return;
+    }
+
+    // Calculate final physical address
+    let phys = (pte & 0x000F_FFFF_FFFF_F000) | offset;
+    outln!("");
+    outln!("    -> 4KB Page");
+    outln!("    Physical Address: {:#018x}", phys);
+}
+
+/// Decode page table entry flags
+fn decode_pte(pte: u64, level: &str) {
+    let flags = [
+        (0, "P", "Present"),
+        (1, "R/W", "Read/Write"),
+        (2, "U/S", "User/Supervisor"),
+        (3, "PWT", "Page Write-Through"),
+        (4, "PCD", "Page Cache Disable"),
+        (5, "A", "Accessed"),
+        (6, "D", "Dirty"),
+        (7, "PS", "Page Size"),
+        (8, "G", "Global"),
+        (63, "XD", "Execute Disable"),
+    ];
+
+    out!("      Flags: ");
+    for (bit, name, _desc) in flags {
+        if (pte & (1 << bit)) != 0 {
+            out!("{} ", name);
+        }
+    }
+    outln!("");
+}
+
+/// Quick address translation
+fn translate_address(vaddr: u64) {
+    outln!("Address Translation: {:#018x}", vaddr);
+    outln!("");
+
+    // Get current CR3
+    let cr3: u64;
+    unsafe {
+        core::arch::asm!("mov {}, cr3", out(reg) cr3);
+    }
+    let pml4_phys = cr3 & 0x000F_FFFF_FFFF_F000;
+
+    // Use the mm module
+    use crate::mm;
+
+    if let Some(phys) = unsafe { mm::mm_virtual_to_physical(pml4_phys, vaddr) } {
+        outln!("  Virtual:  {:#018x}", vaddr);
+        outln!("  Physical: {:#018x}", phys);
+    } else {
+        outln!("  Virtual:  {:#018x}", vaddr);
+        outln!("  Physical: NOT MAPPED");
+    }
+}
+
+/// Show kernel mapping summary
+fn show_kernel_mappings() {
+    outln!("Kernel Address Space Summary");
+    outln!("");
+
+    outln!("  Canonical Address Ranges:");
+    outln!("    User:   0x0000_0000_0000_0000 - 0x0000_7FFF_FFFF_FFFF (128 TB)");
+    outln!("    Hole:   0x0000_8000_0000_0000 - 0xFFFF_7FFF_FFFF_FFFF (invalid)");
+    outln!("    Kernel: 0xFFFF_8000_0000_0000 - 0xFFFF_FFFF_FFFF_FFFF (128 TB)");
+    outln!("");
+
+    // Show some known kernel addresses
+    outln!("  Sample Kernel Addresses:");
+
+    // Get kernel entry point (RIP is typically in kernel)
+    let rip: u64;
+    unsafe {
+        core::arch::asm!(
+            "lea {}, [rip]",
+            out(reg) rip,
+        );
+    }
+    outln!("    Current RIP:  {:#018x}", rip);
+
+    // Stack pointer
+    let rsp: u64;
+    unsafe {
+        core::arch::asm!("mov {}, rsp", out(reg) rsp);
+    }
+    outln!("    Current RSP:  {:#018x}", rsp);
+
+    // CR3 (page table base)
+    let cr3: u64;
+    unsafe {
+        core::arch::asm!("mov {}, cr3", out(reg) cr3);
+    }
+    outln!("    CR3 (PML4):   {:#018x}", cr3 & 0x000F_FFFF_FFFF_F000);
+
+    // Check if addresses are in expected ranges
+    outln!("");
+    let rip_kernel = rip >= 0xFFFF_8000_0000_0000;
+    let rsp_kernel = rsp >= 0xFFFF_8000_0000_0000;
+    outln!("  RIP in kernel space: {}", if rip_kernel { "Yes" } else { "No" });
+    outln!("  RSP in kernel space: {}", if rsp_kernel { "Yes" } else { "No" });
 }
