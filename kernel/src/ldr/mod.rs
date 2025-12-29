@@ -855,6 +855,22 @@ pub unsafe fn load_executable(
     // Note: This uses kernel addresses for now
     (*process).section_object = file_base as *mut u8;
 
+    // Create LDR entry for the main executable and add to module list
+    let peb = (*process).peb;
+    if !peb.is_null() && !(*peb).ldr.is_null() {
+        let ldr_entry = crate::ps::create_ldr_entry_for_module(
+            (*peb).ldr,
+            actual_base,
+            entry_point,
+            pe_info.size_of_image,
+            name,
+            true, // is_exe = true for main executable
+        );
+        if ldr_entry.is_null() {
+            crate::serial_println!("[LDR] Warning: Failed to create LDR entry");
+        }
+    }
+
     let loaded = LoadedImage {
         base: actual_base,
         size: pe_info.size_of_image,

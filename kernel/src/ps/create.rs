@@ -20,7 +20,7 @@ use crate::arch::x86_64::context::{setup_initial_context, setup_user_thread_cont
 use super::cid::{ps_allocate_process_id, ps_allocate_thread_id};
 use super::eprocess::{EProcess, allocate_process, process_flags};
 use super::ethread::{EThread, allocate_thread, thread_flags};
-use super::peb::{allocate_peb, init_peb};
+use super::peb::{allocate_peb, init_peb, allocate_peb_ldr_data, init_peb_ldr_data};
 use super::teb::{allocate_teb, init_teb};
 
 // ============================================================================
@@ -487,6 +487,17 @@ pub unsafe fn ps_create_user_process_ex(
 
     // Initialize PEB with image information
     init_peb(peb, image_base, image_size, entry_point, subsystem);
+
+    // Allocate and initialize PEB_LDR_DATA
+    let ldr = match allocate_peb_ldr_data() {
+        Some(l) => l,
+        None => {
+            crate::serial_println!("[PS] Failed to allocate PEB_LDR_DATA for process");
+            // TODO: Clean up PEB and process
+            return (ptr::null_mut(), ptr::null_mut());
+        }
+    };
+    init_peb_ldr_data(peb, ldr);
 
     // Store PEB pointer in process
     (*process).peb = peb;

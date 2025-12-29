@@ -750,6 +750,56 @@ pub unsafe fn free_peb(peb: *mut Peb) {
     }
 }
 
+// ============================================================================
+// PEB_LDR_DATA Pool
+// ============================================================================
+
+/// Static pool of PEB_LDR_DATA structures (one per process)
+static mut LDR_DATA_POOL: [PebLdrData; crate::ps::MAX_PROCESSES] = {
+    const INIT: PebLdrData = PebLdrData::new();
+    [INIT; crate::ps::MAX_PROCESSES]
+};
+
+/// LDR data pool bitmap
+static mut LDR_DATA_POOL_BITMAP: u64 = 0;
+
+/// LDR data pool lock
+static LDR_DATA_POOL_LOCK: crate::ke::SpinLock<()> = crate::ke::SpinLock::new(());
+
+/// Allocate a PEB_LDR_DATA from the pool
+///
+/// # Safety
+/// Must be called with proper synchronization
+pub unsafe fn allocate_peb_ldr_data() -> Option<*mut PebLdrData> {
+    let _guard = LDR_DATA_POOL_LOCK.lock();
+
+    for bit_idx in 0..crate::ps::MAX_PROCESSES {
+        if LDR_DATA_POOL_BITMAP & (1 << bit_idx) == 0 {
+            LDR_DATA_POOL_BITMAP |= 1 << bit_idx;
+            let ldr = &mut LDR_DATA_POOL[bit_idx] as *mut PebLdrData;
+            // Initialize to default
+            *ldr = PebLdrData::new();
+            return Some(ldr);
+        }
+    }
+    None
+}
+
+/// Free a PEB_LDR_DATA back to the pool
+///
+/// # Safety
+/// LDR data must have been allocated from this pool
+pub unsafe fn free_peb_ldr_data(ldr: *mut PebLdrData) {
+    let _guard = LDR_DATA_POOL_LOCK.lock();
+
+    let base = LDR_DATA_POOL.as_ptr() as usize;
+    let offset = ldr as usize - base;
+    let index = offset / core::mem::size_of::<PebLdrData>();
+    if index < crate::ps::MAX_PROCESSES {
+        LDR_DATA_POOL_BITMAP &= !(1 << index);
+    }
+}
+
 /// Initialize a PEB for a new process
 ///
 /// # Arguments
