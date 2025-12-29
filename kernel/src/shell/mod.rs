@@ -148,12 +148,12 @@ const HISTORY_SIZE: usize = 32;
 const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq",
     "blocks", "bt",
-    "callback", "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
+    "callback", "cat", "cd", "cid", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "desc", "descriptor", "devdrv", "dir", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
     "files",
     "hal", "handles", "help", "history", "hpet",
     "int", "io", "iocp", "ioq", "irql", "irqstat",
-    "ke", "keyedev",
+    "job", "ke", "keyedev",
     "ldr", "lookaside", "ls", "luid",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net",
@@ -1229,6 +1229,12 @@ impl Shell {
         // Lookaside list info
         } else if eq_ignore_case(cmd, "lookaside") {
             commands::cmd_lookaside(&args[1..argc]);
+        // Job object viewer
+        } else if eq_ignore_case(cmd, "job") {
+            commands::cmd_job(&args[1..argc]);
+        // CID table viewer
+        } else if eq_ignore_case(cmd, "cid") {
+            commands::cmd_cid(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

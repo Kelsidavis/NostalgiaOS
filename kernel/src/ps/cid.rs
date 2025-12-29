@@ -240,3 +240,129 @@ pub unsafe fn ps_register_system_process(process: *mut u8) {
     PROCESS_TABLE[0].object = process;
     PROCESS_TABLE[0].entry_type = CidEntryType::Process;
 }
+
+// ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// CID table statistics
+#[derive(Debug, Clone, Copy)]
+pub struct CidStats {
+    /// Maximum processes
+    pub max_processes: usize,
+    /// Maximum threads
+    pub max_threads: usize,
+    /// Active processes
+    pub active_processes: usize,
+    /// Active threads
+    pub active_threads: usize,
+    /// Free process slots
+    pub free_process_slots: usize,
+    /// Free thread slots
+    pub free_thread_slots: usize,
+    /// Next PID hint
+    pub next_pid_hint: u32,
+    /// Next TID hint
+    pub next_tid_hint: u32,
+}
+
+/// Get CID table statistics
+pub fn get_cid_stats() -> CidStats {
+    let mut process_count = 0usize;
+    let mut thread_count = 0usize;
+
+    unsafe {
+        for i in 0..MAX_PROCESSES {
+            if PROCESS_TABLE[i].entry_type == CidEntryType::Process {
+                process_count += 1;
+            }
+        }
+        for i in 0..MAX_THREADS {
+            if THREAD_TABLE[i].entry_type == CidEntryType::Thread {
+                thread_count += 1;
+            }
+        }
+    }
+
+    CidStats {
+        max_processes: MAX_PROCESSES,
+        max_threads: MAX_THREADS,
+        active_processes: process_count,
+        active_threads: thread_count,
+        free_process_slots: MAX_PROCESSES - process_count,
+        free_thread_slots: MAX_THREADS - thread_count,
+        next_pid_hint: NEXT_PID.load(Ordering::Relaxed),
+        next_tid_hint: NEXT_TID.load(Ordering::Relaxed),
+    }
+}
+
+/// CID entry snapshot
+#[derive(Clone, Copy)]
+pub struct CidEntrySnapshot {
+    /// Entry ID (PID or TID)
+    pub id: u32,
+    /// Entry type
+    pub entry_type: CidEntryType,
+    /// Object address
+    pub object_addr: u64,
+}
+
+impl CidEntrySnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            id: 0,
+            entry_type: CidEntryType::Free,
+            object_addr: 0,
+        }
+    }
+}
+
+/// Get process CID entries
+pub fn get_process_cid_snapshots(max_count: usize) -> ([CidEntrySnapshot; 32], usize) {
+    let mut snapshots = [CidEntrySnapshot::empty(); 32];
+    let mut count = 0;
+    let limit = max_count.min(32).min(MAX_PROCESSES);
+
+    unsafe {
+        for i in 0..MAX_PROCESSES {
+            if count >= limit {
+                break;
+            }
+            if PROCESS_TABLE[i].entry_type == CidEntryType::Process {
+                snapshots[count] = CidEntrySnapshot {
+                    id: i as u32,
+                    entry_type: CidEntryType::Process,
+                    object_addr: PROCESS_TABLE[i].object as u64,
+                };
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get thread CID entries
+pub fn get_thread_cid_snapshots(max_count: usize) -> ([CidEntrySnapshot; 64], usize) {
+    let mut snapshots = [CidEntrySnapshot::empty(); 64];
+    let mut count = 0;
+    let limit = max_count.min(64).min(MAX_THREADS);
+
+    unsafe {
+        for i in 0..MAX_THREADS {
+            if count >= limit {
+                break;
+            }
+            if THREAD_TABLE[i].entry_type == CidEntryType::Thread {
+                snapshots[count] = CidEntrySnapshot {
+                    id: i as u32,
+                    entry_type: CidEntryType::Thread,
+                    object_addr: THREAD_TABLE[i].object as u64,
+                };
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}

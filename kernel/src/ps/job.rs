@@ -495,3 +495,129 @@ pub unsafe fn ps_lookup_job_by_name(name: &[u8]) -> *mut Job {
     }
     ptr::null_mut()
 }
+
+// ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// Job statistics
+#[derive(Debug, Clone, Copy)]
+pub struct JobStats {
+    /// Maximum jobs
+    pub max_jobs: usize,
+    /// Allocated jobs
+    pub allocated_count: usize,
+    /// Free jobs
+    pub free_count: usize,
+    /// Total active processes in all jobs
+    pub total_active_processes: u32,
+    /// Next job ID
+    pub next_job_id: u32,
+}
+
+/// Get job statistics
+pub fn get_job_stats() -> JobStats {
+    let bitmap = unsafe { JOB_POOL_BITMAP };
+    let allocated = bitmap.count_ones() as usize;
+    let mut total_processes = 0u32;
+
+    for i in 0..MAX_JOBS {
+        if (bitmap & (1 << i)) != 0 {
+            unsafe {
+                total_processes += JOB_POOL[i].process_count.load(Ordering::Relaxed);
+            }
+        }
+    }
+
+    JobStats {
+        max_jobs: MAX_JOBS,
+        allocated_count: allocated,
+        free_count: MAX_JOBS - allocated,
+        total_active_processes: total_processes,
+        next_job_id: unsafe { NEXT_JOB_ID },
+    }
+}
+
+/// Job snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct JobSnapshot {
+    /// Job ID
+    pub job_id: u32,
+    /// Job name
+    pub name: [u8; 64],
+    /// Name length
+    pub name_len: u8,
+    /// Active process count
+    pub active_processes: u32,
+    /// Total processes ever added
+    pub total_processes: u32,
+    /// Terminated processes
+    pub terminated_processes: u32,
+    /// Limit flags
+    pub limit_flags: u32,
+    /// Has parent job
+    pub has_parent: bool,
+}
+
+impl JobSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            job_id: 0,
+            name: [0; 64],
+            name_len: 0,
+            active_processes: 0,
+            total_processes: 0,
+            terminated_processes: 0,
+            limit_flags: 0,
+            has_parent: false,
+        }
+    }
+}
+
+/// Get job snapshots
+pub fn ps_get_job_snapshots(max_count: usize) -> ([JobSnapshot; 16], usize) {
+    let mut snapshots = [JobSnapshot::empty(); 16];
+    let mut count = 0;
+    let limit = max_count.min(16).min(MAX_JOBS);
+    let bitmap = unsafe { JOB_POOL_BITMAP };
+
+    for i in 0..MAX_JOBS {
+        if count >= limit {
+            break;
+        }
+
+        if (bitmap & (1 << i)) != 0 {
+            let job = unsafe { &JOB_POOL[i] };
+            let name_len = job.name.iter().position(|&b| b == 0).unwrap_or(64);
+
+            snapshots[count] = JobSnapshot {
+                job_id: job.job_id,
+                name: job.name,
+                name_len: name_len as u8,
+                active_processes: job.accounting.active_processes,
+                total_processes: job.accounting.total_processes,
+                terminated_processes: job.accounting.total_terminated_processes,
+                limit_flags: job.limits.basic_limit_information.limit_flags,
+                has_parent: !job.parent_job.is_null(),
+            };
+            count += 1;
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get limit flag names
+pub fn job_limit_flags_name(flags: u32) -> &'static str {
+    if flags == 0 {
+        "None"
+    } else if flags & job_limit_flags::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0 {
+        "KillOnClose"
+    } else if flags & job_limit_flags::JOB_OBJECT_LIMIT_ACTIVE_PROCESS != 0 {
+        "ActiveProcess"
+    } else if flags & job_limit_flags::JOB_OBJECT_LIMIT_JOB_MEMORY != 0 {
+        "JobMemory"
+    } else {
+        "Other"
+    }
+}

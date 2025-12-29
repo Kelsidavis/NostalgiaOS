@@ -47,6 +47,9 @@ pub use cid::{
     MAX_PROCESSES, MAX_THREADS,
     ps_allocate_process_id, ps_free_process_id, ps_lookup_process_by_id,
     ps_allocate_thread_id, ps_free_thread_id, ps_lookup_thread_by_id,
+    // Inspection
+    CidStats, CidEntrySnapshot,
+    get_cid_stats, get_process_cid_snapshots, get_thread_cid_snapshots,
 };
 
 pub use eprocess::{
@@ -78,6 +81,9 @@ pub use job::{
     job_limit_flags, job_security_flags, job_ui_flags,
     ps_create_job, ps_lookup_job, allocate_job, free_job,
     MAX_JOBS, MAX_PROCESSES_PER_JOB,
+    // Inspection
+    JobStats, JobSnapshot,
+    get_job_stats, ps_get_job_snapshots, job_limit_flags_name,
 };
 
 pub use peb::{

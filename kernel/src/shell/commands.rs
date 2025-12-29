@@ -13485,3 +13485,196 @@ fn show_lookaside_info() {
     outln!("Note: Individual lookaside list statistics require");
     outln!("      driver-specific inspection (not globally tracked).");
 }
+
+// ============================================================================
+// Job Object Viewer
+// ============================================================================
+
+/// Job object viewer command
+pub fn cmd_job(args: &[&str]) {
+    if args.is_empty() {
+        show_job_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_job_stats();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_job_list();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("job - Job Object Viewer");
+        outln!("");
+        outln!("Usage: job [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show job statistics (default)");
+        outln!("  list   - List all active jobs");
+        outln!("");
+        outln!("Jobs group processes for resource limits.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'job help' for usage information");
+    }
+}
+
+fn show_job_stats() {
+    use crate::ps::get_job_stats;
+
+    let stats = get_job_stats();
+
+    outln!("Job Object Statistics");
+    outln!("=====================");
+    outln!("");
+    outln!("Max Jobs:               {}", stats.max_jobs);
+    outln!("Allocated Jobs:         {}", stats.allocated_count);
+    outln!("Free Jobs:              {}", stats.free_count);
+    outln!("Total Active Processes: {}", stats.total_active_processes);
+    outln!("Next Job ID:            {}", stats.next_job_id);
+}
+
+fn show_job_list() {
+    use crate::ps::{ps_get_job_snapshots, job_limit_flags_name};
+
+    outln!("Active Job Objects");
+    outln!("==================");
+    outln!("");
+
+    let (snapshots, count) = ps_get_job_snapshots(16);
+
+    if count == 0 {
+        outln!("No jobs currently allocated");
+        return;
+    }
+
+    outln!("{:<6} {:<24} {:<8} {:<10} {:<12}",
+        "ID", "Name", "Active", "Total", "Limits");
+    outln!("--------------------------------------------------------------");
+
+    for i in 0..count {
+        let job = &snapshots[i];
+        let name_len = job.name_len as usize;
+        let name = core::str::from_utf8(&job.name[..name_len]).unwrap_or("<invalid>");
+
+        outln!("{:<6} {:<24} {:<8} {:<10} {:<12}",
+            job.job_id,
+            name,
+            job.active_processes,
+            job.total_processes,
+            job_limit_flags_name(job.limit_flags)
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} jobs", count);
+}
+
+// ============================================================================
+// CID Table Viewer
+// ============================================================================
+
+/// CID table viewer command
+pub fn cmd_cid(args: &[&str]) {
+    if args.is_empty() {
+        show_cid_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_cid_stats();
+    } else if eq_ignore_ascii_case(subcmd, "procs") || eq_ignore_ascii_case(subcmd, "processes") {
+        show_cid_processes();
+    } else if eq_ignore_ascii_case(subcmd, "threads") {
+        show_cid_threads();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("cid - Client ID Table Viewer");
+        outln!("");
+        outln!("Usage: cid [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats    - Show CID table statistics (default)");
+        outln!("  procs    - List process CID entries");
+        outln!("  threads  - List thread CID entries");
+        outln!("");
+        outln!("CID tables track process and thread IDs.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'cid help' for usage information");
+    }
+}
+
+fn show_cid_stats() {
+    use crate::ps::get_cid_stats;
+
+    let stats = get_cid_stats();
+
+    outln!("CID Table Statistics");
+    outln!("====================");
+    outln!("");
+    outln!("Process Table:");
+    outln!("  Max Entries:    {}", stats.max_processes);
+    outln!("  Active:         {}", stats.active_processes);
+    outln!("  Free Slots:     {}", stats.free_process_slots);
+    outln!("  Next PID Hint:  {}", stats.next_pid_hint);
+    outln!("");
+    outln!("Thread Table:");
+    outln!("  Max Entries:    {}", stats.max_threads);
+    outln!("  Active:         {}", stats.active_threads);
+    outln!("  Free Slots:     {}", stats.free_thread_slots);
+    outln!("  Next TID Hint:  {}", stats.next_tid_hint);
+}
+
+fn show_cid_processes() {
+    use crate::ps::get_process_cid_snapshots;
+
+    outln!("Process CID Entries");
+    outln!("===================");
+    outln!("");
+
+    let (snapshots, count) = get_process_cid_snapshots(32);
+
+    if count == 0 {
+        outln!("No processes registered");
+        return;
+    }
+
+    outln!("{:<8} {:<18}", "PID", "EPROCESS");
+    outln!("---------------------------");
+
+    for i in 0..count {
+        let entry = &snapshots[i];
+        outln!("{:<8} 0x{:016X}", entry.id, entry.object_addr);
+    }
+
+    outln!("");
+    outln!("Total: {} processes", count);
+}
+
+fn show_cid_threads() {
+    use crate::ps::get_thread_cid_snapshots;
+
+    outln!("Thread CID Entries");
+    outln!("==================");
+    outln!("");
+
+    let (snapshots, count) = get_thread_cid_snapshots(32);
+
+    if count == 0 {
+        outln!("No threads registered");
+        return;
+    }
+
+    outln!("{:<8} {:<18}", "TID", "ETHREAD");
+    outln!("---------------------------");
+
+    for i in 0..count {
+        let entry = &snapshots[i];
+        outln!("{:<8} 0x{:016X}", entry.id, entry.object_addr);
+    }
+
+    outln!("");
+    outln!("Total: {} threads", count);
+}
