@@ -10874,8 +10874,10 @@ fn sys_set_information_thread(
             crate::serial_println!("[SYSCALL] SetInformationThread: alignment fault fixup = {}",
                 enable != 0);
 
-            // TODO: Store alignment fault fixup flag
-            // This affects how unaligned memory accesses are handled
+            // Store alignment fault fixup flag in thread structure
+            if !ethread.is_null() {
+                unsafe { (*ethread).alignment_fault_fixup = enable != 0; }
+            }
 
             STATUS_SUCCESS
         }

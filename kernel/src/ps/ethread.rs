@@ -145,6 +145,8 @@ pub struct EThread {
     pub break_on_termination: bool,
     /// Priority boost disabled
     pub priority_boost_disabled: bool,
+    /// Enable alignment fault fixup (handles unaligned access)
+    pub alignment_fault_fixup: bool,
 }
 
 // Safety: EThread uses locks and atomics
@@ -192,6 +194,7 @@ impl EThread {
             hide_from_debugger: false,
             break_on_termination: false,
             priority_boost_disabled: false,
+            alignment_fault_fixup: true, // Default enabled
         }
     }
 
