@@ -146,10 +146,11 @@ const HISTORY_SIZE: usize = 32;
 
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
+    "acpi",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpuinfo",
     "debug", "del", "dir", "dump", "echo", "erase", "ex", "exit",
     "hal", "help", "history",
-    "io",
+    "int", "io",
     "ke",
     "ldr", "ls",
     "md", "mem", "memory", "mkdir", "mm", "mv",
@@ -1096,6 +1097,12 @@ impl Shell {
         // PCI device scanner
         } else if eq_ignore_case(cmd, "pci") {
             commands::cmd_pci(&args[1..argc]);
+        // ACPI table scanner
+        } else if eq_ignore_case(cmd, "acpi") {
+            commands::cmd_acpi(&args[1..argc]);
+        // Interrupt testing
+        } else if eq_ignore_case(cmd, "int") {
+            commands::cmd_int(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

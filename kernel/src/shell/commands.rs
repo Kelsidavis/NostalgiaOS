@@ -99,6 +99,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("");
         outln!("  Hardware/Power:");
         outln!("    cpuinfo        Show CPU and ACPI information");
+        outln!("    acpi [tables]  Scan ACPI tables (RSDP, RSDT/XSDT)");
         outln!("    pci [scan]     Scan PCI devices");
         outln!("    power          Show power management status");
         outln!("    shutdown       Shut down the system");
@@ -110,6 +111,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("");
         outln!("  Debugging:");
         outln!("    debug <cmd>    Kernel debug (bugcheck, break, regs)");
+        outln!("    int <type>     Trigger interrupts (div0, break, gpf)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -4903,5 +4905,340 @@ fn read_pci_device(bus: u8, device: u8, function: u8) {
                 }
             }
         }
+    }
+}
+
+// ============================================================================
+// ACPI Command
+// ============================================================================
+
+/// ACPI table scanner
+pub fn cmd_acpi(args: &[&str]) {
+    if args.is_empty() || eq_ignore_case(args[0], "tables") {
+        scan_acpi_tables();
+    } else if eq_ignore_case(args[0], "rsdp") {
+        find_rsdp();
+    } else if eq_ignore_case(args[0], "help") {
+        outln!("ACPI Table Scanner");
+        outln!("");
+        outln!("Usage: acpi [command]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  tables       List ACPI tables (default)");
+        outln!("  rsdp         Find and display RSDP");
+        outln!("  help         Show this help");
+    } else {
+        outln!("Unknown acpi command: {}", args[0]);
+    }
+}
+
+/// Find RSDP in memory
+fn find_rsdp() {
+    outln!("Searching for ACPI RSDP...");
+    outln!("");
+
+    // Search in EBDA (Extended BIOS Data Area) - first KB at 0x40E
+    // and in BIOS ROM area 0xE0000 - 0xFFFFF
+
+    let search_regions: [(u64, u64); 2] = [
+        (0x000E0000, 0x00100000),  // BIOS ROM area
+        (0x00080000, 0x000A0000),  // Additional search area
+    ];
+
+    for (start, end) in search_regions {
+        let mut addr = start;
+        while addr < end {
+            let ptr = addr as *const u8;
+
+            // Check for "RSD PTR " signature
+            let sig = unsafe {
+                [
+                    *ptr, *ptr.add(1), *ptr.add(2), *ptr.add(3),
+                    *ptr.add(4), *ptr.add(5), *ptr.add(6), *ptr.add(7),
+                ]
+            };
+
+            if &sig == b"RSD PTR " {
+                outln!("Found RSDP at {:#x}", addr);
+                outln!("");
+
+                // Read RSDP fields
+                let revision = unsafe { *ptr.add(15) };
+                let rsdt_addr = unsafe { *(ptr.add(16) as *const u32) };
+
+                outln!("  Signature:  RSD PTR ");
+                outln!("  Revision:   {} (ACPI {})", revision, if revision == 0 { "1.0" } else { "2.0+" });
+                outln!("  RSDT Addr:  {:#010x}", rsdt_addr);
+
+                if revision >= 2 {
+                    // XSDT for ACPI 2.0+
+                    let xsdt_addr = unsafe { *(ptr.add(24) as *const u64) };
+                    outln!("  XSDT Addr:  {:#018x}", xsdt_addr);
+                }
+
+                return;
+            }
+
+            addr += 16; // RSDP is 16-byte aligned
+        }
+    }
+
+    outln!("RSDP not found in standard locations");
+    outln!("(May be provided via UEFI on modern systems)");
+}
+
+/// Scan ACPI tables
+fn scan_acpi_tables() {
+    outln!("ACPI Table Scan");
+    outln!("");
+    outln!("Note: Full ACPI parsing requires RSDP location from bootloader.");
+    outln!("");
+
+    // Try to find RSDP first
+    let search_regions: [(u64, u64); 2] = [
+        (0x000E0000, 0x00100000),
+        (0x00080000, 0x000A0000),
+    ];
+
+    let mut rsdp_addr: Option<u64> = None;
+
+    for (start, end) in search_regions {
+        let mut addr = start;
+        while addr < end {
+            let ptr = addr as *const u8;
+            let sig = unsafe {
+                [
+                    *ptr, *ptr.add(1), *ptr.add(2), *ptr.add(3),
+                    *ptr.add(4), *ptr.add(5), *ptr.add(6), *ptr.add(7),
+                ]
+            };
+
+            if &sig == b"RSD PTR " {
+                rsdp_addr = Some(addr);
+                break;
+            }
+            addr += 16;
+        }
+        if rsdp_addr.is_some() {
+            break;
+        }
+    }
+
+    match rsdp_addr {
+        Some(addr) => {
+            outln!("RSDP found at {:#x}", addr);
+
+            let ptr = addr as *const u8;
+            let revision = unsafe { *ptr.add(15) };
+            let rsdt_addr = unsafe { *(ptr.add(16) as *const u32) } as u64;
+
+            if revision >= 2 {
+                let xsdt_addr = unsafe { *(ptr.add(24) as *const u64) };
+                if xsdt_addr != 0 {
+                    outln!("Using XSDT at {:#x}", xsdt_addr);
+                    list_acpi_tables_from_xsdt(xsdt_addr);
+                    return;
+                }
+            }
+
+            if rsdt_addr != 0 {
+                outln!("Using RSDT at {:#x}", rsdt_addr);
+                list_acpi_tables_from_rsdt(rsdt_addr);
+            }
+        }
+        None => {
+            outln!("RSDP not found in legacy BIOS areas.");
+            outln!("On UEFI systems, RSDP is provided through EFI configuration table.");
+        }
+    }
+}
+
+/// List tables from RSDT
+fn list_acpi_tables_from_rsdt(rsdt_addr: u64) {
+    let ptr = rsdt_addr as *const u8;
+
+    // Read header
+    let sig = unsafe {
+        [*ptr, *ptr.add(1), *ptr.add(2), *ptr.add(3)]
+    };
+    let length = unsafe { *(ptr.add(4) as *const u32) };
+
+    if &sig != b"RSDT" {
+        outln!("Invalid RSDT signature");
+        return;
+    }
+
+    let header_size = 36u32; // Standard ACPI table header
+    let entry_count = (length - header_size) / 4;
+
+    outln!("");
+    outln!("RSDT contains {} table entries:", entry_count);
+    outln!("");
+    outln!("  Signature  Address");
+    outln!("  ---------  -------");
+
+    let entries_ptr = unsafe { ptr.add(header_size as usize) as *const u32 };
+
+    for i in 0..entry_count {
+        let table_addr = unsafe { *entries_ptr.add(i as usize) } as u64;
+        let table_ptr = table_addr as *const u8;
+
+        let table_sig = unsafe {
+            [*table_ptr, *table_ptr.add(1), *table_ptr.add(2), *table_ptr.add(3)]
+        };
+        let sig_str = core::str::from_utf8(&table_sig).unwrap_or("????");
+
+        outln!("  {}       {:#010x}", sig_str, table_addr);
+    }
+}
+
+/// List tables from XSDT
+fn list_acpi_tables_from_xsdt(xsdt_addr: u64) {
+    let ptr = xsdt_addr as *const u8;
+
+    // Read header
+    let sig = unsafe {
+        [*ptr, *ptr.add(1), *ptr.add(2), *ptr.add(3)]
+    };
+    let length = unsafe { *(ptr.add(4) as *const u32) };
+
+    if &sig != b"XSDT" {
+        outln!("Invalid XSDT signature");
+        return;
+    }
+
+    let header_size = 36u32;
+    let entry_count = (length - header_size) / 8;
+
+    outln!("");
+    outln!("XSDT contains {} table entries:", entry_count);
+    outln!("");
+    outln!("  Signature  Address");
+    outln!("  ---------  -------");
+
+    let entries_ptr = unsafe { ptr.add(header_size as usize) as *const u64 };
+
+    for i in 0..entry_count {
+        let table_addr = unsafe { *entries_ptr.add(i as usize) };
+        let table_ptr = table_addr as *const u8;
+
+        let table_sig = unsafe {
+            [*table_ptr, *table_ptr.add(1), *table_ptr.add(2), *table_ptr.add(3)]
+        };
+        let sig_str = core::str::from_utf8(&table_sig).unwrap_or("????");
+
+        outln!("  {}       {:#018x}", sig_str, table_addr);
+    }
+}
+
+// ============================================================================
+// Interrupt Test Command
+// ============================================================================
+
+/// Interrupt testing command
+pub fn cmd_int(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Interrupt Testing");
+        outln!("");
+        outln!("Usage: int <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  div0           Trigger divide by zero (INT 0)");
+        outln!("  break          Trigger breakpoint (INT 3)");
+        outln!("  invalid        Trigger invalid opcode (INT 6)");
+        outln!("  gpf            Trigger general protection fault");
+        outln!("  soft <n>       Trigger software interrupt n (0-5, 0x20-21, 0x80)");
+        outln!("  nmi            Trigger NMI (dangerous!)");
+        outln!("");
+        outln!("WARNING: Some interrupts may crash the system!");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "div0") {
+        outln!("Triggering divide by zero...");
+        unsafe {
+            core::arch::asm!(
+                "xor edx, edx",
+                "xor eax, eax",
+                "xor ecx, ecx",
+                "div ecx",
+                options(nostack, nomem),
+            );
+        }
+        outln!("Returned from divide by zero handler");
+    } else if eq_ignore_case(cmd, "break") {
+        outln!("Triggering INT 3 (breakpoint)...");
+        unsafe {
+            core::arch::asm!("int3");
+        }
+        outln!("Returned from breakpoint handler");
+    } else if eq_ignore_case(cmd, "overflow") {
+        // INTO instruction is not available in 64-bit mode
+        outln!("INTO (overflow) instruction not available in 64-bit mode");
+        outln!("Use 'int soft 4' to trigger INT 4 instead");
+    } else if eq_ignore_case(cmd, "invalid") {
+        outln!("Triggering invalid opcode...");
+        unsafe {
+            core::arch::asm!("ud2");
+        }
+        outln!("Returned from invalid opcode handler");
+    } else if eq_ignore_case(cmd, "soft") {
+        if args.len() < 2 {
+            outln!("Usage: int soft <vector>");
+            outln!("  vector: interrupt number (0-255)");
+            return;
+        }
+
+        let vector = args[1].parse::<u8>().unwrap_or(0);
+        outln!("Triggering INT {}...", vector);
+
+        // We can only do this for a few specific vectors with inline asm
+        match vector {
+            0 => unsafe { core::arch::asm!("int 0x00") },
+            1 => unsafe { core::arch::asm!("int 0x01") },
+            2 => unsafe { core::arch::asm!("int 0x02") },
+            3 => unsafe { core::arch::asm!("int 0x03") },
+            0x20 => unsafe { core::arch::asm!("int 0x20") },
+            0x21 => unsafe { core::arch::asm!("int 0x21") },
+            0x80 => unsafe { core::arch::asm!("int 0x80") },
+            _ => {
+                outln!("Only vectors 0-3, 0x20, 0x21, 0x80 supported in this command");
+                return;
+            }
+        }
+
+        outln!("Returned from INT {} handler", vector);
+    } else if eq_ignore_case(cmd, "gpf") {
+        outln!("Triggering General Protection Fault...");
+        outln!("WARNING: This will likely crash!");
+
+        if args.len() > 1 && eq_ignore_case(args[1], "confirm") {
+            unsafe {
+                // Try to write to kernel code segment (should cause GPF)
+                core::arch::asm!(
+                    "mov ax, 0x08",  // Kernel code segment
+                    "mov ds, ax",    // Try to load into data segment
+                    options(nostack),
+                );
+            }
+        } else {
+            outln!("Use 'int gpf confirm' to actually trigger");
+        }
+    } else if eq_ignore_case(cmd, "nmi") {
+        outln!("Triggering NMI (Non-Maskable Interrupt)...");
+        outln!("WARNING: This is dangerous!");
+
+        if args.len() > 1 && eq_ignore_case(args[1], "confirm") {
+            unsafe {
+                core::arch::asm!("int 0x02");
+            }
+            outln!("Returned from NMI handler");
+        } else {
+            outln!("Use 'int nmi confirm' to actually trigger");
+        }
+    } else {
+        outln!("Unknown int command: {}", cmd);
     }
 }
