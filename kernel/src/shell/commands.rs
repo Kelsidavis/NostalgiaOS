@@ -2384,6 +2384,118 @@ pub fn cmd_dump(args: &[&str]) {
 }
 
 // ============================================================================
+// Loader (LDR) Command
+// ============================================================================
+
+/// Loader command - show loader information and load executables
+pub fn cmd_ldr(args: &[&str]) {
+    use crate::ldr;
+
+    if args.is_empty() {
+        outln!("Loader (LDR) Commands");
+        outln!("");
+        outln!("Usage: ldr <command> [args]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  info               Show loader status");
+        outln!("  modules            List loaded modules");
+        outln!("  load <addr>        Load PE executable at address");
+        outln!("  parse <addr>       Parse PE at address (don't load)");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "info") {
+        outln!("Loader Information:");
+        outln!("");
+        outln!("  Subsystem:  Active");
+        outln!("  Features:   PE32/PE32+ parsing");
+        outln!("              Section copying");
+        outln!("              Base relocations");
+        outln!("              Import resolution (basic)");
+        outln!("              Export lookup");
+        outln!("");
+        outln!("Note: Full user-mode loading requires user page tables.");
+    } else if eq_ignore_case(cmd, "modules") {
+        outln!("Loaded Modules:");
+        outln!("");
+        // In a full implementation, we'd iterate the PEB's loader data
+        outln!("  (Module tracking not yet implemented)");
+        outln!("");
+        outln!("Hint: Use 'ps' to see processes and 'pe info <addr>' to analyze PEs.");
+    } else if eq_ignore_case(cmd, "load") {
+        if args.len() < 2 {
+            outln!("Usage: ldr load <address>");
+            outln!("");
+            outln!("Loads a PE executable from the given memory address.");
+            outln!("Address should point to a valid PE file (e.g., from RAM disk).");
+            return;
+        }
+
+        let addr = parse_hex_address(args[1]);
+        if addr == 0 {
+            outln!("Invalid address: {}", args[1]);
+            return;
+        }
+
+        outln!("Loading PE from {:#x}...", addr);
+        outln!("");
+
+        unsafe {
+            // First validate it's a PE
+            let base = addr as *const u8;
+            match ldr::parse_pe(base) {
+                Ok(info) => {
+                    outln!("PE validated:");
+                    outln!("  Type:    {}", if info.is_64bit { "PE32+" } else { "PE32" });
+                    outln!("  Size:    {:#x}", info.size_of_image);
+                    outln!("  Entry:   {:#x}", info.entry_point_rva);
+                    outln!("");
+
+                    // Try to load it
+                    match ldr::load_executable(base, info.size_of_image as usize, b"loaded.exe") {
+                        Ok(result) => {
+                            outln!("Loaded successfully!");
+                            outln!("  Process: PID {}", (*result.process).process_id());
+                            outln!("  Thread:  TID {}", (*result.thread).thread_id());
+                            outln!("  Base:    {:#x}", result.image.base);
+                            outln!("  Entry:   {:#x}", result.image.entry_point);
+                            outln!("");
+                            outln!("Use 'ps start {}' to start the thread.", (*result.thread).thread_id());
+                        }
+                        Err(e) => {
+                            outln!("Load failed: {:?}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    outln!("Invalid PE: {:?}", e);
+                }
+            }
+        }
+    } else if eq_ignore_case(cmd, "parse") {
+        if args.len() < 2 {
+            outln!("Usage: ldr parse <address>");
+            return;
+        }
+
+        let addr = parse_hex_address(args[1]);
+        if addr == 0 {
+            outln!("Invalid address: {}", args[1]);
+            return;
+        }
+
+        // Redirect to pe info command
+        outln!("Parsing PE at {:#x}...", addr);
+        outln!("");
+        show_pe_info(addr, true);
+    } else {
+        outln!("Unknown ldr command: {}", cmd);
+    }
+}
+
+// ============================================================================
 // User-Mode Test Command
 // ============================================================================
 

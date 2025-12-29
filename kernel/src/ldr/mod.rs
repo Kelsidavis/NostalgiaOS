@@ -727,6 +727,191 @@ pub unsafe fn copy_sections(
 }
 
 // ============================================================================
+// Process Image Loading
+// ============================================================================
+
+/// Load result containing process and thread handles
+#[derive(Debug)]
+pub struct LoadResult {
+    /// Pointer to created EPROCESS
+    pub process: *mut crate::ps::EProcess,
+    /// Pointer to initial ETHREAD
+    pub thread: *mut crate::ps::EThread,
+    /// Loaded image information
+    pub image: LoadedImage,
+}
+
+/// Load a PE executable and create a user-mode process
+///
+/// This is the main entry point for loading executables. It:
+/// 1. Parses the PE headers
+/// 2. Allocates memory for the image
+/// 3. Copies sections and processes relocations
+/// 4. Creates the process and initial thread
+///
+/// Note: In a full implementation, this would also:
+/// - Set up user-mode page tables
+/// - Initialize PEB/TEB
+/// - Load required DLLs
+///
+/// # Arguments
+/// * `file_base` - Pointer to PE file in memory (e.g., loaded from disk)
+/// * `file_size` - Size of the PE file
+/// * `name` - Process name
+///
+/// # Safety
+/// - file_base must point to a valid PE file
+/// - The caller must ensure the file is safe to execute
+pub unsafe fn load_executable(
+    file_base: *const u8,
+    _file_size: usize,
+    name: &[u8],
+) -> Result<LoadResult, PeError> {
+    // Parse PE headers
+    let pe_info = parse_pe(file_base)?;
+
+    // Validate it's an executable (not a DLL)
+    if pe_info.is_dll {
+        crate::serial_println!("[LDR] Error: Cannot load DLL as executable");
+        return Err(PeError::InvalidOptionalHeader);
+    }
+
+    // For now, we need the image to be loadable at its preferred base
+    // or be relocatable
+    let image_size = pe_info.size_of_image as usize;
+    let preferred_base = pe_info.image_base;
+
+    crate::serial_println!("[LDR] Loading executable:");
+    crate::serial_println!("[LDR]   Preferred base: {:#x}", preferred_base);
+    crate::serial_println!("[LDR]   Image size:     {:#x}", image_size);
+    crate::serial_println!("[LDR]   Entry point:    {:#x}", pe_info.entry_point_rva);
+
+    // In a full implementation, we would:
+    // 1. Create user-mode page tables
+    // 2. Allocate pages at the preferred base (or find alternative)
+    // 3. Map the pages with appropriate permissions
+
+    // For now, we'll use a static buffer for demonstration
+    // This should be replaced with proper memory allocation
+    static mut IMAGE_BUFFER: [u8; 0x100000] = [0; 0x100000]; // 1MB
+    let load_base = IMAGE_BUFFER.as_mut_ptr();
+
+    if image_size > IMAGE_BUFFER.len() {
+        crate::serial_println!("[LDR] Error: Image too large ({} > {})", image_size, IMAGE_BUFFER.len());
+        return Err(PeError::ImageTooLarge);
+    }
+
+    // Copy sections to the load buffer
+    copy_sections(file_base, load_base, &pe_info)?;
+
+    // Process relocations if loaded at different address
+    let actual_base = load_base as u64;
+    if actual_base != preferred_base {
+        if !pe_info.has_relocations {
+            crate::serial_println!("[LDR] Error: Image requires relocation but has none");
+            return Err(PeError::NotRelocatable);
+        }
+        crate::serial_println!("[LDR] Relocating from {:#x} to {:#x}", preferred_base, actual_base);
+        process_relocations(load_base, preferred_base, actual_base)?;
+    }
+
+    // Calculate entry point
+    let entry_point = actual_base + pe_info.entry_point_rva as u64;
+
+    // For now, create a kernel-mode representation of the process
+    // In a full implementation, we'd create user-mode page tables
+    let system_process = crate::ps::get_system_process();
+    let process = crate::ps::ps_create_process(system_process, name, 8);
+    if process.is_null() {
+        return Err(PeError::OutOfMemory);
+    }
+
+    // Set up process image information
+    // Note: This uses kernel addresses for now
+    (*process).section_object = file_base as *mut u8;
+
+    // Calculate user stack address (would be in user space in full implementation)
+    let stack_size = pe_info.stack_commit.max(0x10000) as usize; // At least 64KB
+    static mut STACK_BUFFER: [u8; 0x20000] = [0; 0x20000]; // 128KB stack
+    let user_stack = STACK_BUFFER.as_ptr().add(STACK_BUFFER.len()) as u64;
+
+    crate::serial_println!("[LDR] Creating initial thread:");
+    crate::serial_println!("[LDR]   Entry point: {:#x}", entry_point);
+    crate::serial_println!("[LDR]   Stack:       {:#x}", user_stack);
+
+    // Create user-mode thread
+    let thread = crate::ps::ps_create_user_thread(
+        process,
+        entry_point,
+        user_stack,
+        8, // Normal priority
+    );
+
+    if thread.is_null() {
+        // TODO: Clean up process
+        return Err(PeError::OutOfMemory);
+    }
+
+    let loaded = LoadedImage {
+        base: actual_base,
+        size: pe_info.size_of_image,
+        entry_point,
+        pe_info,
+    };
+
+    crate::serial_println!("[LDR] Executable loaded successfully");
+
+    Ok(LoadResult {
+        process,
+        thread,
+        image: loaded,
+    })
+}
+
+/// Load a DLL into an existing process
+///
+/// # Arguments
+/// * `process` - Target process
+/// * `file_base` - Pointer to DLL file in memory
+/// * `file_size` - Size of the DLL file
+///
+/// # Safety
+/// - file_base must point to a valid PE DLL
+/// - process must be a valid process pointer
+pub unsafe fn load_dll(
+    _process: *mut crate::ps::EProcess,
+    file_base: *const u8,
+    _file_size: usize,
+) -> Result<LoadedImage, PeError> {
+    // Parse PE headers
+    let pe_info = parse_pe(file_base)?;
+
+    // Validate it's a DLL
+    if !pe_info.is_dll {
+        crate::serial_println!("[LDR] Error: Not a DLL");
+        return Err(PeError::InvalidOptionalHeader);
+    }
+
+    let image_size = pe_info.size_of_image as usize;
+    let preferred_base = pe_info.image_base;
+
+    crate::serial_println!("[LDR] Loading DLL:");
+    crate::serial_println!("[LDR]   Preferred base: {:#x}", preferred_base);
+    crate::serial_println!("[LDR]   Image size:     {:#x}", image_size);
+
+    // In a full implementation:
+    // 1. Find available address space in process
+    // 2. Allocate and map pages
+    // 3. Copy sections
+    // 4. Process relocations
+    // 5. Process imports
+    // 6. Call DllMain with DLL_PROCESS_ATTACH
+
+    // For now, return error as full DLL loading isn't implemented
+    Err(PeError::OutOfMemory)
+}
+
+// ============================================================================
 // Initialization
 // ============================================================================
 

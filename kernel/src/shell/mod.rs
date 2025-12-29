@@ -149,7 +149,7 @@ const COMMANDS: &[&str] = &[
     "cat", "cd", "clear", "cls", "copy", "cp",
     "del", "dir", "dump", "echo", "erase", "exit",
     "help", "history",
-    "ls",
+    "ldr", "ls",
     "md", "mem", "memory", "mkdir", "mv",
     "net",
     "pe", "ps", "pwd",
@@ -1058,6 +1058,8 @@ impl Shell {
             commands::cmd_pe(&args[1..argc]);
         } else if eq_ignore_case(cmd, "dump") {
             commands::cmd_dump(&args[1..argc]);
+        } else if eq_ignore_case(cmd, "ldr") {
+            commands::cmd_ldr(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
