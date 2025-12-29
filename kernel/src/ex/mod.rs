@@ -24,7 +24,9 @@
 
 pub mod callback;
 pub mod fast_mutex;
+pub mod keyed_event;
 pub mod lookaside;
+pub mod luid;
 pub mod pushlock;
 pub mod resource;
 pub mod rundown;
@@ -35,7 +37,9 @@ pub mod worker;
 // Re-exports for convenience
 pub use callback::*;
 pub use fast_mutex::*;
+pub use keyed_event::*;
 pub use lookaside::*;
+pub use luid::*;
 pub use pushlock::*;
 pub use resource::*;
 pub use rundown::*;

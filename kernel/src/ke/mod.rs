@@ -64,6 +64,9 @@ pub mod bugcheck;
 // Device queue
 pub mod device_queue;
 
+// Profile object
+pub mod profile;
+
 // Re-export key types
 pub use list::ListEntry;
 pub use thread::{KThread, ThreadState};
@@ -153,4 +156,12 @@ pub use device_queue::{
     ke_initialize_device_queue, ke_insert_device_queue,
     ke_insert_by_key_device_queue, ke_remove_device_queue,
     ke_remove_by_key_device_queue, ke_remove_entry_device_queue,
+};
+
+// Re-export profile types
+pub use profile::{
+    KProfile, ProfileSource, PROFILE_OBJECT,
+    ke_initialize_profile, ke_start_profile, ke_stop_profile,
+    ke_query_interval_profile, ke_set_interval_profile,
+    DEFAULT_PROFILE_INTERVAL, MINIMUM_PROFILE_INTERVAL,
 };
