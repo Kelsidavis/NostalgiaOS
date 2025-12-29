@@ -149,7 +149,7 @@ const COMMANDS: &[&str] = &[
     "acpi", "apic",
     "bt",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
-    "debug", "del", "desc", "descriptor", "dir", "dump", "echo", "erase", "ex", "exit",
+    "debug", "del", "desc", "descriptor", "dir", "dmi", "dump", "echo", "erase", "ex", "exit",
     "hal", "help", "history", "hpet",
     "int", "io",
     "ke",
@@ -160,7 +160,7 @@ const COMMANDS: &[&str] = &[
     "pagetable", "pci", "pe", "port", "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
-    "sc", "se", "services", "stack", "suspend", "sysinfo",
+    "sc", "se", "services", "smbios", "stack", "suspend", "sysinfo",
     "tasks", "time", "timer", "touch", "type",
     "usertest",
     "veh", "ver", "version",
@@ -1134,6 +1134,9 @@ impl Shell {
         // HPET viewer
         } else if eq_ignore_case(cmd, "hpet") {
             commands::cmd_hpet(&args[1..argc]);
+        // SMBIOS/DMI viewer
+        } else if eq_ignore_case(cmd, "smbios") || eq_ignore_case(cmd, "dmi") {
+            commands::cmd_smbios(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

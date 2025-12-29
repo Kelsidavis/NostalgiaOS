@@ -122,6 +122,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    desc[riptor]   GDT/IDT viewer (gdt, idt, tss)");
         outln!("    stack (bt)     Stack trace/backtrace (trace, dump)");
         outln!("    hpet           HPET timer viewer (status, timers)");
+        outln!("    smbios (dmi)   SMBIOS/DMI system info (bios, cpu, mem)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -8758,5 +8759,632 @@ fn show_hpet_counter(base: u64) {
             outln!("Counter frequency: ~{} MHz", freq_mhz);
             outln!("Period: {} femtoseconds", period_fs);
         }
+    }
+}
+
+// ============================================================================
+// SMBIOS/DMI Viewer Command
+// ============================================================================
+
+/// SMBIOS/DMI viewer for system information
+pub fn cmd_smbios(args: &[&str]) {
+    if args.is_empty() {
+        show_smbios_overview();
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "help") {
+        show_smbios_help();
+    } else if eq_ignore_case(cmd, "status") || eq_ignore_case(cmd, "info") {
+        show_smbios_overview();
+    } else if eq_ignore_case(cmd, "bios") {
+        show_smbios_bios();
+    } else if eq_ignore_case(cmd, "system") {
+        show_smbios_system();
+    } else if eq_ignore_case(cmd, "cpu") || eq_ignore_case(cmd, "processor") {
+        show_smbios_processor();
+    } else if eq_ignore_case(cmd, "memory") || eq_ignore_case(cmd, "mem") {
+        show_smbios_memory();
+    } else if eq_ignore_case(cmd, "all") {
+        show_smbios_all();
+    } else if eq_ignore_case(cmd, "raw") {
+        if args.len() > 1 {
+            if let Some(type_num) = parse_number(args[1]) {
+                show_smbios_type(type_num as u8);
+            } else {
+                outln!("Invalid type number: {}", args[1]);
+            }
+        } else {
+            outln!("Usage: smbios raw <type>");
+        }
+    } else {
+        outln!("Unknown smbios command: {}", cmd);
+        show_smbios_help();
+    }
+}
+
+fn show_smbios_help() {
+    outln!("SMBIOS/DMI Viewer");
+    outln!("");
+    outln!("Usage: smbios [command]");
+    outln!("");
+    outln!("Commands:");
+    outln!("  info         Show SMBIOS entry point (default)");
+    outln!("  bios         BIOS information (Type 0)");
+    outln!("  system       System information (Type 1)");
+    outln!("  cpu          Processor information (Type 4)");
+    outln!("  memory       Memory information (Type 16/17)");
+    outln!("  all          List all SMBIOS structures");
+    outln!("  raw <type>   Show raw data for specific type");
+}
+
+/// SMBIOS Entry Point structure (32-bit)
+#[repr(C, packed)]
+struct SmbiosEntryPoint {
+    anchor: [u8; 4],       // "_SM_"
+    checksum: u8,
+    length: u8,
+    major_version: u8,
+    minor_version: u8,
+    max_struct_size: u16,
+    revision: u8,
+    formatted_area: [u8; 5],
+    intermediate_anchor: [u8; 5], // "_DMI_"
+    intermediate_checksum: u8,
+    table_length: u16,
+    table_address: u32,
+    num_structures: u16,
+    bcd_revision: u8,
+}
+
+/// SMBIOS 3.0 Entry Point (64-bit)
+#[repr(C, packed)]
+struct Smbios3EntryPoint {
+    anchor: [u8; 5],       // "_SM3_"
+    checksum: u8,
+    length: u8,
+    major_version: u8,
+    minor_version: u8,
+    docrev: u8,
+    revision: u8,
+    reserved: u8,
+    table_max_size: u32,
+    table_address: u64,
+}
+
+/// SMBIOS structure header
+#[repr(C, packed)]
+struct SmbiosHeader {
+    struct_type: u8,
+    length: u8,
+    handle: u16,
+}
+
+/// Find SMBIOS entry point
+fn find_smbios_entry() -> Option<(u64, u8, u8, u32, u16)> {
+    // Scan for SMBIOS entry in F0000-FFFFF range
+    // In UEFI systems, may need to use EFI System Table instead
+    unsafe {
+        // First try SMBIOS 3.0 (_SM3_)
+        let mut addr = 0xF0000u64;
+        while addr < 0x100000 {
+            let sig = core::ptr::read_unaligned(addr as *const [u8; 5]);
+            if &sig == b"_SM3_" {
+                let entry = addr as *const Smbios3EntryPoint;
+                let major = { (*entry).major_version };
+                let minor = { (*entry).minor_version };
+                let table_addr = { (*entry).table_address };
+                let max_size = { (*entry).table_max_size };
+                return Some((table_addr, major, minor, max_size, 0));
+            }
+            addr += 16;
+        }
+
+        // Try legacy SMBIOS 2.x (_SM_)
+        addr = 0xF0000;
+        while addr < 0x100000 {
+            let sig = core::ptr::read_unaligned(addr as *const [u8; 4]);
+            if &sig == b"_SM_" {
+                let entry = addr as *const SmbiosEntryPoint;
+                let major = { (*entry).major_version };
+                let minor = { (*entry).minor_version };
+                let table_addr = { (*entry).table_address } as u64;
+                let table_len = { (*entry).table_length };
+                let num_structs = { (*entry).num_structures };
+                return Some((table_addr, major, minor, table_len as u32, num_structs));
+            }
+            addr += 16;
+        }
+    }
+    None
+}
+
+fn show_smbios_overview() {
+    outln!("SMBIOS/DMI Information");
+    outln!("");
+
+    match find_smbios_entry() {
+        Some((table_addr, major, minor, size, count)) => {
+            outln!("SMBIOS Version: {}.{}", major, minor);
+            outln!("Table Address:  0x{:08X}", table_addr);
+            outln!("Table Size:     {} bytes", size);
+            if count > 0 {
+                outln!("Structures:     {}", count);
+            }
+            outln!("");
+
+            // Try to show basic info
+            show_smbios_bios();
+        }
+        None => {
+            outln!("SMBIOS entry point not found in F0000-FFFFF range.");
+            outln!("");
+            outln!("Note: On UEFI systems, SMBIOS table address may be");
+            outln!("      provided via EFI Configuration Table.");
+        }
+    }
+}
+
+/// Get string from SMBIOS structure
+unsafe fn smbios_get_string(data_end: *const u8, index: u8) -> &'static str {
+    if index == 0 {
+        return "";
+    }
+
+    let mut ptr = data_end;
+    let mut current = 1u8;
+
+    while current < index {
+        // Skip to next string
+        while *ptr != 0 {
+            ptr = ptr.add(1);
+        }
+        ptr = ptr.add(1);
+
+        // Check for double-null (end of strings)
+        if *ptr == 0 {
+            return "";
+        }
+        current += 1;
+    }
+
+    // Found the string, read it
+    let start = ptr;
+    let mut len = 0;
+    while *ptr.add(len) != 0 && len < 128 {
+        len += 1;
+    }
+
+    core::str::from_utf8_unchecked(core::slice::from_raw_parts(start, len))
+}
+
+fn show_smbios_bios() {
+    if let Some((table_addr, _, _, _, _)) = find_smbios_entry() {
+        unsafe {
+            let mut ptr = table_addr as *const u8;
+
+            // Find Type 0 (BIOS Information)
+            for _ in 0..50 {
+                let header = ptr as *const SmbiosHeader;
+                let struct_type = { (*header).struct_type };
+                let length = { (*header).length };
+
+                if struct_type == 0 && length >= 0x14 {
+                    outln!("BIOS Information (Type 0)");
+                    outln!("");
+
+                    let data = ptr;
+                    let strings = ptr.add(length as usize);
+
+                    let vendor_idx = *data.add(0x04);
+                    let version_idx = *data.add(0x05);
+                    let date_idx = *data.add(0x08);
+
+                    let vendor = smbios_get_string(strings, vendor_idx);
+                    let version = smbios_get_string(strings, version_idx);
+                    let date = smbios_get_string(strings, date_idx);
+
+                    outln!("  Vendor:       {}", if vendor.is_empty() { "N/A" } else { vendor });
+                    outln!("  Version:      {}", if version.is_empty() { "N/A" } else { version });
+                    outln!("  Release Date: {}", if date.is_empty() { "N/A" } else { date });
+
+                    if length >= 0x18 {
+                        let rom_size = *data.add(0x09);
+                        if rom_size != 0xFF {
+                            outln!("  ROM Size:     {} KB", (rom_size as u32 + 1) * 64);
+                        }
+                    }
+                    return;
+                }
+
+                // Move to next structure
+                ptr = ptr.add(length as usize);
+                while !(*ptr == 0 && *ptr.add(1) == 0) {
+                    ptr = ptr.add(1);
+                }
+                ptr = ptr.add(2);
+
+                if struct_type == 127 {
+                    break; // End of table
+                }
+            }
+        }
+        outln!("BIOS information not found");
+    } else {
+        outln!("SMBIOS not available");
+    }
+}
+
+fn show_smbios_system() {
+    if let Some((table_addr, _, _, _, _)) = find_smbios_entry() {
+        unsafe {
+            let mut ptr = table_addr as *const u8;
+
+            for _ in 0..50 {
+                let header = ptr as *const SmbiosHeader;
+                let struct_type = { (*header).struct_type };
+                let length = { (*header).length };
+
+                if struct_type == 1 && length >= 0x08 {
+                    outln!("System Information (Type 1)");
+                    outln!("");
+
+                    let data = ptr;
+                    let strings = ptr.add(length as usize);
+
+                    let manufacturer_idx = *data.add(0x04);
+                    let product_idx = *data.add(0x05);
+                    let version_idx = *data.add(0x06);
+                    let serial_idx = *data.add(0x07);
+
+                    let manufacturer = smbios_get_string(strings, manufacturer_idx);
+                    let product = smbios_get_string(strings, product_idx);
+                    let version = smbios_get_string(strings, version_idx);
+                    let serial = smbios_get_string(strings, serial_idx);
+
+                    outln!("  Manufacturer: {}", if manufacturer.is_empty() { "N/A" } else { manufacturer });
+                    outln!("  Product:      {}", if product.is_empty() { "N/A" } else { product });
+                    outln!("  Version:      {}", if version.is_empty() { "N/A" } else { version });
+                    outln!("  Serial:       {}", if serial.is_empty() { "N/A" } else { serial });
+
+                    if length >= 0x19 {
+                        // UUID at offset 0x08 (16 bytes)
+                        out!("  UUID:         ");
+                        for i in 0..16 {
+                            out!("{:02X}", *data.add(0x08 + i));
+                            if i == 3 || i == 5 || i == 7 || i == 9 {
+                                out!("-");
+                            }
+                        }
+                        outln!("");
+                    }
+                    return;
+                }
+
+                ptr = ptr.add(length as usize);
+                while !(*ptr == 0 && *ptr.add(1) == 0) {
+                    ptr = ptr.add(1);
+                }
+                ptr = ptr.add(2);
+
+                if struct_type == 127 {
+                    break;
+                }
+            }
+        }
+        outln!("System information not found");
+    } else {
+        outln!("SMBIOS not available");
+    }
+}
+
+fn show_smbios_processor() {
+    if let Some((table_addr, _, _, _, _)) = find_smbios_entry() {
+        unsafe {
+            let mut ptr = table_addr as *const u8;
+            let mut proc_count = 0;
+
+            for _ in 0..100 {
+                let header = ptr as *const SmbiosHeader;
+                let struct_type = { (*header).struct_type };
+                let length = { (*header).length };
+
+                if struct_type == 4 && length >= 0x1A {
+                    if proc_count == 0 {
+                        outln!("Processor Information (Type 4)");
+                        outln!("");
+                    }
+                    proc_count += 1;
+
+                    let data = ptr;
+                    let strings = ptr.add(length as usize);
+
+                    let socket_idx = *data.add(0x04);
+                    let manufacturer_idx = *data.add(0x07);
+                    let version_idx = *data.add(0x10);
+
+                    let socket = smbios_get_string(strings, socket_idx);
+                    let manufacturer = smbios_get_string(strings, manufacturer_idx);
+                    let version = smbios_get_string(strings, version_idx);
+
+                    let proc_type = *data.add(0x05);
+                    let proc_family = *data.add(0x06);
+                    let max_speed = u16::from_le_bytes([*data.add(0x14), *data.add(0x15)]);
+                    let cur_speed = u16::from_le_bytes([*data.add(0x16), *data.add(0x17)]);
+
+                    outln!("Processor {}:", proc_count);
+                    outln!("  Socket:       {}", if socket.is_empty() { "N/A" } else { socket });
+                    outln!("  Manufacturer: {}", if manufacturer.is_empty() { "N/A" } else { manufacturer });
+                    outln!("  Version:      {}", if version.is_empty() { "N/A" } else { version });
+                    outln!("  Type:         {} ({:#x})", proc_type_name(proc_type), proc_type);
+                    outln!("  Family:       {}", proc_family);
+                    outln!("  Max Speed:    {} MHz", max_speed);
+                    outln!("  Current:      {} MHz", cur_speed);
+
+                    if length >= 0x28 {
+                        let cores = *data.add(0x23);
+                        let enabled = *data.add(0x24);
+                        let threads = *data.add(0x25);
+                        if cores > 0 {
+                            outln!("  Cores:        {} (enabled: {})", cores, enabled);
+                            outln!("  Threads:      {}", threads);
+                        }
+                    }
+                    outln!("");
+                }
+
+                ptr = ptr.add(length as usize);
+                while !(*ptr == 0 && *ptr.add(1) == 0) {
+                    ptr = ptr.add(1);
+                }
+                ptr = ptr.add(2);
+
+                if struct_type == 127 {
+                    break;
+                }
+            }
+
+            if proc_count == 0 {
+                outln!("Processor information not found");
+            }
+        }
+    } else {
+        outln!("SMBIOS not available");
+    }
+}
+
+fn proc_type_name(t: u8) -> &'static str {
+    match t {
+        1 => "Other",
+        2 => "Unknown",
+        3 => "Central Processor",
+        4 => "Math Processor",
+        5 => "DSP Processor",
+        6 => "Video Processor",
+        _ => "Reserved",
+    }
+}
+
+fn show_smbios_memory() {
+    if let Some((table_addr, _, _, _, _)) = find_smbios_entry() {
+        unsafe {
+            let mut ptr = table_addr as *const u8;
+            let mut device_count = 0;
+
+            for _ in 0..200 {
+                let header = ptr as *const SmbiosHeader;
+                let struct_type = { (*header).struct_type };
+                let length = { (*header).length };
+
+                // Type 17: Memory Device
+                if struct_type == 17 && length >= 0x15 {
+                    if device_count == 0 {
+                        outln!("Memory Devices (Type 17)");
+                        outln!("");
+                    }
+
+                    let data = ptr;
+                    let strings = ptr.add(length as usize);
+
+                    let size = u16::from_le_bytes([*data.add(0x0C), *data.add(0x0D)]);
+                    let device_loc_idx = *data.add(0x10);
+                    let bank_loc_idx = *data.add(0x11);
+
+                    if size != 0 && size != 0xFFFF {
+                        device_count += 1;
+                        let device_loc = smbios_get_string(strings, device_loc_idx);
+                        let bank_loc = smbios_get_string(strings, bank_loc_idx);
+
+                        let size_mb = if size & 0x8000 != 0 {
+                            (size & 0x7FFF) as u32 // KB
+                        } else {
+                            (size as u32) * 1024 // MB to KB
+                        };
+
+                        outln!("Device {}:", device_count);
+                        outln!("  Location:     {}", if device_loc.is_empty() { "N/A" } else { device_loc });
+                        outln!("  Bank:         {}", if bank_loc.is_empty() { "N/A" } else { bank_loc });
+                        outln!("  Size:         {} MB", size_mb / 1024);
+
+                        if length >= 0x17 {
+                            let speed = u16::from_le_bytes([*data.add(0x15), *data.add(0x16)]);
+                            if speed > 0 {
+                                outln!("  Speed:        {} MHz", speed);
+                            }
+                        }
+
+                        if length >= 0x1B {
+                            let manufacturer_idx = *data.add(0x17);
+                            let manufacturer = smbios_get_string(strings, manufacturer_idx);
+                            if !manufacturer.is_empty() {
+                                outln!("  Manufacturer: {}", manufacturer);
+                            }
+                        }
+                        outln!("");
+                    }
+                }
+
+                ptr = ptr.add(length as usize);
+                while !(*ptr == 0 && *ptr.add(1) == 0) {
+                    ptr = ptr.add(1);
+                }
+                ptr = ptr.add(2);
+
+                if struct_type == 127 {
+                    break;
+                }
+            }
+
+            if device_count == 0 {
+                outln!("No populated memory devices found");
+            } else {
+                outln!("Total: {} memory device(s)", device_count);
+            }
+        }
+    } else {
+        outln!("SMBIOS not available");
+    }
+}
+
+fn show_smbios_all() {
+    if let Some((table_addr, major, minor, _, _)) = find_smbios_entry() {
+        outln!("All SMBIOS Structures (v{}.{})", major, minor);
+        outln!("");
+        outln!("Type Handle Length Description");
+        outln!("---- ------ ------ -----------");
+
+        unsafe {
+            let mut ptr = table_addr as *const u8;
+
+            for _ in 0..256 {
+                let header = ptr as *const SmbiosHeader;
+                let struct_type = { (*header).struct_type };
+                let length = { (*header).length };
+                let handle = { (*header).handle };
+
+                let type_name = smbios_type_name(struct_type);
+                outln!("{:4} 0x{:04X} {:6} {}", struct_type, handle, length, type_name);
+
+                ptr = ptr.add(length as usize);
+                while !(*ptr == 0 && *ptr.add(1) == 0) {
+                    ptr = ptr.add(1);
+                }
+                ptr = ptr.add(2);
+
+                if struct_type == 127 {
+                    break;
+                }
+            }
+        }
+    } else {
+        outln!("SMBIOS not available");
+    }
+}
+
+fn smbios_type_name(t: u8) -> &'static str {
+    match t {
+        0 => "BIOS Information",
+        1 => "System Information",
+        2 => "Baseboard Information",
+        3 => "System Enclosure",
+        4 => "Processor Information",
+        5 => "Memory Controller",
+        6 => "Memory Module",
+        7 => "Cache Information",
+        8 => "Port Connector",
+        9 => "System Slots",
+        10 => "On Board Devices",
+        11 => "OEM Strings",
+        12 => "System Config Options",
+        13 => "BIOS Language",
+        14 => "Group Associations",
+        15 => "System Event Log",
+        16 => "Physical Memory Array",
+        17 => "Memory Device",
+        18 => "32-bit Memory Error",
+        19 => "Memory Array Mapped Addr",
+        20 => "Memory Device Mapped Addr",
+        21 => "Built-in Pointing Device",
+        22 => "Portable Battery",
+        23 => "System Reset",
+        24 => "Hardware Security",
+        25 => "System Power Controls",
+        26 => "Voltage Probe",
+        27 => "Cooling Device",
+        28 => "Temperature Probe",
+        29 => "Electrical Current Probe",
+        30 => "Out-of-Band Remote Access",
+        31 => "Boot Integrity Services",
+        32 => "System Boot",
+        33 => "64-bit Memory Error",
+        34 => "Management Device",
+        35 => "Mgmt Device Component",
+        36 => "Mgmt Device Threshold",
+        37 => "Memory Channel",
+        38 => "IPMI Device",
+        39 => "System Power Supply",
+        40 => "Additional Information",
+        41 => "Onboard Devices Ext",
+        42 => "Mgmt Controller Host IF",
+        43 => "TPM Device",
+        44 => "Processor Additional",
+        45 => "Firmware Inventory",
+        127 => "End-of-Table",
+        _ => "OEM/Unknown",
+    }
+}
+
+fn show_smbios_type(type_num: u8) {
+    if let Some((table_addr, _, _, _, _)) = find_smbios_entry() {
+        outln!("SMBIOS Type {} Raw Data", type_num);
+        outln!("");
+
+        unsafe {
+            let mut ptr = table_addr as *const u8;
+            let mut found = false;
+
+            for _ in 0..256 {
+                let header = ptr as *const SmbiosHeader;
+                let struct_type = { (*header).struct_type };
+                let length = { (*header).length };
+                let handle = { (*header).handle };
+
+                if struct_type == type_num {
+                    found = true;
+                    outln!("Handle: 0x{:04X}  Length: {}", handle, length);
+                    outln!("");
+
+                    // Hex dump
+                    for i in 0..length {
+                        if i % 16 == 0 {
+                            out!("{:04X}: ", i);
+                        }
+                        out!("{:02X} ", *ptr.add(i as usize));
+                        if i % 16 == 15 || i == length - 1 {
+                            outln!("");
+                        }
+                    }
+                    outln!("");
+                }
+
+                ptr = ptr.add(length as usize);
+                while !(*ptr == 0 && *ptr.add(1) == 0) {
+                    ptr = ptr.add(1);
+                }
+                ptr = ptr.add(2);
+
+                if struct_type == 127 {
+                    break;
+                }
+            }
+
+            if !found {
+                outln!("No structures of type {} found", type_num);
+            }
+        }
+    } else {
+        outln!("SMBIOS not available");
     }
 }
