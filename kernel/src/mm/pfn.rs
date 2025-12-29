@@ -346,6 +346,17 @@ pub unsafe fn mm_free_page(pfn_index: usize) {
     insert_free_page(pfn_index as u32);
 }
 
+/// Get a PFN entry by index
+///
+/// Returns a mutable reference to the PFN entry, or None if invalid.
+pub unsafe fn mm_get_pfn(pfn_index: usize) -> Option<&'static mut MmPfn> {
+    if pfn_index < PFN_DATABASE.len() {
+        Some(&mut PFN_DATABASE[pfn_index])
+    } else {
+        None
+    }
+}
+
 /// Get memory statistics
 pub fn mm_get_stats() -> MmStats {
     MmStats {

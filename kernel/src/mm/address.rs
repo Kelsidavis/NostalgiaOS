@@ -587,11 +587,96 @@ pub unsafe fn mm_access_fault(
         return false; // Access to reserved memory is a fault
     }
 
-    // Record the fault
+    // Page-align the fault address
+    let page_addr = fault_address & !0xFFF;
+
+    // Check if page is already mapped (soft fault - just need TLB update)
+    if aspace_ref.pml4_physical != 0 {
+        if let Some(pte) = super::pte::mm_get_pte(aspace_ref.pml4_physical, page_addr) {
+            if (*pte).is_present() {
+                // Page is already mapped - this was a TLB miss (soft fault)
+                aspace_ref.working_set.soft_fault_count.fetch_add(1, Ordering::Relaxed);
+                super::pte::mm_invalidate_page(page_addr);
+                return true;
+            }
+        }
+    }
+
+    // Hard fault - need to allocate a physical page
     aspace_ref.working_set.hard_fault_count.fetch_add(1, Ordering::Relaxed);
 
-    // TODO: Actually allocate a physical page and map it
-    // For now, we just indicate the fault could be handled
+    // Allocate a physical page
+    let pfn = match super::pfn::mm_allocate_zeroed_page() {
+        Some(p) => p,
+        None => {
+            // Try to trim working set to free pages
+            if let Some(victim_addr) = aspace_ref.working_set.find_oldest() {
+                // Unmap the victim page
+                if aspace_ref.pml4_physical != 0 {
+                    if let Some(victim_phys) = super::pte::mm_unmap_page(
+                        aspace_ref.pml4_physical,
+                        victim_addr,
+                    ) {
+                        // Free the physical page
+                        let victim_pfn = (victim_phys / super::pfn::PAGE_SIZE as u64) as usize;
+                        super::pfn::mm_free_page(victim_pfn);
+                        aspace_ref.working_set.remove_page(victim_addr);
+
+                        // Try allocation again
+                        match super::pfn::mm_allocate_zeroed_page() {
+                            Some(p) => p,
+                            None => return false, // Still no memory
+                        }
+                    } else {
+                        return false;
+                    }
+                } else {
+                    return false;
+                }
+            } else {
+                return false; // No pages to trim and no memory
+            }
+        }
+    };
+
+    let phys_addr = (pfn * super::pfn::PAGE_SIZE) as u64;
+
+    // Determine PTE flags from VAD protection
+    let pte_flags = super::pte::protection_to_pte_flags(vad_ref.protection, is_user_address);
+
+    // Map the page
+    if aspace_ref.pml4_physical == 0 {
+        // No page tables yet - use system address space
+        let system_cr3 = super::pte::mm_get_cr3();
+        if super::pte::mm_map_page(system_cr3, page_addr, phys_addr, pte_flags).is_err() {
+            // Failed to map - free the page we allocated
+            super::pfn::mm_free_page(pfn);
+            return false;
+        }
+    } else {
+        if super::pte::mm_map_page(aspace_ref.pml4_physical, page_addr, phys_addr, pte_flags).is_err() {
+            // Failed to map - free the page we allocated
+            super::pfn::mm_free_page(pfn);
+            return false;
+        }
+    }
+
+    // Add to working set
+    if !aspace_ref.working_set.add_page(page_addr) {
+        // Working set full - this shouldn't happen since we trimmed above
+        // but handle gracefully
+        crate::serial_println!("[MM] Warning: Working set full after page allocation");
+    }
+
+    // Update PFN entry with owning process
+    let pfn_entry = super::pfn::mm_get_pfn(pfn);
+    if let Some(pfn_ref) = pfn_entry {
+        pfn_ref.owning_process = aspace_ref.process;
+        pfn_ref.pte_address.store(page_addr, Ordering::SeqCst);
+    }
+
+    // Update private usage counter
+    aspace_ref.private_usage.fetch_add(super::pfn::PAGE_SIZE as u64, Ordering::Relaxed);
 
     true
 }

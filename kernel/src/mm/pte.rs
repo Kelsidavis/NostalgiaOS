@@ -482,3 +482,134 @@ pub unsafe fn mm_set_cr3(cr3: u64) {
 pub fn init() {
     crate::serial_println!("[MM] PTE subsystem initialized");
 }
+
+// ============================================================================
+// Page Mapping Functions
+// ============================================================================
+
+/// Map a physical page at a virtual address
+///
+/// Creates intermediate page tables as needed.
+///
+/// # Arguments
+/// * `pml4_phys` - Physical address of PML4 table
+/// * `virt_addr` - Virtual address to map
+/// * `phys_addr` - Physical address of the page to map
+/// * `flags` - PTE flags (PRESENT, WRITABLE, USER, etc.)
+///
+/// # Returns
+/// Ok(()) on success, Err(()) if page table allocation fails
+pub unsafe fn mm_map_page(
+    pml4_phys: u64,
+    virt_addr: u64,
+    phys_addr: u64,
+    flags: u64,
+) -> Result<(), ()> {
+    if !is_canonical(virt_addr) {
+        return Err(());
+    }
+
+    let pml4 = pml4_phys as *mut PageTable;
+
+    // Ensure PML4 entry exists
+    let pml4e = &mut (*pml4).entries[pml4_index(virt_addr)];
+    if !pml4e.is_present() {
+        // Allocate PDPT
+        let pdpt_pfn = super::pfn::mm_allocate_zeroed_page().ok_or(())?;
+        let pdpt_phys = (pdpt_pfn * super::pfn::PAGE_SIZE) as u64;
+        pml4e.set_present(pdpt_phys, pte_flags::PRESENT | pte_flags::WRITABLE | pte_flags::USER);
+    }
+
+    // Ensure PDPT entry exists
+    let pdpt = pml4e.phys_addr() as *mut PageTable;
+    let pdpte = &mut (*pdpt).entries[pdpt_index(virt_addr)];
+    if pdpte.is_huge() {
+        return Err(()); // Can't map 4K page within 1GB page
+    }
+    if !pdpte.is_present() {
+        // Allocate PD
+        let pd_pfn = super::pfn::mm_allocate_zeroed_page().ok_or(())?;
+        let pd_phys = (pd_pfn * super::pfn::PAGE_SIZE) as u64;
+        pdpte.set_present(pd_phys, pte_flags::PRESENT | pte_flags::WRITABLE | pte_flags::USER);
+    }
+
+    // Ensure PD entry exists
+    let pd = pdpte.phys_addr() as *mut PageTable;
+    let pde = &mut (*pd).entries[pd_index(virt_addr)];
+    if pde.is_huge() {
+        return Err(()); // Can't map 4K page within 2MB page
+    }
+    if !pde.is_present() {
+        // Allocate PT
+        let pt_pfn = super::pfn::mm_allocate_zeroed_page().ok_or(())?;
+        let pt_phys = (pt_pfn * super::pfn::PAGE_SIZE) as u64;
+        pde.set_present(pt_phys, pte_flags::PRESENT | pte_flags::WRITABLE | pte_flags::USER);
+    }
+
+    // Map the page in PT
+    let pt = pde.phys_addr() as *mut PageTable;
+    let pte = &mut (*pt).entries[pt_index(virt_addr)];
+    pte.set_present(phys_addr, flags | pte_flags::PRESENT);
+
+    // Invalidate TLB for this address
+    mm_invalidate_page(virt_addr);
+
+    Ok(())
+}
+
+/// Unmap a page at a virtual address
+///
+/// # Arguments
+/// * `pml4_phys` - Physical address of PML4 table
+/// * `virt_addr` - Virtual address to unmap
+///
+/// # Returns
+/// The physical address of the unmapped page, or None if not mapped
+pub unsafe fn mm_unmap_page(pml4_phys: u64, virt_addr: u64) -> Option<u64> {
+    let pte = mm_get_pte(pml4_phys, virt_addr)?;
+    if !(*pte).is_present() {
+        return None;
+    }
+
+    let phys_addr = (*pte).phys_addr();
+    (*pte).clear();
+
+    // Invalidate TLB for this address
+    mm_invalidate_page(virt_addr);
+
+    Some(phys_addr)
+}
+
+/// Convert VAD protection flags to PTE flags
+pub fn protection_to_pte_flags(protection: u32, is_user: bool) -> u64 {
+    use super::vad::protection;
+
+    let mut flags = pte_flags::PRESENT;
+
+    // User/Supervisor
+    if is_user {
+        flags |= pte_flags::USER;
+    } else {
+        flags |= pte_flags::GLOBAL;
+    }
+
+    // Writable
+    if (protection & protection::PAGE_READWRITE) != 0
+        || (protection & protection::PAGE_EXECUTE_READWRITE) != 0
+        || (protection & protection::PAGE_WRITECOPY) != 0
+        || (protection & protection::PAGE_EXECUTE_WRITECOPY) != 0
+    {
+        flags |= pte_flags::WRITABLE;
+    }
+
+    // No-Execute
+    if (protection & protection::PAGE_EXECUTE) == 0
+        && (protection & protection::PAGE_EXECUTE_READ) == 0
+        && (protection & protection::PAGE_EXECUTE_READWRITE) == 0
+        && (protection & protection::PAGE_EXECUTE_WRITECOPY) == 0
+    {
+        flags |= pte_flags::NO_EXECUTE;
+    }
+
+    flags
+}
