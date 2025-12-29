@@ -14875,7 +14875,7 @@ fn sys_alert_thread(
         // If the thread is in an alertable wait, wake it up
         if (*target_thread).state == ThreadState::Waiting && (*target_thread).alertable {
             // Set wait status to indicate alerted
-            (*target_thread).wait_status = crate::ke::dispatcher::WaitStatus::Alerted;
+            (*target_thread).wait_status = crate::ke::dispatcher::WaitStatus::Alerted.as_isize();
 
             // Make thread ready to run
             (*target_thread).state = ThreadState::Ready;
@@ -14951,7 +14951,7 @@ fn sys_alert_resume_thread(
 
         // If the thread was in an alertable wait, set alerted status
         if (*target_thread).state == ThreadState::Waiting && (*target_thread).alertable {
-            (*target_thread).wait_status = crate::ke::dispatcher::WaitStatus::Alerted;
+            (*target_thread).wait_status = crate::ke::dispatcher::WaitStatus::Alerted.as_isize();
             (*target_thread).state = ThreadState::Ready;
         }
     }

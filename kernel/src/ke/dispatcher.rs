@@ -211,6 +211,24 @@ impl WaitStatus {
             _ => WaitStatus::Object0, // For now, we only support single object waits
         }
     }
+
+    /// Convert to isize for storage in thread wait_status field
+    #[inline]
+    pub const fn as_isize(self) -> isize {
+        self as i32 as isize
+    }
+
+    /// Create from raw isize value
+    #[inline]
+    pub fn from_isize(value: isize) -> Self {
+        match value as i32 {
+            0 => WaitStatus::Object0,
+            0x80 => WaitStatus::Abandoned,
+            0x101 => WaitStatus::Alerted,
+            0x102 => WaitStatus::Timeout,
+            _ => WaitStatus::Invalid,
+        }
+    }
 }
 
 /// Maximum number of objects in a multi-object wait

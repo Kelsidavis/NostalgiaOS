@@ -306,7 +306,7 @@ unsafe fn wait_for_objects_blocking(
     let using_timeout = timeout_ms.is_some() && timeout_ms != Some(TIMEOUT_INFINITE);
 
     // Set up thread wait state
-    (*thread).wait_status = WaitStatus::Object0;
+    (*thread).wait_status = WaitStatus::Object0.as_isize();
     (*thread).wait_block_list = wait_blocks.as_mut_ptr();
     (*thread).wait_type = wait_type;
     (*thread).wait_count = count as u8;
@@ -539,7 +539,7 @@ pub unsafe fn ki_unwait_thread(thread: *mut KThread, status: WaitStatus) {
     }
 
     // Set the wait status that will be returned
-    (*thread).wait_status = status;
+    (*thread).wait_status = status.as_isize();
 
     // Remove thread from all wait lists
     // (The wait blocks are on the thread's stack and contain list entries)
@@ -696,7 +696,7 @@ unsafe fn wait_for_objects_blocking_alertable(
     (*thread).wait_type = wait_type;
     (*thread).wait_count = count as u8;
     (*thread).wait_block_list = wait_blocks.as_mut_ptr();
-    (*thread).wait_status = WaitStatus::Object0; // Will be updated
+    (*thread).wait_status = WaitStatus::Object0.as_isize(); // Will be updated
 
     // Initialize wait blocks and add to object wait lists
     for (i, &object) in objects.iter().enumerate() {
@@ -767,7 +767,7 @@ unsafe fn wait_for_objects_blocking_alertable(
     }
 
     // Get status from thread (set by signal code)
-    let status = (*thread).wait_status;
+    let status = WaitStatus::from_isize((*thread).wait_status);
 
     // Clean up wait blocks
     for i in 0..count {

@@ -40,6 +40,7 @@ pub mod spinlock;
 pub mod mutex;
 pub mod event;
 pub mod semaphore;
+pub mod queue;
 
 // Deferred execution
 pub mod dpc;
@@ -69,6 +70,12 @@ pub use spinlock::{SpinLock, SpinLockGuard, RawSpinLock};
 pub use mutex::{KMutex, MutexGuard};
 pub use event::{KEvent, EventType};
 pub use semaphore::KSemaphore;
+pub use queue::{
+    KQueue, WaitMode as QueueWaitMode, QueueWaitReason,
+    ke_initialize_queue, ke_read_state_queue,
+    ke_insert_queue, ke_insert_head_queue,
+    ke_remove_queue, ke_rundown_queue,
+};
 
 // Re-export DPC types
 pub use dpc::{KDpc, DpcRoutine, DpcImportance};

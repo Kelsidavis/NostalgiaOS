@@ -11,7 +11,12 @@ use core::ptr;
 use super::list::ListEntry;
 use super::process::KProcess;
 use super::apc::KApcState;
-use super::dispatcher::{KWaitBlock, WaitType, WaitStatus};
+use super::dispatcher::{KWaitBlock, WaitType};
+
+// Forward declaration - use opaque pointer to avoid circular dependency
+// The actual KQueue type is defined in queue.rs
+/// Opaque kernel queue type (defined in queue module)
+pub type KQueuePtr = *mut core::ffi::c_void;
 
 /// Thread states
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,8 +175,8 @@ pub struct KThread {
     pub apc_queueable: bool,
 
     // Wait support
-    /// Status returned from last wait operation
-    pub wait_status: WaitStatus,
+    /// Status returned from last wait operation (isize for queue entry pointers)
+    pub wait_status: isize,
 
     /// Pointer to array of wait blocks for multi-object wait
     pub wait_block_list: *mut KWaitBlock,
@@ -181,6 +186,19 @@ pub struct KThread {
 
     /// Number of objects being waited on
     pub wait_count: u8,
+
+    /// Wait reason code
+    pub wait_reason: u8,
+
+    /// Whether user APC is pending
+    pub user_apc_pending: bool,
+
+    // Queue support (for KQUEUE / I/O completion ports)
+    /// Associated kernel queue (for worker threads)
+    pub queue: KQueuePtr,
+
+    /// Entry in queue's thread list
+    pub queue_list_entry: ListEntry,
 
     // Suspension support
     /// Suspend count (thread is suspended when > 0)
@@ -227,10 +245,14 @@ impl KThread {
             kernel_apc_disable: 0,
             alertable: false,
             apc_queueable: true,
-            wait_status: WaitStatus::Object0,
+            wait_status: 0,
             wait_block_list: ptr::null_mut(),
             wait_type: WaitType::WaitAny,
             wait_count: 0,
+            wait_reason: 0,
+            user_apc_pending: false,
+            queue: ptr::null_mut(),
+            queue_list_entry: ListEntry::new(),
             suspend_count: 0,
             suspend_saved_state: ThreadState::Initialized,
             // Impersonation
