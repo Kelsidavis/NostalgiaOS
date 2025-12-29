@@ -42,9 +42,11 @@ pub mod debug_flags {
 
 /// Debug event types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 #[repr(u32)]
 pub enum DebugEventType {
     /// Exception occurred
+    #[default]
     Exception = 1,
     /// Thread created
     CreateThread = 2,
@@ -62,12 +64,6 @@ pub enum DebugEventType {
     OutputDebugString = 8,
     /// RIP event (system error)
     Rip = 9,
-}
-
-impl Default for DebugEventType {
-    fn default() -> Self {
-        DebugEventType::Exception
-    }
 }
 
 /// Exception debug event info
@@ -497,10 +493,7 @@ pub unsafe fn dbgk_wait_for_debug_event(
     debug_index: usize,
     timeout_ms: Option<u64>,
 ) -> Option<(*mut DebugEvent, DebugEventType, u32, u32)> {
-    let obj = match dbgk_get_debug_object(debug_index) {
-        Some(o) => o,
-        None => return None,
-    };
+    let obj = dbgk_get_debug_object(debug_index)?;
 
     // Wait for an event to be available
     use super::wait::ke_wait_for_single_object;
@@ -556,7 +549,7 @@ pub unsafe fn dbgk_continue_debug_event(
 
     // Find and remove the event
     let mut current = obj.event_list.flink;
-    while current != &obj.event_list as *const _ as *mut _ {
+    while !core::ptr::eq(current, &obj.event_list as *const _) {
         let event = crate::containing_record!(current, DebugEvent, list_entry);
 
         if (*event).process_id == pid && (*event).thread_id == tid && (*event).reported {
