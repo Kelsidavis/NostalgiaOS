@@ -42,6 +42,13 @@ impl Luid {
         }
     }
 
+    pub const fn from_u64(value: u64) -> Self {
+        Self {
+            low_part: value as u32,
+            high_part: (value >> 32) as i32,
+        }
+    }
+
     pub fn is_zero(&self) -> bool {
         self.low_part == 0 && self.high_part == 0
     }

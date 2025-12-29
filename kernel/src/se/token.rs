@@ -225,6 +225,9 @@ pub struct Token {
 
     /// Is elevated
     pub is_elevated: bool,
+
+    /// Origin LUID (logon session that created this token)
+    pub origin_luid: Luid,
 }
 
 impl Token {
@@ -253,6 +256,7 @@ impl Token {
             restricted_sid_count: 0,
             elevation_type: TokenElevationType::Default,
             is_elevated: false,
+            origin_luid: Luid::new(0, 0),
         }
     }
 

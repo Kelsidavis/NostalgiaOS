@@ -168,6 +168,8 @@ pub struct EProcess {
     pub priority_boost_disabled: bool,
     /// Hard error mode (SEM_FAILCRITICALERRORS, etc.)
     pub hard_error_mode: u32,
+    /// Execute flags (DEP/NX policy)
+    pub execute_flags: u32,
 
     /// Process cookie (for ASLR)
     pub cookie: u32,
@@ -228,6 +230,7 @@ impl EProcess {
             break_on_termination: false,
             priority_boost_disabled: false,
             hard_error_mode: 0,
+            execute_flags: 0,
             cookie: 0,
         }
     }

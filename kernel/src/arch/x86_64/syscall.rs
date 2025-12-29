@@ -6338,6 +6338,21 @@ unsafe fn get_token_id(handle: usize) -> Option<u32> {
     if tid == u32::MAX { None } else { Some(tid) }
 }
 
+/// Get a pointer to the Token from a handle
+unsafe fn get_token_ptr(handle: usize) -> Option<*mut crate::se::token::Token> {
+    let token_id = get_token_id(handle)?;
+    // Look up token in TOKEN_POOL by matching token_id
+    for i in 0..crate::se::token::MAX_TOKENS {
+        if crate::se::token::TOKEN_POOL_BITMAP & (1 << i) != 0 {
+            let token = &mut crate::se::token::TOKEN_POOL[i] as *mut crate::se::token::Token;
+            if (*token).token_id.low_part == token_id {
+                return Some(token);
+            }
+        }
+    }
+    None
+}
+
 /// Determine handle type from handle value
 fn get_handle_type(handle: usize) -> HandleType {
     if (TOKEN_HANDLE_BASE..TOKEN_HANDLE_BASE + MAX_TOKEN_HANDLES).contains(&handle) {
@@ -8564,8 +8579,12 @@ fn sys_query_information_process(
             }
 
             unsafe {
-                // DEP enabled (MEM_EXECUTE_OPTION_ENABLE = 2)
-                *(process_information as *mut u32) = 2;
+                let execute_flags = if !eprocess.is_null() {
+                    (*eprocess).execute_flags
+                } else {
+                    2 // DEP enabled by default (MEM_EXECUTE_OPTION_ENABLE)
+                };
+                *(process_information as *mut u32) = execute_flags;
             }
 
             STATUS_SUCCESS
@@ -10503,7 +10522,8 @@ fn sys_set_information_process(
             crate::serial_println!("[SYSCALL] SetInformationProcess: execute flags (DEP) = {:#x}",
                 execute_flags);
 
-            // TODO: Store DEP flags in process
+            // Store DEP flags in process
+            process.execute_flags = execute_flags;
             0
         }
 
@@ -11540,7 +11560,12 @@ fn sys_set_information_token(
             let origin_luid = unsafe { *(token_information as *const u64) };
             crate::serial_println!("[SYSCALL] SetInformationToken: origin LUID = {:#x}", origin_luid);
 
-            // TODO: Store origin LUID
+            // Store origin LUID in token
+            if let Some(token) = unsafe { get_token_ptr(token_handle) } {
+                unsafe {
+                    (*token).origin_luid = crate::se::privilege::Luid::from_u64(origin_luid);
+                }
+            }
 
             0
         }
