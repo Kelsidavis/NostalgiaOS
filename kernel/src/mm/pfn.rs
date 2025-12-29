@@ -478,3 +478,107 @@ pub fn init() {
         mm_init_pfn_simple(256, 768);
     }
 }
+
+/// Detailed PFN database statistics
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PfnDetailedStats {
+    pub total_pages: u32,
+    pub free_pages: u32,
+    pub zeroed_pages: u32,
+    pub standby_pages: u32,
+    pub modified_pages: u32,
+    pub active_pages: u32,
+    pub transition_pages: u32,
+    pub bad_pages: u32,
+    pub kernel_pages: u32,
+    pub locked_pages: u32,
+}
+
+/// Get detailed PFN statistics by scanning the database
+pub fn mm_get_detailed_pfn_stats() -> PfnDetailedStats {
+    let _guard = PFN_LOCK.lock();
+
+    let mut stats = PfnDetailedStats::default();
+
+    unsafe {
+        stats.total_pages = TOTAL_PAGES as u32;
+
+        for i in 0..PFN_DATABASE.len() {
+            let pfn = &PFN_DATABASE[i];
+
+            match pfn.state {
+                MmPageState::Free => stats.free_pages += 1,
+                MmPageState::Zeroed => stats.zeroed_pages += 1,
+                MmPageState::Standby => stats.standby_pages += 1,
+                MmPageState::Modified | MmPageState::ModifiedNoWrite => stats.modified_pages += 1,
+                MmPageState::Active => stats.active_pages += 1,
+                MmPageState::Transition => stats.transition_pages += 1,
+                MmPageState::Bad => stats.bad_pages += 1,
+            }
+
+            if (pfn.flags & pfn_flags::PFN_KERNEL) != 0 {
+                stats.kernel_pages += 1;
+            }
+            if (pfn.flags & pfn_flags::PFN_LOCKED) != 0 {
+                stats.locked_pages += 1;
+            }
+        }
+    }
+
+    stats
+}
+
+/// Get a snapshot of a specific PFN entry for display
+#[derive(Debug, Clone, Copy)]
+pub struct PfnSnapshot {
+    pub index: usize,
+    pub state: MmPageState,
+    pub ref_count: u32,
+    pub share_count: u32,
+    pub flags: u16,
+    pub pte_address: u64,
+    pub flink: u32,
+    pub blink: u32,
+}
+
+/// Get a snapshot of a PFN entry
+pub fn mm_get_pfn_snapshot(pfn_index: usize) -> Option<PfnSnapshot> {
+    if pfn_index >= unsafe { PFN_DATABASE.len() } {
+        return None;
+    }
+
+    let _guard = PFN_LOCK.lock();
+
+    unsafe {
+        let pfn = &PFN_DATABASE[pfn_index];
+        Some(PfnSnapshot {
+            index: pfn_index,
+            state: pfn.state,
+            ref_count: pfn.reference_count.load(Ordering::Relaxed),
+            share_count: pfn.share_count.load(Ordering::Relaxed),
+            flags: pfn.flags,
+            pte_address: pfn.pte_address.load(Ordering::Relaxed),
+            flink: pfn.flink,
+            blink: pfn.blink,
+        })
+    }
+}
+
+/// Get database size
+pub fn mm_get_pfn_database_size() -> usize {
+    unsafe { PFN_DATABASE.len() }
+}
+
+/// Get state name
+pub fn mm_page_state_name(state: MmPageState) -> &'static str {
+    match state {
+        MmPageState::Free => "Free",
+        MmPageState::Zeroed => "Zeroed",
+        MmPageState::Standby => "Standby",
+        MmPageState::Modified => "Modified",
+        MmPageState::ModifiedNoWrite => "ModNoWrite",
+        MmPageState::Active => "Active",
+        MmPageState::Transition => "Transition",
+        MmPageState::Bad => "Bad",
+    }
+}

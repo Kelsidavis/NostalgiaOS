@@ -126,6 +126,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    exception      Exception history viewer (list, stats)");
         outln!("    irqstat        Interrupt statistics (all, rate, clear)");
         outln!("    pool           Kernel pool allocator stats (classes)");
+        outln!("    pfn            PFN database viewer (stats, entry, range)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -10235,4 +10236,301 @@ fn test_pool_alloc(size: usize) {
     outln!("  Active allocations: {}",
         stats.allocation_count.saturating_sub(stats.free_count));
     outln!("  Bytes in use: {} B", stats.bytes_allocated);
+}
+
+// ============================================================================
+// PFN Database Viewer Command
+// ============================================================================
+
+/// PFN database viewer command
+pub fn cmd_pfn(args: &[&str]) {
+    if args.is_empty() {
+        show_pfn_overview();
+        return;
+    }
+
+    let cmd = args[0];
+    if eq_ignore_case(cmd, "help") {
+        show_pfn_help();
+    } else if eq_ignore_case(cmd, "stats") || eq_ignore_case(cmd, "detail") {
+        show_pfn_detailed_stats();
+    } else if eq_ignore_case(cmd, "entry") || eq_ignore_case(cmd, "show") {
+        if args.len() > 1 {
+            let index = parse_number(args[1]).unwrap_or(0) as usize;
+            show_pfn_entry(index);
+        } else {
+            outln!("Usage: pfn entry <index>");
+        }
+    } else if eq_ignore_case(cmd, "range") {
+        if args.len() > 2 {
+            let start = parse_number(args[1]).unwrap_or(0) as usize;
+            let count = parse_number(args[2]).unwrap_or(16) as usize;
+            show_pfn_range(start, count);
+        } else if args.len() > 1 {
+            let start = parse_number(args[1]).unwrap_or(0) as usize;
+            show_pfn_range(start, 16);
+        } else {
+            outln!("Usage: pfn range <start> [count]");
+        }
+    } else if eq_ignore_case(cmd, "active") {
+        show_pfn_by_state_active();
+    } else if eq_ignore_case(cmd, "lists") {
+        show_pfn_lists();
+    } else {
+        outln!("Unknown pfn command: {}", cmd);
+        show_pfn_help();
+    }
+}
+
+fn show_pfn_help() {
+    outln!("PFN Database Viewer");
+    outln!("");
+    outln!("Usage: pfn <command>");
+    outln!("");
+    outln!("Commands:");
+    outln!("  (none)         Show overview statistics");
+    outln!("  stats          Show detailed per-state counts");
+    outln!("  entry <idx>    Show details for PFN entry");
+    outln!("  range <s> [n]  Show range of PFN entries");
+    outln!("  active         List active (in-use) pages");
+    outln!("  lists          Show free/zeroed list heads");
+}
+
+fn show_pfn_overview() {
+    use crate::mm::pfn::{mm_get_stats, mm_get_pfn_database_size, PAGE_SIZE};
+
+    let stats = mm_get_stats();
+    let db_size = mm_get_pfn_database_size();
+
+    outln!("PFN Database Overview");
+    outln!("=====================");
+    outln!("");
+    outln!("Database Size:     {} entries", db_size);
+    outln!("Initialized Pages: {}", stats.total_pages);
+    outln!("");
+    outln!("Page States:");
+    outln!("  Free:    {} pages ({} KB)",
+        stats.free_pages, (stats.free_pages as usize * PAGE_SIZE) / 1024);
+    outln!("  Zeroed:  {} pages ({} KB)",
+        stats.zeroed_pages, (stats.zeroed_pages as usize * PAGE_SIZE) / 1024);
+    outln!("  Active:  {} pages ({} KB)",
+        stats.active_pages, (stats.active_pages as usize * PAGE_SIZE) / 1024);
+    outln!("");
+
+    let total_available = stats.free_pages + stats.zeroed_pages;
+    let total_mb = (db_size * PAGE_SIZE) / (1024 * 1024);
+    let used_mb = (stats.active_pages as usize * PAGE_SIZE) / (1024 * 1024);
+
+    outln!("Summary:");
+    outln!("  Max Trackable:   {} pages ({} MB)", db_size, total_mb);
+    outln!("  Available:       {} pages", total_available);
+    outln!("  In Use:          {} pages ({} MB)", stats.active_pages, used_mb);
+
+    if stats.total_pages > 0 {
+        let usage = (stats.active_pages as f64 / stats.total_pages as f64) * 100.0;
+        outln!("  Usage:           {:.1}%", usage);
+    }
+}
+
+fn show_pfn_detailed_stats() {
+    use crate::mm::pfn::{mm_get_detailed_pfn_stats, PAGE_SIZE};
+
+    let stats = mm_get_detailed_pfn_stats();
+
+    outln!("Detailed PFN Statistics");
+    outln!("=======================");
+    outln!("");
+    outln!("Initialized Pages: {}", stats.total_pages);
+    outln!("");
+    outln!("Pages by State:");
+    outln!("  Free:         {:>8} pages ({:>6} KB)",
+        stats.free_pages, (stats.free_pages as usize * PAGE_SIZE) / 1024);
+    outln!("  Zeroed:       {:>8} pages ({:>6} KB)",
+        stats.zeroed_pages, (stats.zeroed_pages as usize * PAGE_SIZE) / 1024);
+    outln!("  Standby:      {:>8} pages ({:>6} KB)",
+        stats.standby_pages, (stats.standby_pages as usize * PAGE_SIZE) / 1024);
+    outln!("  Modified:     {:>8} pages ({:>6} KB)",
+        stats.modified_pages, (stats.modified_pages as usize * PAGE_SIZE) / 1024);
+    outln!("  Active:       {:>8} pages ({:>6} KB)",
+        stats.active_pages, (stats.active_pages as usize * PAGE_SIZE) / 1024);
+    outln!("  Transition:   {:>8} pages", stats.transition_pages);
+    outln!("  Bad:          {:>8} pages", stats.bad_pages);
+
+    outln!("");
+    outln!("Pages by Flags:");
+    outln!("  Kernel:       {:>8} pages", stats.kernel_pages);
+    outln!("  Locked:       {:>8} pages", stats.locked_pages);
+}
+
+fn show_pfn_entry(index: usize) {
+    use crate::mm::pfn::{mm_get_pfn_snapshot, mm_page_state_name, pfn_flags, PAGE_SIZE};
+
+    match mm_get_pfn_snapshot(index) {
+        Some(pfn) => {
+            let phys_addr = index * PAGE_SIZE;
+
+            outln!("PFN Entry {}", index);
+            outln!("====================");
+            outln!("");
+            outln!("Physical Address: {:#x} - {:#x}",
+                phys_addr, phys_addr + PAGE_SIZE - 1);
+            outln!("State:            {} ({})", pfn.state as u8, mm_page_state_name(pfn.state));
+            outln!("Reference Count:  {}", pfn.ref_count);
+            outln!("Share Count:      {}", pfn.share_count);
+            outln!("PTE Address:      {:#018x}", pfn.pte_address);
+            if pfn.flink == u32::MAX {
+                outln!("Flink:            NULL");
+            } else {
+                outln!("Flink:            {}", pfn.flink);
+            }
+            if pfn.blink == u32::MAX {
+                outln!("Blink:            NULL");
+            } else {
+                outln!("Blink:            {}", pfn.blink);
+            }
+            outln!("Flags:            {:#06x}", pfn.flags);
+
+            // Decode flags
+            if pfn.flags != 0 {
+                outln!("");
+                outln!("Flags Decoded:");
+                if (pfn.flags & pfn_flags::PFN_KERNEL) != 0 { outln!("  KERNEL"); }
+                if (pfn.flags & pfn_flags::PFN_LOCKED) != 0 { outln!("  LOCKED"); }
+                if (pfn.flags & pfn_flags::PFN_PROTOTYPE) != 0 { outln!("  PROTOTYPE"); }
+                if (pfn.flags & pfn_flags::PFN_LARGE_PAGE) != 0 { outln!("  LARGE_PAGE"); }
+                if (pfn.flags & pfn_flags::PFN_ROM) != 0 { outln!("  ROM"); }
+                if (pfn.flags & pfn_flags::PFN_DIRTY) != 0 { outln!("  DIRTY"); }
+            }
+        }
+        None => {
+            outln!("PFN entry {} not found", index);
+        }
+    }
+}
+
+fn show_pfn_range(start: usize, count: usize) {
+    use crate::mm::pfn::{mm_get_pfn_snapshot, mm_page_state_name, mm_get_pfn_database_size};
+
+    let db_size = mm_get_pfn_database_size();
+    let end = (start + count).min(db_size);
+
+    if start >= db_size {
+        outln!("Start index {} is beyond database size {}", start, db_size);
+        return;
+    }
+
+    outln!("PFN Entries {} - {}", start, end - 1);
+    outln!("");
+    outln!("{:<8} {:<12} {:<6} {:<6} {:<8} {:<8}",
+        "Index", "State", "Refs", "Share", "Flink", "Blink");
+    outln!("------------------------------------------------------");
+
+    for i in start..end {
+        if let Some(pfn) = mm_get_pfn_snapshot(i) {
+            if pfn.flink == u32::MAX {
+                if pfn.blink == u32::MAX {
+                    outln!("{:<8} {:<12} {:>5} {:>6} {:>8} {:>8}",
+                        i, mm_page_state_name(pfn.state),
+                        pfn.ref_count, pfn.share_count, "-", "-");
+                } else {
+                    outln!("{:<8} {:<12} {:>5} {:>6} {:>8} {:>8}",
+                        i, mm_page_state_name(pfn.state),
+                        pfn.ref_count, pfn.share_count, "-", pfn.blink);
+                }
+            } else {
+                if pfn.blink == u32::MAX {
+                    outln!("{:<8} {:<12} {:>5} {:>6} {:>8} {:>8}",
+                        i, mm_page_state_name(pfn.state),
+                        pfn.ref_count, pfn.share_count, pfn.flink, "-");
+                } else {
+                    outln!("{:<8} {:<12} {:>5} {:>6} {:>8} {:>8}",
+                        i, mm_page_state_name(pfn.state),
+                        pfn.ref_count, pfn.share_count, pfn.flink, pfn.blink);
+                }
+            }
+        }
+    }
+}
+
+fn show_pfn_by_state_active() {
+    use crate::mm::pfn::{mm_get_pfn_snapshot, mm_get_pfn_database_size, MmPageState, PAGE_SIZE};
+
+    let db_size = mm_get_pfn_database_size();
+
+    outln!("Active Pages");
+    outln!("============");
+    outln!("");
+    outln!("{:<8} {:<18} {:<6} {:<6} {:<18}",
+        "Index", "Phys Address", "Refs", "Share", "PTE Address");
+    outln!("--------------------------------------------------------------");
+
+    let mut count = 0;
+    for i in 0..db_size {
+        if let Some(pfn) = mm_get_pfn_snapshot(i) {
+            if pfn.state == MmPageState::Active {
+                let phys_addr = i * PAGE_SIZE;
+                outln!("{:<8} {:#018x} {:>5} {:>6} {:#018x}",
+                    i, phys_addr, pfn.ref_count, pfn.share_count, pfn.pte_address);
+                count += 1;
+                if count >= 50 {
+                    outln!("...(showing first 50, use 'pfn range' for more)");
+                    break;
+                }
+            }
+        }
+    }
+
+    if count == 0 {
+        outln!("  No active pages found");
+    } else {
+        outln!("");
+        outln!("Total: {} active pages shown", count);
+    }
+}
+
+fn show_pfn_lists() {
+    use crate::mm::pfn::{mm_get_stats, mm_get_pfn_snapshot};
+
+    let stats = mm_get_stats();
+
+    outln!("PFN List Information");
+    outln!("====================");
+    outln!("");
+
+    outln!("Free List:");
+    outln!("  Count:     {} pages", stats.free_pages);
+    if stats.free_pages > 0 {
+        // Find first free page to show list head
+        for i in 0..4096 {
+            if let Some(pfn) = mm_get_pfn_snapshot(i) {
+                if pfn.state as u8 == 0 { // Free
+                    outln!("  Head:      entry {}", i);
+                    if pfn.flink == u32::MAX {
+                        outln!("  Flink:     NULL");
+                    } else {
+                        outln!("  Flink:     {}", pfn.flink);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    outln!("");
+    outln!("Zeroed List:");
+    outln!("  Count:     {} pages", stats.zeroed_pages);
+    if stats.zeroed_pages > 0 {
+        // Find first zeroed page
+        for i in 0..4096 {
+            if let Some(pfn) = mm_get_pfn_snapshot(i) {
+                if pfn.state as u8 == 1 { // Zeroed
+                    outln!("  Head:      entry {}", i);
+                    break;
+                }
+            }
+        }
+    }
+
+    outln!("");
+    outln!("Active Pages: {}", stats.active_pages);
 }
