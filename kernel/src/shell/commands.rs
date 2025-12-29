@@ -4071,6 +4071,10 @@ pub fn cmd_debug(args: &[&str]) {
         outln!("  idt              Show IDT base and limit");
         outln!("  peek <addr> [n]  Read n bytes at address (hex dump)");
         outln!("  cpuid [leaf]     Display CPUID information");
+        outln!("  inb <port>       Read byte from I/O port");
+        outln!("  inw <port>       Read word from I/O port");
+        outln!("  ind <port>       Read dword from I/O port");
+        outln!("  rdmsr <msr>      Read model-specific register");
         outln!("  veh              Show VEH handler count");
         outln!("  seh              Show SEH frame count");
         return;
@@ -4382,6 +4386,131 @@ pub fn cmd_debug(args: &[&str]) {
             outln!("    CX8={} APIC={} SEP={} MTRR={} PGE={} MCA={} CMOV={} PAT={}",
                 (edx >> 8) & 1, (edx >> 9) & 1, (edx >> 11) & 1, (edx >> 12) & 1,
                 (edx >> 13) & 1, (edx >> 14) & 1, (edx >> 15) & 1, (edx >> 16) & 1);
+        }
+    } else if eq_ignore_case(cmd, "inb") {
+        if args.len() < 2 {
+            outln!("Usage: debug inb <port>");
+            return;
+        }
+
+        let port_str = args[1].trim_start_matches("0x").trim_start_matches("0X");
+        let port = match u16::from_str_radix(port_str, 16) {
+            Ok(p) => p,
+            Err(_) => {
+                outln!("Error: Invalid port '{}'", args[1]);
+                return;
+            }
+        };
+
+        let value: u8;
+        unsafe {
+            core::arch::asm!(
+                "in al, dx",
+                out("al") value,
+                in("dx") port,
+            );
+        }
+
+        outln!("Port {:#06x}: {:#04x} ({})", port, value, value);
+    } else if eq_ignore_case(cmd, "inw") {
+        if args.len() < 2 {
+            outln!("Usage: debug inw <port>");
+            return;
+        }
+
+        let port_str = args[1].trim_start_matches("0x").trim_start_matches("0X");
+        let port = match u16::from_str_radix(port_str, 16) {
+            Ok(p) => p,
+            Err(_) => {
+                outln!("Error: Invalid port '{}'", args[1]);
+                return;
+            }
+        };
+
+        let value: u16;
+        unsafe {
+            core::arch::asm!(
+                "in ax, dx",
+                out("ax") value,
+                in("dx") port,
+            );
+        }
+
+        outln!("Port {:#06x}: {:#06x} ({})", port, value, value);
+    } else if eq_ignore_case(cmd, "ind") {
+        if args.len() < 2 {
+            outln!("Usage: debug ind <port>");
+            return;
+        }
+
+        let port_str = args[1].trim_start_matches("0x").trim_start_matches("0X");
+        let port = match u16::from_str_radix(port_str, 16) {
+            Ok(p) => p,
+            Err(_) => {
+                outln!("Error: Invalid port '{}'", args[1]);
+                return;
+            }
+        };
+
+        let value: u32;
+        unsafe {
+            core::arch::asm!(
+                "in eax, dx",
+                out("eax") value,
+                in("dx") port,
+            );
+        }
+
+        outln!("Port {:#06x}: {:#010x} ({})", port, value, value);
+    } else if eq_ignore_case(cmd, "rdmsr") {
+        if args.len() < 2 {
+            outln!("Usage: debug rdmsr <msr>");
+            outln!("");
+            outln!("Common MSRs:");
+            outln!("  0x10      TSC (Time Stamp Counter)");
+            outln!("  0x1B      APIC Base");
+            outln!("  0xC0000080 EFER (Extended Feature Enable)");
+            outln!("  0xC0000081 STAR (SYSCALL Target Address)");
+            outln!("  0xC0000082 LSTAR (Long Mode SYSCALL Target)");
+            return;
+        }
+
+        let msr_str = args[1].trim_start_matches("0x").trim_start_matches("0X");
+        let msr = match u32::from_str_radix(msr_str, 16) {
+            Ok(m) => m,
+            Err(_) => {
+                outln!("Error: Invalid MSR '{}'", args[1]);
+                return;
+            }
+        };
+
+        let lo: u32;
+        let hi: u32;
+
+        unsafe {
+            core::arch::asm!(
+                "rdmsr",
+                in("ecx") msr,
+                out("eax") lo,
+                out("edx") hi,
+            );
+        }
+
+        let value = ((hi as u64) << 32) | (lo as u64);
+        outln!("MSR {:#010x}: {:#018x}", msr, value);
+
+        // Decode common MSRs
+        if msr == 0x1B {
+            outln!("  APIC Base: {:#x}", value & 0xFFFFFF000);
+            outln!("  BSP: {}", (value >> 8) & 1);
+            outln!("  x2APIC Enable: {}", (value >> 10) & 1);
+            outln!("  Global Enable: {}", (value >> 11) & 1);
+        } else if msr == 0xC0000080 {
+            outln!("  EFER:");
+            outln!("    SCE (SYSCALL): {}", (value >> 0) & 1);
+            outln!("    LME (Long Mode Enable): {}", (value >> 8) & 1);
+            outln!("    LMA (Long Mode Active): {}", (value >> 10) & 1);
+            outln!("    NXE (No-Execute): {}", (value >> 11) & 1);
         }
     } else if eq_ignore_case(cmd, "veh") {
         let count = ke::rtl_get_vectored_handler_count();
