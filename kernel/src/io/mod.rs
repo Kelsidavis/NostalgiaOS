@@ -96,6 +96,10 @@ pub use file::{
     file_share,
     io_create_file_object,
     io_close_file_object,
+    FilePoolStats,
+    FileSnapshot,
+    io_get_file_stats,
+    io_get_file_snapshots,
 };
 
 pub use complete::{
@@ -151,6 +155,10 @@ pub use iocp::{
     io_post_irp_completion,
     MAX_COMPLETION_PORTS,
     MAX_QUEUED_COMPLETIONS,
+    CompletionPortStats,
+    CompletionPortSnapshot,
+    io_get_iocp_stats,
+    io_get_iocp_snapshots,
 };
 
 pub use pipe::{

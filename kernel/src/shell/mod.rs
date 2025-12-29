@@ -150,8 +150,9 @@ const COMMANDS: &[&str] = &[
     "bt",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "desc", "descriptor", "devdrv", "dir", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
+    "files",
     "hal", "handles", "help", "history", "hpet",
-    "int", "io", "ioq", "irql", "irqstat",
+    "int", "io", "iocp", "ioq", "irql", "irqstat",
     "ke",
     "ldr", "ls",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
@@ -1186,6 +1187,12 @@ impl Shell {
         // Device/Driver viewer
         } else if eq_ignore_case(cmd, "devdrv") {
             commands::cmd_devdrv(&args[1..argc]);
+        // File object viewer
+        } else if eq_ignore_case(cmd, "files") {
+            commands::cmd_files(&args[1..argc]);
+        // Completion port viewer
+        } else if eq_ignore_case(cmd, "iocp") {
+            commands::cmd_iocp(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

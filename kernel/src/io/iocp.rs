@@ -564,3 +564,96 @@ pub fn init() {
 
     crate::serial_println!("[IO] Completion port subsystem initialized");
 }
+
+// ============================================================================
+// Completion Port Inspection (for debugging)
+// ============================================================================
+
+/// Completion port pool statistics
+#[derive(Debug, Clone, Copy)]
+pub struct CompletionPortStats {
+    /// Total number of ports in pool
+    pub total_ports: usize,
+    /// Number of allocated ports
+    pub allocated_ports: usize,
+    /// Number of free ports
+    pub free_ports: usize,
+    /// Total completions processed across all ports
+    pub total_completions: u64,
+}
+
+/// Snapshot of an allocated completion port
+#[derive(Debug, Clone, Copy)]
+pub struct CompletionPortSnapshot {
+    /// Port address
+    pub address: u64,
+    /// Is active
+    pub active: bool,
+    /// Concurrency limit
+    pub concurrency_limit: u32,
+    /// Active threads
+    pub active_threads: u32,
+    /// Queued completions
+    pub queued_count: usize,
+    /// Total completions processed
+    pub completions_processed: u64,
+}
+
+/// Get completion port pool statistics
+pub fn io_get_iocp_stats() -> CompletionPortStats {
+    unsafe {
+        let allocated = COMPLETION_PORT_BITMAP.count_ones() as usize;
+        let mut total_completions = 0u64;
+
+        for i in 0..MAX_COMPLETION_PORTS {
+            if COMPLETION_PORT_BITMAP & (1 << i) != 0 {
+                total_completions += COMPLETION_PORT_POOL[i].completions_processed;
+            }
+        }
+
+        CompletionPortStats {
+            total_ports: MAX_COMPLETION_PORTS,
+            allocated_ports: allocated,
+            free_ports: MAX_COMPLETION_PORTS - allocated,
+            total_completions,
+        }
+    }
+}
+
+/// Get snapshots of allocated completion ports
+pub fn io_get_iocp_snapshots(max_count: usize) -> ([CompletionPortSnapshot; 16], usize) {
+    let mut snapshots = [CompletionPortSnapshot {
+        address: 0,
+        active: false,
+        concurrency_limit: 0,
+        active_threads: 0,
+        queued_count: 0,
+        completions_processed: 0,
+    }; 16];
+
+    let max_count = max_count.min(16);
+    let mut count = 0;
+
+    unsafe {
+        for i in 0..MAX_COMPLETION_PORTS {
+            if count >= max_count {
+                break;
+            }
+            if COMPLETION_PORT_BITMAP & (1 << i) != 0 {
+                let port = &COMPLETION_PORT_POOL[i];
+
+                snapshots[count] = CompletionPortSnapshot {
+                    address: &COMPLETION_PORT_POOL[i] as *const _ as u64,
+                    active: port.active,
+                    concurrency_limit: port.concurrency_limit,
+                    active_threads: port.active_threads,
+                    queued_count: port.completion_queue.count,
+                    completions_processed: port.completions_processed,
+                };
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}

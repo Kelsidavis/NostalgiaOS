@@ -12144,3 +12144,181 @@ fn show_driver_list() {
     outln!("");
     outln!("Total: {} drivers", count);
 }
+
+// ============================================================================
+// File Object Viewer Command
+// ============================================================================
+
+/// File object viewer command
+pub fn cmd_files(args: &[&str]) {
+    if args.is_empty() {
+        show_files_help();
+        return;
+    }
+
+    let cmd = args[0];
+    if eq_ignore_ascii_case(cmd, "help") || cmd == "-h" || cmd == "--help" || cmd == "-?" {
+        show_files_help();
+    } else if eq_ignore_ascii_case(cmd, "stats") {
+        show_file_stats();
+    } else if eq_ignore_ascii_case(cmd, "list") {
+        show_file_list();
+    } else {
+        outln!("Unknown subcommand: {}", args[0]);
+        show_files_help();
+    }
+}
+
+fn show_files_help() {
+    outln!("File Object Viewer");
+    outln!("");
+    outln!("Usage: files <subcommand>");
+    outln!("");
+    outln!("Subcommands:");
+    outln!("  stats     - Show file object pool statistics");
+    outln!("  list      - List allocated file objects");
+    outln!("  help      - Show this help message");
+}
+
+fn show_file_stats() {
+    use crate::io::io_get_file_stats;
+
+    let stats = io_get_file_stats();
+
+    outln!("File Object Pool Statistics");
+    outln!("===========================");
+    outln!("");
+    outln!("Total Files:      {}", stats.total_files);
+    outln!("Allocated:        {}", stats.allocated_files);
+    outln!("Free:             {}", stats.free_files);
+    outln!("");
+
+    let usage_pct = if stats.total_files > 0 {
+        (stats.allocated_files * 100) / stats.total_files
+    } else {
+        0
+    };
+    outln!("Pool Usage: {}%", usage_pct);
+}
+
+fn show_file_list() {
+    use crate::io::io_get_file_snapshots;
+
+    outln!("Allocated File Objects");
+    outln!("======================");
+    outln!("");
+
+    let (snapshots, count) = io_get_file_snapshots(32);
+
+    if count == 0 {
+        outln!("No file objects currently allocated");
+        return;
+    }
+
+    outln!("{:<18} {:<24} {:<6} {:<6} {:<10}",
+        "Address", "Name", "R", "W", "Offset");
+    outln!("------------------------------------------------------------");
+
+    for i in 0..count {
+        let file = &snapshots[i];
+        let name = core::str::from_utf8(&file.name[..file.name_length as usize])
+            .unwrap_or("?");
+        let read_str = if file.read_access { "Y" } else { "-" };
+        let write_str = if file.write_access { "Y" } else { "-" };
+
+        outln!("{:#018x} {:<24} {:<6} {:<6} {:<10}",
+            file.address,
+            name,
+            read_str,
+            write_str,
+            file.offset
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} files", count);
+}
+
+// ============================================================================
+// Completion Port Viewer Command
+// ============================================================================
+
+/// Completion port viewer command
+pub fn cmd_iocp(args: &[&str]) {
+    if args.is_empty() {
+        show_iocp_help();
+        return;
+    }
+
+    let cmd = args[0];
+    if eq_ignore_ascii_case(cmd, "help") || cmd == "-h" || cmd == "--help" || cmd == "-?" {
+        show_iocp_help();
+    } else if eq_ignore_ascii_case(cmd, "stats") {
+        show_iocp_stats();
+    } else if eq_ignore_ascii_case(cmd, "list") {
+        show_iocp_list();
+    } else {
+        outln!("Unknown subcommand: {}", args[0]);
+        show_iocp_help();
+    }
+}
+
+fn show_iocp_help() {
+    outln!("Completion Port Viewer");
+    outln!("");
+    outln!("Usage: iocp <subcommand>");
+    outln!("");
+    outln!("Subcommands:");
+    outln!("  stats     - Show completion port statistics");
+    outln!("  list      - List allocated completion ports");
+    outln!("  help      - Show this help message");
+}
+
+fn show_iocp_stats() {
+    use crate::io::io_get_iocp_stats;
+
+    let stats = io_get_iocp_stats();
+
+    outln!("Completion Port Statistics");
+    outln!("==========================");
+    outln!("");
+    outln!("Total Ports:      {}", stats.total_ports);
+    outln!("Allocated:        {}", stats.allocated_ports);
+    outln!("Free:             {}", stats.free_ports);
+    outln!("Total Completions: {}", stats.total_completions);
+}
+
+fn show_iocp_list() {
+    use crate::io::io_get_iocp_snapshots;
+
+    outln!("Allocated Completion Ports");
+    outln!("==========================");
+    outln!("");
+
+    let (snapshots, count) = io_get_iocp_snapshots(16);
+
+    if count == 0 {
+        outln!("No completion ports currently allocated");
+        return;
+    }
+
+    outln!("{:<18} {:<8} {:<10} {:<8} {:<12}",
+        "Address", "Active", "Concurrency", "Queued", "Processed");
+    outln!("------------------------------------------------------------");
+
+    for i in 0..count {
+        let port = &snapshots[i];
+        let active_str = if port.active { "Yes" } else { "No" };
+
+        outln!("{:#018x} {:<8} {:<10} {:<8} {:<12}",
+            port.address,
+            active_str,
+            port.concurrency_limit,
+            port.queued_count,
+            port.completions_processed
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} ports", count);
+}

@@ -446,3 +446,115 @@ pub unsafe fn io_close_file_object(file: *mut FileObject) {
 pub unsafe fn init_file_system() {
     crate::serial_println!("[IO] File object subsystem initialized ({} files available)", MAX_FILES);
 }
+
+// ============================================================================
+// File Object Pool Inspection (for debugging)
+// ============================================================================
+
+/// File object pool statistics
+#[derive(Debug, Clone, Copy)]
+pub struct FilePoolStats {
+    /// Total number of file objects in pool
+    pub total_files: usize,
+    /// Number of allocated file objects
+    pub allocated_files: usize,
+    /// Number of free file objects
+    pub free_files: usize,
+}
+
+/// Snapshot of an allocated file object
+#[derive(Debug, Clone, Copy)]
+pub struct FileSnapshot {
+    /// File object address
+    pub address: u64,
+    /// File name (truncated)
+    pub name: [u8; 64],
+    /// Name length
+    pub name_length: u8,
+    /// Flags
+    pub flags: u32,
+    /// Current byte offset
+    pub offset: u64,
+    /// Read access
+    pub read_access: bool,
+    /// Write access
+    pub write_access: bool,
+    /// Delete pending
+    pub delete_pending: bool,
+    /// Has device
+    pub has_device: bool,
+}
+
+/// Get file object pool statistics
+pub fn io_get_file_stats() -> FilePoolStats {
+    unsafe {
+        let _guard = FILE_POOL_LOCK.lock();
+        let mut allocated = 0usize;
+        for word in FILE_POOL_BITMAP.iter() {
+            allocated += word.count_ones() as usize;
+        }
+
+        FilePoolStats {
+            total_files: MAX_FILES,
+            allocated_files: allocated,
+            free_files: MAX_FILES - allocated,
+        }
+    }
+}
+
+/// Get snapshots of allocated file objects
+pub fn io_get_file_snapshots(max_count: usize) -> ([FileSnapshot; 32], usize) {
+    let mut snapshots = [FileSnapshot {
+        address: 0,
+        name: [0; 64],
+        name_length: 0,
+        flags: 0,
+        offset: 0,
+        read_access: false,
+        write_access: false,
+        delete_pending: false,
+        has_device: false,
+    }; 32];
+
+    let max_count = max_count.min(32);
+    let mut count = 0;
+
+    unsafe {
+        let _guard = FILE_POOL_LOCK.lock();
+
+        for word_idx in 0..4 {
+            for bit_idx in 0..64 {
+                if count >= max_count {
+                    break;
+                }
+                let global_idx = word_idx * 64 + bit_idx;
+                if global_idx >= MAX_FILES {
+                    break;
+                }
+                if FILE_POOL_BITMAP[word_idx] & (1 << bit_idx) != 0 {
+                    let file = &FILE_POOL[global_idx];
+
+                    // Copy name (truncated to 64 bytes)
+                    let mut name = [0u8; 64];
+                    let name_len = (file.file_name_length as usize).min(63);
+                    name[..name_len].copy_from_slice(&file.file_name[..name_len]);
+
+                    snapshots[count] = FileSnapshot {
+                        address: &FILE_POOL[global_idx] as *const _ as u64,
+                        name,
+                        name_length: name_len as u8,
+                        flags: file.flags.load(Ordering::Relaxed),
+                        offset: file.current_byte_offset.load(Ordering::Relaxed),
+                        read_access: file.read_access,
+                        write_access: file.write_access,
+                        delete_pending: file.delete_pending,
+                        has_device: !file.device_object.is_null(),
+                    };
+                    count += 1;
+                }
+            }
+        }
+    }
+
+    (snapshots, count)
+}
