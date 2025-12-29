@@ -126,6 +126,8 @@ pub enum SyscallNumber {
     NtSetTimer = 55,
     NtCancelTimer = 56,
     NtQueryTimer = 57,
+    NtQueryEvent = 58,
+    NtQuerySemaphore = 59,
 
     // Registry operations
     NtCreateKey = 60,
@@ -200,6 +202,7 @@ pub enum SyscallNumber {
     NtContinue = 131,
     NtGetContextThread = 132,
     NtSetContextThread = 133,
+    NtQueryMutant = 134,
 
     // Process creation (extended)
     NtCreateProcess = 140,
@@ -386,6 +389,9 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtSetTimer as usize, sys_set_timer);
     register_syscall(SyscallNumber::NtCancelTimer as usize, sys_cancel_timer);
     register_syscall(SyscallNumber::NtQueryTimer as usize, sys_query_timer);
+    register_syscall(SyscallNumber::NtQueryEvent as usize, sys_query_event);
+    register_syscall(SyscallNumber::NtQuerySemaphore as usize, sys_query_semaphore);
+    register_syscall(SyscallNumber::NtQueryMutant as usize, sys_query_mutant);
 
     // Memory management syscalls
     register_syscall(SyscallNumber::NtAllocateVirtualMemory as usize, sys_allocate_virtual_memory);
@@ -3838,6 +3844,348 @@ fn sys_query_timer(
     }
 
     crate::serial_println!("[SYSCALL] NtQueryTimer: OB query successful");
+    0
+}
+
+/// Event information class
+mod event_info_class {
+    #[allow(non_upper_case_globals)]
+    pub const EventBasicInformation: usize = 0;
+}
+
+/// Event basic information structure
+#[repr(C)]
+struct EventBasicInformation {
+    /// Event type (0 = Notification, 1 = Synchronization)
+    event_type: u32,
+    /// Event state (1 = signaled, 0 = not signaled)
+    event_state: i32,
+}
+
+/// NtQueryEvent - Query event object information
+///
+/// Returns the event type and current signal state.
+///
+/// # Arguments
+/// * `event_handle` - Handle to event object
+/// * `event_info_class` - Information class (only EventBasicInformation supported)
+/// * `event_information` - Output buffer for information
+/// * `event_info_length` - Size of output buffer
+/// * `return_length` - Optional pointer to receive required size
+///
+/// # Returns
+/// * STATUS_SUCCESS - Query successful
+/// * STATUS_INVALID_HANDLE - Invalid handle
+/// * STATUS_INVALID_PARAMETER - Invalid info class or null buffer
+/// * STATUS_INFO_LENGTH_MISMATCH - Buffer too small
+/// * STATUS_OBJECT_TYPE_MISMATCH - Handle is not an event
+fn sys_query_event(
+    event_handle: usize,
+    event_info_class: usize,
+    event_information: usize,
+    event_info_length: usize,
+    return_length: usize,
+    _: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtQueryEvent(handle=0x{:X}, class={}, buf=0x{:X}, len={})",
+        event_handle, event_info_class, event_information, event_info_length
+    );
+
+    if event_handle == 0 {
+        return wait_status::STATUS_INVALID_HANDLE;
+    }
+
+    if event_info_class != event_info_class::EventBasicInformation {
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    let required_size = core::mem::size_of::<EventBasicInformation>();
+
+    if return_length != 0 {
+        unsafe { *(return_length as *mut u32) = required_size as u32; }
+    }
+
+    if event_info_length < required_size {
+        return wait_status::STATUS_INFO_LENGTH_MISMATCH;
+    }
+
+    if event_information == 0 {
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Try sync object pool first
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(event_handle) } {
+        if obj_type != SyncObjectType::Event {
+            return wait_status::STATUS_OBJECT_TYPE_MISMATCH;
+        }
+
+        unsafe {
+            let event = &*core::ptr::addr_of!((*entry).data.event);
+            let info = event_information as *mut EventBasicInformation;
+
+            // EventType: 0 = Notification, 1 = Synchronization
+            (*info).event_type = event.event_type() as u32;
+            (*info).event_state = event.is_signaled() as i32;
+        }
+
+        crate::serial_println!("[SYSCALL] NtQueryEvent: query successful");
+        return 0;
+    }
+
+    // Try object manager
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(event_handle as u32, 0);
+        if obj.is_null() {
+            return wait_status::STATUS_INVALID_HANDLE;
+        }
+        obj
+    };
+
+    unsafe {
+        let event = &*(object as *const crate::ke::event::KEvent);
+        let info = event_information as *mut EventBasicInformation;
+
+        (*info).event_type = event.event_type() as u32;
+        (*info).event_state = event.is_signaled() as i32;
+
+        crate::ob::ob_dereference_object(object);
+    }
+
+    crate::serial_println!("[SYSCALL] NtQueryEvent: OB query successful");
+    0
+}
+
+/// Semaphore information class
+mod semaphore_info_class {
+    #[allow(non_upper_case_globals)]
+    pub const SemaphoreBasicInformation: usize = 0;
+}
+
+/// Semaphore basic information structure
+#[repr(C)]
+struct SemaphoreBasicInformation {
+    /// Current count
+    current_count: i32,
+    /// Maximum count
+    maximum_count: i32,
+}
+
+/// NtQuerySemaphore - Query semaphore object information
+///
+/// Returns the current count and maximum count of the semaphore.
+///
+/// # Arguments
+/// * `semaphore_handle` - Handle to semaphore object
+/// * `semaphore_info_class` - Information class (only SemaphoreBasicInformation supported)
+/// * `semaphore_information` - Output buffer for information
+/// * `semaphore_info_length` - Size of output buffer
+/// * `return_length` - Optional pointer to receive required size
+///
+/// # Returns
+/// * STATUS_SUCCESS - Query successful
+/// * STATUS_INVALID_HANDLE - Invalid handle
+/// * STATUS_INVALID_PARAMETER - Invalid info class or null buffer
+/// * STATUS_INFO_LENGTH_MISMATCH - Buffer too small
+/// * STATUS_OBJECT_TYPE_MISMATCH - Handle is not a semaphore
+fn sys_query_semaphore(
+    semaphore_handle: usize,
+    semaphore_info_class: usize,
+    semaphore_information: usize,
+    semaphore_info_length: usize,
+    return_length: usize,
+    _: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtQuerySemaphore(handle=0x{:X}, class={}, buf=0x{:X}, len={})",
+        semaphore_handle, semaphore_info_class, semaphore_information, semaphore_info_length
+    );
+
+    if semaphore_handle == 0 {
+        return wait_status::STATUS_INVALID_HANDLE;
+    }
+
+    if semaphore_info_class != semaphore_info_class::SemaphoreBasicInformation {
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    let required_size = core::mem::size_of::<SemaphoreBasicInformation>();
+
+    if return_length != 0 {
+        unsafe { *(return_length as *mut u32) = required_size as u32; }
+    }
+
+    if semaphore_info_length < required_size {
+        return wait_status::STATUS_INFO_LENGTH_MISMATCH;
+    }
+
+    if semaphore_information == 0 {
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Try sync object pool first
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(semaphore_handle) } {
+        if obj_type != SyncObjectType::Semaphore {
+            return wait_status::STATUS_OBJECT_TYPE_MISMATCH;
+        }
+
+        unsafe {
+            let semaphore = &*core::ptr::addr_of!((*entry).data.semaphore);
+            let info = semaphore_information as *mut SemaphoreBasicInformation;
+
+            (*info).current_count = semaphore.count();
+            (*info).maximum_count = semaphore.limit();
+        }
+
+        crate::serial_println!("[SYSCALL] NtQuerySemaphore: query successful");
+        return 0;
+    }
+
+    // Try object manager
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(semaphore_handle as u32, 0);
+        if obj.is_null() {
+            return wait_status::STATUS_INVALID_HANDLE;
+        }
+        obj
+    };
+
+    unsafe {
+        let semaphore = &*(object as *const crate::ke::KSemaphore);
+        let info = semaphore_information as *mut SemaphoreBasicInformation;
+
+        (*info).current_count = semaphore.count();
+        (*info).maximum_count = semaphore.limit();
+
+        crate::ob::ob_dereference_object(object);
+    }
+
+    crate::serial_println!("[SYSCALL] NtQuerySemaphore: OB query successful");
+    0
+}
+
+/// Mutant information class
+mod mutant_info_class {
+    #[allow(non_upper_case_globals)]
+    pub const MutantBasicInformation: usize = 0;
+}
+
+/// Mutant basic information structure
+#[repr(C)]
+struct MutantBasicInformation {
+    /// Current count (negative when owned, 0 = available)
+    current_count: i32,
+    /// Whether the mutant is owned by the caller
+    owned_by_caller: u8,
+    /// Whether the mutant was abandoned
+    abandoned_state: u8,
+}
+
+/// NtQueryMutant - Query mutant (mutex) object information
+///
+/// Returns the current state, ownership, and abandoned status.
+///
+/// # Arguments
+/// * `mutant_handle` - Handle to mutant object
+/// * `mutant_info_class` - Information class (only MutantBasicInformation supported)
+/// * `mutant_information` - Output buffer for information
+/// * `mutant_info_length` - Size of output buffer
+/// * `return_length` - Optional pointer to receive required size
+///
+/// # Returns
+/// * STATUS_SUCCESS - Query successful
+/// * STATUS_INVALID_HANDLE - Invalid handle
+/// * STATUS_INVALID_PARAMETER - Invalid info class or null buffer
+/// * STATUS_INFO_LENGTH_MISMATCH - Buffer too small
+/// * STATUS_OBJECT_TYPE_MISMATCH - Handle is not a mutant
+fn sys_query_mutant(
+    mutant_handle: usize,
+    mutant_info_class: usize,
+    mutant_information: usize,
+    mutant_info_length: usize,
+    return_length: usize,
+    _: usize,
+) -> isize {
+    crate::serial_println!(
+        "[SYSCALL] NtQueryMutant(handle=0x{:X}, class={}, buf=0x{:X}, len={})",
+        mutant_handle, mutant_info_class, mutant_information, mutant_info_length
+    );
+
+    if mutant_handle == 0 {
+        return wait_status::STATUS_INVALID_HANDLE;
+    }
+
+    if mutant_info_class != mutant_info_class::MutantBasicInformation {
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    let required_size = core::mem::size_of::<MutantBasicInformation>();
+
+    if return_length != 0 {
+        unsafe { *(return_length as *mut u32) = required_size as u32; }
+    }
+
+    if mutant_info_length < required_size {
+        return wait_status::STATUS_INFO_LENGTH_MISMATCH;
+    }
+
+    if mutant_information == 0 {
+        return wait_status::STATUS_INVALID_PARAMETER;
+    }
+
+    // Try sync object pool first
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(mutant_handle) } {
+        if obj_type != SyncObjectType::Mutex {
+            return wait_status::STATUS_OBJECT_TYPE_MISMATCH;
+        }
+
+        unsafe {
+            let mutex = &*core::ptr::addr_of!((*entry).data.mutex);
+            let info = mutant_information as *mut MutantBasicInformation;
+
+            // In NT, count is 1 when available, <= 0 when owned
+            // -1 = owned once, -2 = owned twice (recursive), etc.
+            (*info).current_count = if mutex.is_owned() {
+                // Use header signal_state to approximate count
+                -(mutex.header.signal_state().max(1))
+            } else {
+                1 // Available
+            };
+            (*info).owned_by_caller = mutex.is_owned_by_current() as u8;
+            // Abandoned state would be set if owner thread terminated while holding
+            // For now we don't track this, so always 0
+            (*info).abandoned_state = 0;
+        }
+
+        crate::serial_println!("[SYSCALL] NtQueryMutant: query successful");
+        return 0;
+    }
+
+    // Try object manager
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(mutant_handle as u32, 0);
+        if obj.is_null() {
+            return wait_status::STATUS_INVALID_HANDLE;
+        }
+        obj
+    };
+
+    unsafe {
+        let mutex = &*(object as *const crate::ke::KMutex);
+        let info = mutant_information as *mut MutantBasicInformation;
+
+        (*info).current_count = if mutex.is_owned() {
+            -(mutex.header.signal_state().max(1))
+        } else {
+            1
+        };
+        (*info).owned_by_caller = mutex.is_owned_by_current() as u8;
+        (*info).abandoned_state = 0;
+
+        crate::ob::ob_dereference_object(object);
+    }
+
+    crate::serial_println!("[SYSCALL] NtQueryMutant: OB query successful");
     0
 }
 
