@@ -2821,7 +2821,7 @@ fn sys_set_event(
     // Try sync object pool first
     if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
         if obj_type != SyncObjectType::Event {
-            return -1;
+            return STATUS_OBJECT_TYPE_MISMATCH;
         }
 
         let was_signaled = unsafe {
@@ -2833,14 +2833,14 @@ fn sys_set_event(
             unsafe { *(previous_state as *mut i32) = was_signaled as i32; }
         }
 
-        return 0;
+        return STATUS_SUCCESS;
     }
 
     // Fall back to object manager handles
     let object = unsafe {
         let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
         if obj.is_null() {
-            return -1;
+            return STATUS_INVALID_HANDLE;
         }
         obj
     };
@@ -2856,7 +2856,7 @@ fn sys_set_event(
 
     unsafe { crate::ob::ob_dereference_object(object); }
 
-    0 // STATUS_SUCCESS
+    STATUS_SUCCESS
 }
 
 /// NtResetEvent - Reset (unsignal) an event
@@ -2868,7 +2868,7 @@ fn sys_reset_event(
     // Try sync object pool first
     if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
         if obj_type != SyncObjectType::Event {
-            return -1;
+            return STATUS_OBJECT_TYPE_MISMATCH;
         }
 
         let was_signaled = unsafe {
@@ -2880,14 +2880,14 @@ fn sys_reset_event(
             unsafe { *(previous_state as *mut i32) = was_signaled as i32; }
         }
 
-        return 0;
+        return STATUS_SUCCESS;
     }
 
     // Fall back to object manager handles
     let object = unsafe {
         let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
         if obj.is_null() {
-            return -1;
+            return STATUS_INVALID_HANDLE;
         }
         obj
     };
@@ -2903,7 +2903,7 @@ fn sys_reset_event(
 
     unsafe { crate::ob::ob_dereference_object(object); }
 
-    0
+    STATUS_SUCCESS
 }
 
 /// NtClearEvent - Clear (unsignal) an event
@@ -2931,7 +2931,7 @@ fn sys_pulse_event(
     // Try sync object pool first
     if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
         if obj_type != SyncObjectType::Event {
-            return -1;
+            return STATUS_OBJECT_TYPE_MISMATCH;
         }
 
         let was_signaled = unsafe {
@@ -2944,14 +2944,14 @@ fn sys_pulse_event(
         }
 
         crate::serial_println!("[SYSCALL] NtPulseEvent(handle={:#x}) -> prev={}", handle, was_signaled);
-        return 0;
+        return STATUS_SUCCESS;
     }
 
     // Fall back to object manager handles
     let object = unsafe {
         let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
         if obj.is_null() {
-            return -1;
+            return STATUS_INVALID_HANDLE;
         }
         obj
     };
@@ -2968,7 +2968,7 @@ fn sys_pulse_event(
     unsafe { crate::ob::ob_dereference_object(object); }
 
     crate::serial_println!("[SYSCALL] NtPulseEvent(handle={:#x}) via OB -> prev={}", handle, was_signaled);
-    0
+    STATUS_SUCCESS
 }
 
 // ============================================================================
@@ -3088,13 +3088,13 @@ fn sys_create_event(
     _: usize,
 ) -> isize {
     if event_handle == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Allocate event from pool
     let handle = match unsafe { alloc_sync_object(SyncObjectType::Event) } {
         Some(h) => h,
-        None => return -1, // STATUS_INSUFFICIENT_RESOURCES
+        None => return STATUS_INSUFFICIENT_RESOURCES,
     };
 
     // Initialize the event
@@ -3117,7 +3117,7 @@ fn sys_create_event(
     crate::serial_println!("[SYSCALL] NtCreateEvent(type={}, init={}) -> handle {:#x}",
         event_type, initial_state, handle);
 
-    0 // STATUS_SUCCESS
+    STATUS_SUCCESS
 }
 
 /// NtReleaseSemaphore - Release a semaphore
@@ -3130,7 +3130,7 @@ fn sys_release_semaphore(
     // Try sync object pool first
     if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
         if obj_type != SyncObjectType::Semaphore {
-            return -1; // Wrong object type
+            return STATUS_OBJECT_TYPE_MISMATCH;
         }
 
         let prev = unsafe {
@@ -3142,14 +3142,14 @@ fn sys_release_semaphore(
             unsafe { *(previous_count as *mut i32) = prev; }
         }
 
-        return 0;
+        return STATUS_SUCCESS;
     }
 
     // Fall back to object manager handles
     let object = unsafe {
         let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
         if obj.is_null() {
-            return -1;
+            return STATUS_INVALID_HANDLE;
         }
         obj
     };
@@ -3165,7 +3165,7 @@ fn sys_release_semaphore(
 
     unsafe { crate::ob::ob_dereference_object(object); }
 
-    0
+    STATUS_SUCCESS
 }
 
 /// NtCreateSemaphore - Create a semaphore object
@@ -3178,13 +3178,13 @@ fn sys_create_semaphore(
     _: usize,
 ) -> isize {
     if semaphore_handle == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Allocate semaphore from pool
     let handle = match unsafe { alloc_sync_object(SyncObjectType::Semaphore) } {
         Some(h) => h,
-        None => return -1,
+        None => return STATUS_INSUFFICIENT_RESOURCES,
     };
 
     // Initialize the semaphore
@@ -3201,7 +3201,7 @@ fn sys_create_semaphore(
     crate::serial_println!("[SYSCALL] NtCreateSemaphore(init={}, max={}) -> handle {:#x}",
         initial_count, maximum_count, handle);
 
-    0
+    STATUS_SUCCESS
 }
 
 /// NtReleaseMutant - Release a mutex (mutant in NT terminology)
@@ -3213,7 +3213,7 @@ fn sys_release_mutant(
     // Try sync object pool first
     if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
         if obj_type != SyncObjectType::Mutex {
-            return -1;
+            return STATUS_OBJECT_TYPE_MISMATCH;
         }
 
         let prev = unsafe {
@@ -3227,14 +3227,14 @@ fn sys_release_mutant(
             unsafe { *(previous_count as *mut i32) = prev; }
         }
 
-        return 0;
+        return STATUS_SUCCESS;
     }
 
     // Fall back to object manager handles
     let object = unsafe {
         let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
         if obj.is_null() {
-            return -1;
+            return STATUS_INVALID_HANDLE;
         }
         obj
     };
@@ -3252,7 +3252,7 @@ fn sys_release_mutant(
 
     unsafe { crate::ob::ob_dereference_object(object); }
 
-    0
+    STATUS_SUCCESS
 }
 
 /// NtCreateMutant - Create a mutex object
@@ -3264,13 +3264,13 @@ fn sys_create_mutant(
     _: usize, _: usize,
 ) -> isize {
     if mutant_handle == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Allocate mutex from pool
     let handle = match unsafe { alloc_sync_object(SyncObjectType::Mutex) } {
         Some(h) => h,
-        None => return -1,
+        None => return STATUS_INSUFFICIENT_RESOURCES,
     };
 
     // Initialize the mutex
@@ -3292,7 +3292,7 @@ fn sys_create_mutant(
     crate::serial_println!("[SYSCALL] NtCreateMutant(initial_owner={}) -> handle {:#x}",
         initial_owner, handle);
 
-    0
+    STATUS_SUCCESS
 }
 
 // ============================================================================
