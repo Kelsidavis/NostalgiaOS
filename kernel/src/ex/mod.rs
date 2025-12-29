@@ -22,6 +22,7 @@
 //! - `FAST_MUTEX`: Fast kernel mutex
 //! - `LOOKASIDE_LIST_EX`: Per-CPU lookaside list
 
+pub mod callback;
 pub mod fast_mutex;
 pub mod lookaside;
 pub mod pushlock;
@@ -32,6 +33,7 @@ pub mod worker;
 // pub mod timer;     // Uses ke::timer
 
 // Re-exports for convenience
+pub use callback::*;
 pub use fast_mutex::*;
 pub use lookaside::*;
 pub use pushlock::*;
