@@ -4075,6 +4075,8 @@ pub fn cmd_debug(args: &[&str]) {
         outln!("  inw <port>       Read word from I/O port");
         outln!("  ind <port>       Read dword from I/O port");
         outln!("  rdmsr <msr>      Read model-specific register");
+        outln!("  tsc              Read Time Stamp Counter");
+        outln!("  all              Dump complete system state");
         outln!("  veh              Show VEH handler count");
         outln!("  seh              Show SEH frame count");
         return;
@@ -4512,6 +4514,150 @@ pub fn cmd_debug(args: &[&str]) {
             outln!("    LMA (Long Mode Active): {}", (value >> 10) & 1);
             outln!("    NXE (No-Execute): {}", (value >> 11) & 1);
         }
+    } else if eq_ignore_case(cmd, "tsc") {
+        let lo: u32;
+        let hi: u32;
+
+        unsafe {
+            core::arch::asm!(
+                "rdtsc",
+                out("eax") lo,
+                out("edx") hi,
+            );
+        }
+
+        let tsc = ((hi as u64) << 32) | (lo as u64);
+        outln!("Time Stamp Counter: {}", tsc);
+        outln!("  Hex: {:#018x}", tsc);
+    } else if eq_ignore_case(cmd, "all") {
+        // Comprehensive system state dump
+        outln!("=== Complete System State ===");
+        outln!("");
+
+        // CPU Info
+        let eax: u32;
+        let ebx: u32;
+        let ecx: u32;
+        let edx: u32;
+
+        unsafe {
+            core::arch::asm!(
+                "push rbx",
+                "mov eax, 0",
+                "cpuid",
+                "mov {ebx_out:e}, ebx",
+                "pop rbx",
+                ebx_out = out(reg) ebx,
+                out("eax") eax,
+                lateout("ecx") ecx,
+                out("edx") edx,
+            );
+        }
+
+        let mut vendor = [0u8; 12];
+        vendor[0..4].copy_from_slice(&ebx.to_le_bytes());
+        vendor[4..8].copy_from_slice(&edx.to_le_bytes());
+        vendor[8..12].copy_from_slice(&ecx.to_le_bytes());
+        let vendor_str = core::str::from_utf8(&vendor).unwrap_or("?");
+
+        outln!("[CPU]");
+        outln!("  Vendor: {}", vendor_str);
+
+        // Control Registers
+        let cr0: u64;
+        let cr3: u64;
+        let cr4: u64;
+        let rflags: u64;
+
+        unsafe {
+            core::arch::asm!(
+                "mov {}, cr0",
+                "mov {}, cr3",
+                "mov {}, cr4",
+                "pushfq",
+                "pop {}",
+                out(reg) cr0,
+                out(reg) cr3,
+                out(reg) cr4,
+                out(reg) rflags,
+            );
+        }
+
+        outln!("");
+        outln!("[Control Registers]");
+        outln!("  CR0: {:#018x} (PG={} WP={} PE={})", cr0,
+            (cr0 >> 31) & 1, (cr0 >> 16) & 1, cr0 & 1);
+        outln!("  CR3: {:#018x}", cr3);
+        outln!("  CR4: {:#018x} (PAE={} PSE={})", cr4, (cr4 >> 5) & 1, (cr4 >> 4) & 1);
+        outln!("  RFLAGS: {:#018x} (IF={})", rflags, (rflags >> 9) & 1);
+
+        // GDT/IDT
+        #[repr(C, packed)]
+        struct DescriptorTablePointer {
+            limit: u16,
+            base: u64,
+        }
+
+        let mut gdtr = DescriptorTablePointer { limit: 0, base: 0 };
+        let mut idtr = DescriptorTablePointer { limit: 0, base: 0 };
+
+        unsafe {
+            core::arch::asm!("sgdt [{}]", in(reg) &mut gdtr);
+            core::arch::asm!("sidt [{}]", in(reg) &mut idtr);
+        }
+
+        outln!("");
+        outln!("[Descriptor Tables]");
+        outln!("  GDT: {:#018x} (limit: {:#x})", gdtr.base, gdtr.limit);
+        outln!("  IDT: {:#018x} (limit: {:#x})", idtr.base, idtr.limit);
+
+        // Stack
+        let rsp: u64;
+        let rbp: u64;
+
+        unsafe {
+            core::arch::asm!(
+                "mov {}, rsp",
+                "mov {}, rbp",
+                out(reg) rsp,
+                out(reg) rbp,
+            );
+        }
+
+        outln!("");
+        outln!("[Stack]");
+        outln!("  RSP: {:#018x}", rsp);
+        outln!("  RBP: {:#018x}", rbp);
+
+        // TSC
+        let lo: u32;
+        let hi: u32;
+
+        unsafe {
+            core::arch::asm!(
+                "rdtsc",
+                out("eax") lo,
+                out("edx") hi,
+            );
+        }
+
+        let tsc = ((hi as u64) << 32) | (lo as u64);
+
+        outln!("");
+        outln!("[Timing]");
+        outln!("  TSC: {}", tsc);
+
+        // Exception handlers
+        let veh_count = ke::rtl_get_vectored_handler_count();
+        let seh_count = ke::rtl_get_seh_frame_count();
+
+        outln!("");
+        outln!("[Exception Handling]");
+        outln!("  VEH Handlers: {}", veh_count);
+        outln!("  SEH Frames: {}", seh_count);
+
+        outln!("");
+        outln!("=== End System State ===");
     } else if eq_ignore_case(cmd, "veh") {
         let count = ke::rtl_get_vectored_handler_count();
         outln!("Vectored Exception Handlers:");
