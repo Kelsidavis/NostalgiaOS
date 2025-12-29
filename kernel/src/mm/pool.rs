@@ -408,6 +408,51 @@ pub fn mm_get_pool_free_count(class_idx: usize) -> usize {
     }
 }
 
+/// Per-class pool statistics
+#[derive(Debug, Clone, Copy)]
+pub struct PoolClassStats {
+    pub block_size: usize,
+    pub total_blocks: usize,
+    pub free_blocks: usize,
+    pub used_blocks: usize,
+    pub total_bytes: usize,
+    pub used_bytes: usize,
+}
+
+/// Get statistics for a specific size class
+pub fn mm_get_pool_class_stats(class_idx: usize) -> Option<PoolClassStats> {
+    if class_idx >= SIZE_CLASSES.len() {
+        return None;
+    }
+    unsafe {
+        let _guard = POOL_LOCK.lock();
+        let arena = &POOL_ARENAS[class_idx];
+        let block_size = SIZE_CLASSES[class_idx];
+        let total_blocks = BLOCKS_PER_CLASS;
+        let free_blocks = arena.free_count;
+        let used_blocks = total_blocks - free_blocks;
+
+        Some(PoolClassStats {
+            block_size,
+            total_blocks,
+            free_blocks,
+            used_blocks,
+            total_bytes: block_size * total_blocks,
+            used_bytes: block_size * used_blocks,
+        })
+    }
+}
+
+/// Get number of size classes
+pub fn mm_get_pool_class_count() -> usize {
+    SIZE_CLASSES.len()
+}
+
+/// Get all size classes
+pub fn mm_get_size_classes() -> &'static [usize] {
+    &SIZE_CLASSES
+}
+
 // ============================================================================
 // Global Allocator (optional)
 // ============================================================================

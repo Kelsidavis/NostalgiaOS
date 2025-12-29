@@ -125,6 +125,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    smbios (dmi)   SMBIOS/DMI system info (bios, cpu, mem)");
         outln!("    exception      Exception history viewer (list, stats)");
         outln!("    irqstat        Interrupt statistics (all, rate, clear)");
+        outln!("    pool           Kernel pool allocator stats (classes)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -10007,4 +10008,231 @@ fn show_irqstat_rate() {
     if keyboard > 0 { outln!("  Keyboard:    {:.2} /sec", keyboard as f64 / seconds as f64); }
     if ipi_resched > 0 { outln!("  Reschedule:  {:.2} /sec", ipi_resched as f64 / seconds as f64); }
     if tlb > 0 { outln!("  TLB Shoot:   {:.2} /sec", tlb as f64 / seconds as f64); }
+}
+
+// ============================================================================
+// Pool Statistics Command
+// ============================================================================
+
+/// Kernel pool statistics viewer command
+pub fn cmd_pool(args: &[&str]) {
+    if args.is_empty() {
+        show_pool_overview();
+        return;
+    }
+
+    let cmd = args[0];
+    if eq_ignore_case(cmd, "help") {
+        show_pool_help();
+    } else if eq_ignore_case(cmd, "classes") || eq_ignore_case(cmd, "sizes") {
+        show_pool_classes();
+    } else if eq_ignore_case(cmd, "usage") || eq_ignore_case(cmd, "detail") {
+        show_pool_usage();
+    } else if eq_ignore_case(cmd, "fragmentation") || eq_ignore_case(cmd, "frag") {
+        show_pool_fragmentation();
+    } else if eq_ignore_case(cmd, "alloc") {
+        if args.len() > 1 {
+            let size = parse_number(args[1]).unwrap_or(64) as usize;
+            test_pool_alloc(size);
+        } else {
+            outln!("Usage: pool alloc <size>");
+        }
+    } else {
+        outln!("Unknown pool command: {}", cmd);
+        show_pool_help();
+    }
+}
+
+fn show_pool_help() {
+    outln!("Kernel Pool Statistics Viewer");
+    outln!("");
+    outln!("Usage: pool <command>");
+    outln!("");
+    outln!("Commands:");
+    outln!("  (none)         Show overview statistics");
+    outln!("  classes        Show per-size-class stats");
+    outln!("  usage          Show detailed usage breakdown");
+    outln!("  fragmentation  Show fragmentation analysis");
+    outln!("  alloc <size>   Test pool allocation");
+}
+
+fn show_pool_overview() {
+    use crate::mm::pool::mm_get_pool_stats;
+
+    let stats = mm_get_pool_stats();
+
+    outln!("Kernel Pool Statistics");
+    outln!("======================");
+    outln!("");
+    outln!("Pool Heap Size:    {} KB ({} bytes)", stats.total_size / 1024, stats.total_size);
+    outln!("Bytes Allocated:   {} KB ({} bytes)", stats.bytes_allocated / 1024, stats.bytes_allocated);
+    outln!("Bytes Free:        {} KB ({} bytes)", stats.bytes_free / 1024, stats.bytes_free);
+    outln!("");
+    outln!("Allocation Count:  {}", stats.allocation_count);
+    outln!("Free Count:        {}", stats.free_count);
+    outln!("Active Allocs:     {}", stats.allocation_count.saturating_sub(stats.free_count));
+
+    let usage_pct = if stats.total_size > 0 {
+        (stats.bytes_allocated as f64 / stats.total_size as f64) * 100.0
+    } else {
+        0.0
+    };
+    outln!("");
+    outln!("Usage:             {:.1}%", usage_pct);
+
+    outln!("");
+    outln!("Use 'pool classes' for size class breakdown");
+}
+
+fn show_pool_classes() {
+    use crate::mm::pool::{mm_get_pool_class_stats, mm_get_pool_class_count};
+
+    outln!("Pool Size Classes");
+    outln!("=================");
+    outln!("");
+    outln!("{:<6} {:<8} {:<8} {:<8} {:<10} {:<10}",
+        "Class", "Size", "Total", "Used", "Free", "Usage%");
+    outln!("--------------------------------------------------------------");
+
+    for i in 0..mm_get_pool_class_count() {
+        if let Some(stats) = mm_get_pool_class_stats(i) {
+            let usage_pct = if stats.total_blocks > 0 {
+                (stats.used_blocks as f64 / stats.total_blocks as f64) * 100.0
+            } else {
+                0.0
+            };
+            outln!("{:<6} {:>6}B {:>8} {:>8} {:>8} {:>9.1}%",
+                i, stats.block_size, stats.total_blocks,
+                stats.used_blocks, stats.free_blocks, usage_pct);
+        }
+    }
+}
+
+fn show_pool_usage() {
+    use crate::mm::pool::{mm_get_pool_stats, mm_get_pool_class_stats, mm_get_pool_class_count};
+
+    let overall = mm_get_pool_stats();
+
+    outln!("Detailed Pool Usage");
+    outln!("===================");
+    outln!("");
+
+    outln!("Overall:");
+    outln!("  Total capacity:     {} KB", overall.total_size / 1024);
+    outln!("  Currently in use:   {} KB ({:.1}%)",
+        overall.bytes_allocated / 1024,
+        (overall.bytes_allocated as f64 / overall.total_size as f64) * 100.0);
+    outln!("  Available:          {} KB", overall.bytes_free / 1024);
+
+    outln!("");
+    outln!("Per Size Class:");
+    outln!("{:<8} {:<12} {:<12} {:<12}",
+        "Size", "Capacity", "In Use", "Available");
+    outln!("------------------------------------------------");
+
+    let mut total_capacity = 0usize;
+    let mut total_in_use = 0usize;
+
+    for i in 0..mm_get_pool_class_count() {
+        if let Some(stats) = mm_get_pool_class_stats(i) {
+            outln!("{:>6}B {:>10}B {:>10}B {:>10}B",
+                stats.block_size, stats.total_bytes,
+                stats.used_bytes, stats.total_bytes - stats.used_bytes);
+            total_capacity += stats.total_bytes;
+            total_in_use += stats.used_bytes;
+        }
+    }
+
+    outln!("------------------------------------------------");
+    outln!("{:<8} {:>10}B {:>10}B {:>10}B",
+        "TOTAL", total_capacity, total_in_use, total_capacity - total_in_use);
+}
+
+fn show_pool_fragmentation() {
+    use crate::mm::pool::{mm_get_pool_class_stats, mm_get_pool_class_count};
+
+    outln!("Pool Fragmentation Analysis");
+    outln!("===========================");
+    outln!("");
+
+    let mut total_waste = 0usize;
+    let mut total_used = 0usize;
+    let mut fragmented_classes = 0;
+
+    for i in 0..mm_get_pool_class_count() {
+        if let Some(stats) = mm_get_pool_class_stats(i) {
+            if stats.used_blocks > 0 {
+                total_used += stats.used_bytes;
+                // Assume average internal fragmentation is block_size/4
+                let estimated_waste = (stats.block_size / 4) * stats.used_blocks;
+                total_waste += estimated_waste;
+
+                // Check if class is fragmented (some used, some free)
+                if stats.free_blocks > 0 && stats.used_blocks > 0 {
+                    fragmented_classes += 1;
+                }
+            }
+        }
+    }
+
+    outln!("Size Classes with Mixed Usage: {}/{}",
+        fragmented_classes, mm_get_pool_class_count());
+
+    if total_used > 0 {
+        let frag_pct = (total_waste as f64 / (total_used + total_waste) as f64) * 100.0;
+        outln!("");
+        outln!("Estimated Internal Fragmentation:");
+        outln!("  Used bytes:              {} B", total_used);
+        outln!("  Est. wasted bytes:       {} B", total_waste);
+        outln!("  Fragmentation rate:      {:.1}%", frag_pct);
+    } else {
+        outln!("");
+        outln!("No allocations to analyze");
+    }
+
+    outln!("");
+    outln!("Notes:");
+    outln!("  - Internal fragmentation is estimated (actual may vary)");
+    outln!("  - Pool uses fixed size classes which may waste space");
+    outln!("  - Allocations are rounded up to next size class");
+}
+
+fn test_pool_alloc(size: usize) {
+    use crate::mm::pool::{ex_allocate_pool_with_tag, ex_free_pool, PoolType, pool_tags};
+
+    outln!("Testing pool allocation of {} bytes...", size);
+
+    unsafe {
+        let ptr = ex_allocate_pool_with_tag(
+            PoolType::NonPagedPool,
+            size,
+            pool_tags::TAG_GENERIC,
+        );
+
+        if ptr.is_null() {
+            outln!("  Allocation FAILED (null returned)");
+            outln!("  Size may be too large for available pool");
+        } else {
+            outln!("  Allocation SUCCESS at {:p}", ptr);
+
+            // Write some test data
+            for i in 0..size.min(16) {
+                *ptr.add(i) = (i & 0xFF) as u8;
+            }
+            outln!("  Wrote {} bytes of test data", size.min(16));
+
+            // Free immediately
+            ex_free_pool(ptr);
+            outln!("  Freed successfully");
+        }
+    }
+
+    // Show updated stats
+    use crate::mm::pool::mm_get_pool_stats;
+    let stats = mm_get_pool_stats();
+    outln!("");
+    outln!("Current pool state:");
+    outln!("  Active allocations: {}",
+        stats.allocation_count.saturating_sub(stats.free_count));
+    outln!("  Bytes in use: {} B", stats.bytes_allocated);
 }

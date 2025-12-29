@@ -157,7 +157,7 @@ const COMMANDS: &[&str] = &[
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net",
     "ob",
-    "pagetable", "pci", "pe", "port", "ps", "pwd",
+    "pagetable", "pci", "pe", "pool", "port", "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
     "sc", "se", "services", "smbios", "stack", "suspend", "sysinfo",
@@ -1143,6 +1143,9 @@ impl Shell {
         // Interrupt statistics
         } else if eq_ignore_case(cmd, "irqstat") {
             commands::cmd_irqstat(&args[1..argc]);
+        // Pool statistics
+        } else if eq_ignore_case(cmd, "pool") {
+            commands::cmd_pool(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
