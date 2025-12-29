@@ -10383,6 +10383,7 @@ fn sys_set_information_process(
             let new_base_priority = priority_class_to_base_priority(priority_info.priority_class);
 
             process.pcb.base_priority = new_base_priority;
+            process.priority_class = priority_info.priority_class;
             crate::serial_println!("[SYSCALL] SetInformationProcess: priority class {} (foreground={}) -> base {}",
                 priority_info.priority_class, priority_info.foreground, new_base_priority);
 
@@ -10419,7 +10420,7 @@ fn sys_set_information_process(
             crate::serial_println!("[SYSCALL] SetInformationProcess: priority boost disabled = {}",
                 disable_boost != 0);
 
-            // TODO: Store boost disable flag in process
+            process.priority_boost_disabled = disable_boost != 0;
             0
         }
 
