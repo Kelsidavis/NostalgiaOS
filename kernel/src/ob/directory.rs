@@ -291,8 +291,10 @@ pub fn directory_parse_procedure(
     remaining_name: &[u8],
     found_object: *mut *mut u8,
 ) -> i32 {
+    const STATUS_INVALID_PARAMETER: i32 = 0xC000000Du32 as i32;
+
     if object.is_null() || remaining_name.is_empty() || found_object.is_null() {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     unsafe {

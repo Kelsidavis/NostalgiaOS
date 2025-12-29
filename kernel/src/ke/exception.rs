@@ -1012,8 +1012,10 @@ pub unsafe fn ke_raise_exception(
     context: *mut Context,
     first_chance: bool,
 ) -> i32 {
+    const STATUS_INVALID_PARAMETER: i32 = 0xC000000Du32 as i32;
+
     if exception_record.is_null() || context.is_null() {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     let record = &*exception_record;
@@ -1096,8 +1098,11 @@ pub unsafe fn ke_raise_exception(
 /// # Safety
 /// Must be called from thread context with valid context pointer
 pub unsafe fn ke_continue(context: *const Context, test_alert: bool) -> i32 {
+    const STATUS_INVALID_PARAMETER: i32 = 0xC000000Du32 as i32;
+    const STATUS_NO_THREAD: i32 = 0xC000012Bu32 as i32;
+
     if context.is_null() {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     let ctx = &*context;
@@ -1107,7 +1112,7 @@ pub unsafe fn ke_continue(context: *const Context, test_alert: bool) -> i32 {
     let thread = prcb.current_thread;
 
     if thread.is_null() {
-        return -1;
+        return STATUS_NO_THREAD;
     }
 
     // If test_alert is set and we're alertable, check for APCs
@@ -1141,15 +1146,18 @@ pub unsafe fn ke_continue(context: *const Context, test_alert: bool) -> i32 {
 /// # Safety
 /// Must be called from thread context with valid buffer
 pub unsafe fn ke_get_context(context: *mut Context, context_flags: u32) -> i32 {
+    const STATUS_INVALID_PARAMETER: i32 = 0xC000000Du32 as i32;
+    const STATUS_NO_THREAD: i32 = 0xC000012Bu32 as i32;
+
     if context.is_null() {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let prcb = super::prcb::get_current_prcb_mut();
     let thread = prcb.current_thread;
 
     if thread.is_null() {
-        return -1;
+        return STATUS_NO_THREAD;
     }
 
     let ctx = &mut *context;
@@ -1186,15 +1194,18 @@ pub unsafe fn ke_get_context(context: *mut Context, context_flags: u32) -> i32 {
 /// # Safety
 /// Must be called from thread context with valid context
 pub unsafe fn ke_set_context(context: *const Context) -> i32 {
+    const STATUS_INVALID_PARAMETER: i32 = 0xC000000Du32 as i32;
+    const STATUS_NO_THREAD: i32 = 0xC000012Bu32 as i32;
+
     if context.is_null() {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let prcb = super::prcb::get_current_prcb_mut();
     let thread = prcb.current_thread;
 
     if thread.is_null() {
-        return -1;
+        return STATUS_NO_THREAD;
     }
 
     let ctx = &*context;

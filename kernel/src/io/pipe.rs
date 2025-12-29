@@ -284,8 +284,10 @@ impl PipeInstance {
 
     /// Write data to peer's input buffer
     pub unsafe fn write(&mut self, data: &[u8]) -> isize {
+        const STATUS_PIPE_DISCONNECTED: isize = 0xC00000B0u32 as isize;
+
         if self.state != PipeState::Connected || self.peer.is_null() {
-            return -1; // STATUS_PIPE_DISCONNECTED
+            return STATUS_PIPE_DISCONNECTED;
         }
 
         let peer = &mut *self.peer;
@@ -584,8 +586,10 @@ pub unsafe fn io_write_pipe(
     buffer: *const u8,
     length: usize,
 ) -> isize {
+    const STATUS_INVALID_PARAMETER: isize = 0xC000000Du32 as isize;
+
     if instance.is_null() || buffer.is_null() || length == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let data = core::slice::from_raw_parts(buffer, length);
@@ -598,8 +602,10 @@ pub unsafe fn io_read_pipe(
     buffer: *mut u8,
     length: usize,
 ) -> isize {
+    const STATUS_INVALID_PARAMETER: isize = 0xC000000Du32 as isize;
+
     if instance.is_null() || buffer.is_null() || length == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let buf = core::slice::from_raw_parts_mut(buffer, length);
