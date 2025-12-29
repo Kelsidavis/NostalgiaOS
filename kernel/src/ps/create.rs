@@ -16,10 +16,12 @@ use crate::ke::{
     scheduler::ki_ready_thread,
     SpinLock,
 };
-use crate::arch::x86_64::context::{setup_initial_context, setup_user_thread_context};
+use crate::arch::x86_64::context::{setup_initial_context, setup_user_thread_context_with_teb};
 use super::cid::{ps_allocate_process_id, ps_allocate_thread_id};
 use super::eprocess::{EProcess, allocate_process, process_flags};
 use super::ethread::{EThread, allocate_thread, thread_flags};
+use super::peb::{allocate_peb, init_peb};
+use super::teb::{allocate_teb, init_teb};
 
 // ============================================================================
 // Stack Pool for PS threads
@@ -317,6 +319,32 @@ pub unsafe fn ps_create_user_thread(
     user_stack: u64,
     priority: i8,
 ) -> *mut EThread {
+    // Use default stack size
+    let stack_size = 0x10000u64; // 64KB
+    let stack_limit = user_stack - stack_size;
+    ps_create_user_thread_ex(process, entry_point, user_stack, stack_limit, priority)
+}
+
+/// Create a user-mode thread with extended parameters
+///
+/// Extended version that includes stack limits for TEB initialization.
+///
+/// # Arguments
+/// * `process` - Owning process (must have user-mode address space)
+/// * `entry_point` - Virtual address of user-mode entry point
+/// * `user_stack` - Virtual address of user-mode stack top (high address)
+/// * `user_stack_limit` - Virtual address of user-mode stack bottom (low address)
+/// * `priority` - Thread priority
+///
+/// # Returns
+/// Pointer to new ETHREAD, or null on failure
+pub unsafe fn ps_create_user_thread_ex(
+    process: *mut EProcess,
+    entry_point: u64,
+    user_stack: u64,
+    user_stack_limit: u64,
+    priority: i8,
+) -> *mut EThread {
     if process.is_null() {
         return ptr::null_mut();
     }
@@ -343,6 +371,21 @@ pub unsafe fn ps_create_user_thread(
         return ptr::null_mut();
     }
 
+    // Allocate and initialize TEB
+    let teb = match allocate_teb() {
+        Some(t) => t,
+        None => {
+            crate::serial_println!("[PS] Failed to allocate TEB for thread");
+            super::ethread::free_thread(thread);
+            return ptr::null_mut();
+        }
+    };
+
+    // Initialize TEB with process and thread info
+    let peb = (*process).peb;
+    let pid = (*process).unique_process_id as u64;
+    init_teb(teb, peb, pid, tid as u64, user_stack, user_stack_limit);
+
     // Initialize the thread (using a dummy kernel-mode routine since we'll IRETQ to user)
     fn dummy_start(_: *mut u8) { loop { core::hint::spin_loop(); } }
     (*thread).init(
@@ -355,24 +398,29 @@ pub unsafe fn ps_create_user_thread(
         priority,
     );
 
+    // Store TEB pointer in thread
+    (*thread).teb = teb;
+
     // Set user-mode entry point
     (*thread).start_address = entry_point as *mut u8;
     (*thread).win32_start_address = entry_point as *mut u8;
 
     // Set up the kernel stack with trap frame for IRETQ to user mode
-    setup_user_thread_context(
+    // Pass TEB address for GS base setup
+    setup_user_thread_context_with_teb(
         (*thread).get_tcb_mut(),
         kernel_stack_top,
         entry_point,
         user_stack,
+        teb as u64,
     );
 
     // Add thread to process's thread list
     (*process).thread_list_head.insert_tail(&mut (*thread).thread_list_entry);
     (*process).increment_thread_count();
 
-    crate::serial_println!("[PS] Created user-mode thread {} in process {} (entry={:#x})",
-        tid, (*process).unique_process_id, entry_point);
+    crate::serial_println!("[PS] Created user-mode thread {} in process {} (entry={:#x}, TEB={:p})",
+        tid, (*process).unique_process_id, entry_point, teb);
 
     thread
 }
@@ -388,6 +436,9 @@ pub unsafe fn ps_create_user_thread(
 /// * `entry_point` - Virtual address of user-mode entry point
 /// * `user_stack` - Virtual address of user-mode stack top
 /// * `cr3` - Page table physical address for this process
+/// * `image_base` - Base address where executable was loaded
+/// * `image_size` - Size of loaded executable
+/// * `subsystem` - PE subsystem (GUI, CUI, etc.)
 ///
 /// # Returns
 /// Tuple of (process, thread) pointers, or (null, null) on failure
@@ -402,16 +453,50 @@ pub unsafe fn ps_create_user_process(
     user_stack: u64,
     _cr3: u64,
 ) -> (*mut EProcess, *mut EThread) {
+    ps_create_user_process_ex(parent, name, entry_point, user_stack, _cr3, 0, 0, 0)
+}
+
+/// Create a user-mode process with full parameters
+///
+/// Extended version that accepts image information for PEB initialization.
+pub unsafe fn ps_create_user_process_ex(
+    parent: *mut EProcess,
+    name: &[u8],
+    entry_point: u64,
+    user_stack: u64,
+    _cr3: u64,
+    image_base: u64,
+    image_size: u32,
+    subsystem: u16,
+) -> (*mut EProcess, *mut EThread) {
     // Create the process
     let process = ps_create_process(parent, name, 8);
     if process.is_null() {
         return (ptr::null_mut(), ptr::null_mut());
     }
 
-    // Create the initial thread
-    let thread = ps_create_user_thread(process, entry_point, user_stack, 8);
+    // Allocate and initialize PEB
+    let peb = match allocate_peb() {
+        Some(p) => p,
+        None => {
+            crate::serial_println!("[PS] Failed to allocate PEB for process");
+            // TODO: Clean up the process
+            return (ptr::null_mut(), ptr::null_mut());
+        }
+    };
+
+    // Initialize PEB with image information
+    init_peb(peb, image_base, image_size, entry_point, subsystem);
+
+    // Store PEB pointer in process
+    (*process).peb = peb;
+
+    // Create the initial thread (with stack size for TEB initialization)
+    let user_stack_size = 0x10000u64; // 64KB default stack
+    let user_stack_limit = user_stack - user_stack_size;
+    let thread = ps_create_user_thread_ex(process, entry_point, user_stack, user_stack_limit, 8);
     if thread.is_null() {
-        // TODO: Clean up the process
+        // TODO: Clean up PEB and process
         return (process, ptr::null_mut());
     }
 

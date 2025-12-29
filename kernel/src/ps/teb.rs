@@ -669,3 +669,114 @@ pub unsafe fn set_last_error(error: u32) {
         options(nostack, preserves_flags)
     );
 }
+
+// ============================================================================
+// TEB Initialization
+// ============================================================================
+
+/// Static TEB pool for threads
+/// In a full implementation, TEBs would be allocated in user-mode address space
+static mut TEB_POOL: [Teb; crate::ps::MAX_THREADS] = {
+    const INIT: Teb = Teb::new();
+    [INIT; crate::ps::MAX_THREADS]
+};
+
+/// TEB pool bitmap (supports up to 256 threads with 4 x u64)
+static mut TEB_POOL_BITMAP: [u64; 4] = [0; 4];
+
+/// TEB pool lock
+static TEB_POOL_LOCK: crate::ke::SpinLock<()> = crate::ke::SpinLock::new(());
+
+/// Allocate a TEB from the pool
+///
+/// # Safety
+/// Must be called with proper synchronization
+pub unsafe fn allocate_teb() -> Option<*mut Teb> {
+    let _guard = TEB_POOL_LOCK.lock();
+
+    for word_idx in 0..4 {
+        if TEB_POOL_BITMAP[word_idx] != u64::MAX {
+            for bit_idx in 0..64 {
+                let global_idx = word_idx * 64 + bit_idx;
+                if global_idx >= crate::ps::MAX_THREADS {
+                    return None;
+                }
+                if TEB_POOL_BITMAP[word_idx] & (1 << bit_idx) == 0 {
+                    TEB_POOL_BITMAP[word_idx] |= 1 << bit_idx;
+                    let teb = &mut TEB_POOL[global_idx] as *mut Teb;
+                    // Initialize to default
+                    *teb = Teb::new();
+                    return Some(teb);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Free a TEB back to the pool
+///
+/// # Safety
+/// TEB must have been allocated from this pool
+pub unsafe fn free_teb(teb: *mut Teb) {
+    let _guard = TEB_POOL_LOCK.lock();
+
+    let base = TEB_POOL.as_ptr() as usize;
+    let offset = teb as usize - base;
+    let index = offset / core::mem::size_of::<Teb>();
+    if index < crate::ps::MAX_THREADS {
+        let word_idx = index / 64;
+        let bit_idx = index % 64;
+        TEB_POOL_BITMAP[word_idx] &= !(1 << bit_idx);
+    }
+}
+
+/// Initialize a TEB for a new thread
+///
+/// # Arguments
+/// * `teb` - Pointer to TEB structure to initialize
+/// * `peb` - Pointer to the process's PEB
+/// * `pid` - Process ID
+/// * `tid` - Thread ID
+/// * `stack_base` - Top of user stack (high address)
+/// * `stack_limit` - Bottom of user stack (low address)
+///
+/// # Safety
+/// teb and peb must be valid pointers
+pub unsafe fn init_teb(
+    teb: *mut Teb,
+    peb: *mut Peb,
+    pid: u64,
+    tid: u64,
+    stack_base: u64,
+    stack_limit: u64,
+) {
+    let teb = &mut *teb;
+
+    // Initialize basic info
+    teb.init(peb, pid, tid);
+
+    // Set up NT_TIB self pointer
+    teb.nt_tib.self_ptr = &mut teb.nt_tib as *mut NtTib;
+
+    // Set stack information
+    teb.nt_tib.stack_base = stack_base as *mut u8;
+    teb.nt_tib.stack_limit = stack_limit as *mut u8;
+    teb.deallocation_stack = stack_limit as *mut u8;
+
+    // Initialize TLS links as empty
+    teb.tls_links.init_head();
+
+    crate::serial_println!("[TEB] Initialized TEB at {:p}", teb);
+    crate::serial_println!("[TEB]   PEB:         {:p}", peb);
+    crate::serial_println!("[TEB]   PID/TID:     {}/{}", pid, tid);
+    crate::serial_println!("[TEB]   Stack:       {:#x}-{:#x}", stack_limit, stack_base);
+}
+
+/// Get the address of a TEB suitable for GS base
+///
+/// Returns the address that should be loaded into the GS base MSR
+/// for user-mode TEB access.
+pub fn get_teb_gs_base(teb: *const Teb) -> u64 {
+    teb as u64
+}

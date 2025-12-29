@@ -698,3 +698,124 @@ impl Default for Peb {
         Self::new()
     }
 }
+
+// ============================================================================
+// PEB Initialization
+// ============================================================================
+
+/// Static PEB pool for processes
+/// In a full implementation, PEBs would be allocated in user-mode address space
+static mut PEB_POOL: [Peb; crate::ps::MAX_PROCESSES] = {
+    const INIT: Peb = Peb::new();
+    [INIT; crate::ps::MAX_PROCESSES]
+};
+
+/// PEB pool bitmap
+static mut PEB_POOL_BITMAP: u64 = 0;
+
+/// PEB pool lock
+static PEB_POOL_LOCK: crate::ke::SpinLock<()> = crate::ke::SpinLock::new(());
+
+/// Allocate a PEB from the pool
+///
+/// # Safety
+/// Must be called with proper synchronization
+pub unsafe fn allocate_peb() -> Option<*mut Peb> {
+    let _guard = PEB_POOL_LOCK.lock();
+
+    for i in 0..crate::ps::MAX_PROCESSES {
+        if PEB_POOL_BITMAP & (1 << i) == 0 {
+            PEB_POOL_BITMAP |= 1 << i;
+            let peb = &mut PEB_POOL[i] as *mut Peb;
+            // Initialize to default
+            *peb = Peb::new();
+            return Some(peb);
+        }
+    }
+    None
+}
+
+/// Free a PEB back to the pool
+///
+/// # Safety
+/// PEB must have been allocated from this pool
+pub unsafe fn free_peb(peb: *mut Peb) {
+    let _guard = PEB_POOL_LOCK.lock();
+
+    let base = PEB_POOL.as_ptr() as usize;
+    let offset = peb as usize - base;
+    let index = offset / core::mem::size_of::<Peb>();
+    if index < crate::ps::MAX_PROCESSES {
+        PEB_POOL_BITMAP &= !(1 << index);
+    }
+}
+
+/// Initialize a PEB for a new process
+///
+/// # Arguments
+/// * `peb` - Pointer to PEB structure to initialize
+/// * `image_base` - Base address of loaded executable
+/// * `image_size` - Size of loaded executable
+/// * `entry_point` - Entry point address
+/// * `subsystem` - PE subsystem (GUI, CUI, etc.)
+///
+/// # Safety
+/// peb must be a valid pointer to a PEB structure
+pub unsafe fn init_peb(
+    peb: *mut Peb,
+    image_base: u64,
+    image_size: u32,
+    entry_point: u64,
+    subsystem: u16,
+) {
+    let peb = &mut *peb;
+
+    // Set image information
+    peb.image_base_address = image_base as *mut u8;
+    peb.image_subsystem = subsystem as u32;
+
+    // OS version: Windows Server 2003 (5.2.3790)
+    peb.os_major_version = 5;
+    peb.os_minor_version = 2;
+    peb.os_build_number = 3790;
+    peb.os_platform_id = 2; // VER_PLATFORM_WIN32_NT
+
+    // Initialize number of processors
+    peb.number_of_processors = 1; // TODO: Get actual count
+
+    // Set process affinity mask
+    peb.active_process_affinity_mask = 1;
+
+    // Initialize mutant to -1 (invalid handle)
+    peb.mutant = u64::MAX;
+
+    crate::serial_println!("[PEB] Initialized PEB at {:p}", peb);
+    crate::serial_println!("[PEB]   Image base:   {:#x}", image_base);
+    crate::serial_println!("[PEB]   Entry point:  {:#x}", entry_point);
+    crate::serial_println!("[PEB]   Subsystem:    {}", subsystem);
+}
+
+/// Initialize PEB loader data (PEB_LDR_DATA)
+///
+/// This sets up the module lists that track loaded DLLs.
+///
+/// # Safety
+/// peb must have been initialized with init_peb
+pub unsafe fn init_peb_ldr_data(peb: *mut Peb, ldr: *mut PebLdrData) {
+    let peb = &mut *peb;
+    let ldr = &mut *ldr;
+
+    // Initialize loader data
+    ldr.length = core::mem::size_of::<PebLdrData>() as u32;
+    ldr.initialized = 1;
+
+    // Initialize module lists as empty (pointing to themselves)
+    ldr.in_load_order_module_list.init_head();
+    ldr.in_memory_order_module_list.init_head();
+    ldr.in_initialization_order_module_list.init_head();
+
+    // Link to PEB
+    peb.ldr = ldr;
+
+    crate::serial_println!("[PEB] Initialized loader data at {:p}", ldr);
+}

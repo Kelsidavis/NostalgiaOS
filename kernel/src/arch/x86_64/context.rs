@@ -16,6 +16,75 @@ use core::arch::naked_asm;
 use crate::ke::thread::KThread;
 
 // ============================================================================
+// MSR Constants for GS Base
+// ============================================================================
+
+/// MSR address for kernel GS base (swapped by SWAPGS)
+pub const MSR_KERNEL_GS_BASE: u32 = 0xC0000102;
+
+/// MSR address for GS base (current value)
+pub const MSR_GS_BASE: u32 = 0xC0000101;
+
+/// MSR address for FS base
+pub const MSR_FS_BASE: u32 = 0xC0000100;
+
+/// Write to a Model-Specific Register (MSR)
+///
+/// # Safety
+/// The MSR address must be valid and writing to it must be safe in the current context.
+#[inline]
+pub unsafe fn write_msr(msr: u32, value: u64) {
+    let low = value as u32;
+    let high = (value >> 32) as u32;
+    core::arch::asm!(
+        "wrmsr",
+        in("ecx") msr,
+        in("eax") low,
+        in("edx") high,
+        options(nostack, preserves_flags),
+    );
+}
+
+/// Read from a Model-Specific Register (MSR)
+///
+/// # Safety
+/// The MSR address must be valid.
+#[inline]
+pub unsafe fn read_msr(msr: u32) -> u64 {
+    let (low, high): (u32, u32);
+    core::arch::asm!(
+        "rdmsr",
+        in("ecx") msr,
+        out("eax") low,
+        out("edx") high,
+        options(nostack, preserves_flags),
+    );
+    ((high as u64) << 32) | (low as u64)
+}
+
+/// Set the GS base for user mode (TEB address)
+///
+/// This sets the GS base MSR so user-mode code can access the TEB via gs:[offset].
+///
+/// # Safety
+/// The Teb_address must be a valid TEB address in user space.
+#[inline]
+pub unsafe fn set_user_gs_base(teb_address: u64) {
+    write_msr(MSR_GS_BASE, teb_address);
+}
+
+/// Set the kernel GS base (for SWAPGS)
+///
+/// This sets the kernel GS base that will be swapped in by SWAPGS on syscall entry.
+///
+/// # Safety
+/// The address must be a valid kernel per-CPU data address.
+#[inline]
+pub unsafe fn set_kernel_gs_base(kernel_gs: u64) {
+    write_msr(MSR_KERNEL_GS_BASE, kernel_gs);
+}
+
+// ============================================================================
 // Trap Frame (KTRAP_FRAME)
 // ============================================================================
 
@@ -381,8 +450,31 @@ pub unsafe fn setup_user_thread_context(
     entry_point: u64,
     user_stack: u64,
 ) {
+    // Use null TEB for basic setup (will be set later if needed)
+    setup_user_thread_context_with_teb(thread, kernel_stack_top, entry_point, user_stack, 0);
+}
+
+/// Set up a user-mode thread's initial kernel stack with TEB
+///
+/// Extended version that also sets up the GS base for TEB access.
+///
+/// # Safety
+/// - kernel_stack_top must point to the top of a valid kernel stack
+/// - entry_point and user_stack must be valid user-mode addresses
+/// - teb_address must be a valid TEB address (or 0 if not using TEB)
+pub unsafe fn setup_user_thread_context_with_teb(
+    thread: *mut KThread,
+    kernel_stack_top: *mut u8,
+    entry_point: u64,
+    user_stack: u64,
+    teb_address: u64,
+) {
     // Create the trap frame for initial user-mode entry
-    let trap_frame = KTrapFrame::for_user_mode(entry_point, user_stack);
+    let mut trap_frame = KTrapFrame::for_user_mode(entry_point, user_stack);
+
+    // Store TEB address in p1_home - this will be used by ki_return_to_user
+    // to set GS base before IRETQ
+    trap_frame.p1_home = teb_address;
 
     // Calculate where to place the trap frame on the kernel stack
     let frame_size = core::mem::size_of::<KTrapFrame>();
@@ -427,11 +519,28 @@ pub unsafe fn setup_user_thread_context(
 ///
 /// This is called when a user-mode thread is scheduled.
 /// The trap frame is already set up on the stack above us.
+/// The TEB address is stored in p1_home (offset 0 in trap frame).
 #[unsafe(naked)]
 pub unsafe extern "C" fn ki_return_to_user() {
     naked_asm!(
         // At this point, RSP points just below the trap frame
-        // We need to restore all registers from the trap frame and IRETQ
+        // The trap frame starts at RSP, with p1_home at offset 0
+
+        // First, set up GS base for user-mode TEB access
+        // Read TEB address from p1_home (offset 0)
+        "mov rax, [rsp]",           // rax = TEB address from p1_home
+        "test rax, rax",            // Check if TEB address is non-zero
+        "jz 2f",                    // Skip MSR write if zero
+
+        // Write GS base MSR (MSR_GS_BASE = 0xC0000101)
+        "mov ecx, 0xC0000101",      // MSR number in ECX
+        "mov rdx, rax",             // Copy TEB address
+        "shr rdx, 32",              // High 32 bits in EDX
+        // RAX already has low 32 bits
+        "wrmsr",                    // Write MSR
+
+        "2:",
+        // Now restore registers from the trap frame
 
         // Skip the parameter homes and previous_mode (48 bytes)
         "add rsp, 48",

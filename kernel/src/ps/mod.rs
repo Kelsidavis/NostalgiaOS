@@ -66,7 +66,9 @@ pub use create::{
     ps_create_thread, ps_create_system_thread,
     ps_start_thread, ps_create_and_start_system_thread,
     // User-mode thread/process creation
-    ps_create_user_thread, ps_create_user_process, ps_start_user_thread,
+    ps_create_user_thread, ps_create_user_thread_ex,
+    ps_create_user_process, ps_create_user_process_ex,
+    ps_start_user_thread,
 };
 
 pub use job::{
@@ -81,6 +83,8 @@ pub use peb::{
     Peb, PebLdrData, LdrDataTableEntry,
     RtlUserProcessParameters, UnicodeString,
     ListEntry64, peb_flags,
+    // PEB allocation and initialization
+    allocate_peb, free_peb, init_peb, init_peb_ldr_data,
 };
 
 pub use teb::{
@@ -88,6 +92,8 @@ pub use teb::{
     TLS_MINIMUM_AVAILABLE, TLS_EXPANSION_SLOTS,
     get_current_teb, get_current_peb,
     get_last_error, set_last_error,
+    // TEB allocation and initialization
+    allocate_teb, free_teb, init_teb, get_teb_gs_base,
 };
 
 /// Initialize the Process Manager
