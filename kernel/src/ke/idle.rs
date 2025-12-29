@@ -8,66 +8,85 @@
 
 use core::arch::asm;
 use super::thread::{KThread, ThreadState, constants};
-use super::prcb;
+use super::prcb::{self, MAX_CPUS};
 use super::process;
 use crate::arch::x86_64::context;
 
-/// Static idle thread for the boot processor
-static mut IDLE_THREAD: KThread = KThread::new();
+/// Per-CPU idle threads
+static mut IDLE_THREADS: [KThread; MAX_CPUS] = [const { KThread::new() }; MAX_CPUS];
 
-/// Static stack for the idle thread (16KB)
+/// Static stacks for idle threads (16KB each)
 #[repr(C, align(16))]
+#[derive(Copy, Clone)]
 struct IdleStack {
     data: [u8; constants::THREAD_STACK_SIZE],
 }
 
-static mut IDLE_STACK: IdleStack = IdleStack {
+static mut IDLE_STACKS: [IdleStack; MAX_CPUS] = [IdleStack {
     data: [0; constants::THREAD_STACK_SIZE],
-};
+}; MAX_CPUS];
 
-/// Initialize the idle thread
+/// Initialize the idle thread for a specific CPU
 ///
 /// # Safety
-/// Must be called once during kernel initialization
-pub unsafe fn init_idle_thread() {
+/// Must be called once per CPU during initialization
+pub unsafe fn init_idle_thread(cpu_id: usize) {
+    if cpu_id >= MAX_CPUS {
+        return;
+    }
+
     // Get stack base (top of stack - stacks grow downward)
-    let stack_base = IDLE_STACK.data.as_mut_ptr().add(constants::THREAD_STACK_SIZE);
+    let stack_base = IDLE_STACKS[cpu_id].data.as_mut_ptr().add(constants::THREAD_STACK_SIZE);
 
     // Initialize idle thread structure
-    IDLE_THREAD.thread_id = 0; // Thread 0 is always idle
-    IDLE_THREAD.priority = 0;  // Lowest priority
-    IDLE_THREAD.base_priority = 0;
-    IDLE_THREAD.quantum = constants::THREAD_QUANTUM;
-    IDLE_THREAD.state = ThreadState::Running; // Starts as running
-    IDLE_THREAD.process = process::get_system_process_mut();
-    IDLE_THREAD.stack_base = stack_base;
-    IDLE_THREAD.stack_limit = IDLE_STACK.data.as_mut_ptr();
-    IDLE_THREAD.wait_list_entry.init_head();
-    IDLE_THREAD.thread_list_entry.init_head();
+    IDLE_THREADS[cpu_id].thread_id = cpu_id as u32; // Each CPU's idle thread has unique ID
+    IDLE_THREADS[cpu_id].priority = 0;  // Lowest priority
+    IDLE_THREADS[cpu_id].base_priority = 0;
+    IDLE_THREADS[cpu_id].quantum = constants::THREAD_QUANTUM;
+    IDLE_THREADS[cpu_id].state = ThreadState::Running; // Starts as running
+    IDLE_THREADS[cpu_id].process = process::get_system_process_mut();
+    IDLE_THREADS[cpu_id].stack_base = stack_base;
+    IDLE_THREADS[cpu_id].stack_limit = IDLE_STACKS[cpu_id].data.as_mut_ptr();
+    IDLE_THREADS[cpu_id].wait_list_entry.init_head();
+    IDLE_THREADS[cpu_id].thread_list_entry.init_head();
 
     // Initialize APC state
-    IDLE_THREAD.apc_state.init(process::get_system_process_mut());
-    IDLE_THREAD.special_apc_disable = 0;
-    IDLE_THREAD.kernel_apc_disable = 0;
-    IDLE_THREAD.alertable = false;
-    IDLE_THREAD.apc_queueable = true;
+    IDLE_THREADS[cpu_id].apc_state.init(process::get_system_process_mut());
+    IDLE_THREADS[cpu_id].special_apc_disable = 0;
+    IDLE_THREADS[cpu_id].kernel_apc_disable = 0;
+    IDLE_THREADS[cpu_id].alertable = false;
+    IDLE_THREADS[cpu_id].apc_queueable = true;
 
     // Set up initial context for idle thread
     context::setup_initial_context(
-        &mut IDLE_THREAD as *mut KThread,
+        &mut IDLE_THREADS[cpu_id] as *mut KThread,
         stack_base,
         idle_thread_entry,
     );
 
-    // Set as idle thread and current thread in PRCB
-    let prcb = prcb::get_current_prcb_mut();
-    prcb.idle_thread = &mut IDLE_THREAD as *mut KThread;
-    prcb.current_thread = &mut IDLE_THREAD as *mut KThread;
+    // Set as idle thread and current thread in this CPU's PRCB
+    if let Some(prcb) = prcb::get_prcb_mut(cpu_id) {
+        prcb.idle_thread = &mut IDLE_THREADS[cpu_id] as *mut KThread;
+        prcb.current_thread = &mut IDLE_THREADS[cpu_id] as *mut KThread;
+    }
 }
 
-/// Get the idle thread
+/// Get the current CPU's idle thread
 pub fn get_idle_thread() -> *mut KThread {
-    unsafe { &mut IDLE_THREAD as *mut KThread }
+    let prcb = prcb::get_current_prcb();
+    prcb.idle_thread
+}
+
+/// Get a specific CPU's idle thread
+///
+/// # Safety
+/// Caller must ensure cpu_id is valid
+pub unsafe fn get_idle_thread_for_cpu(cpu_id: usize) -> Option<*mut KThread> {
+    if cpu_id < MAX_CPUS {
+        Some(&mut IDLE_THREADS[cpu_id] as *mut KThread)
+    } else {
+        None
+    }
 }
 
 /// Idle thread entry point

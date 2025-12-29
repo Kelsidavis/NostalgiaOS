@@ -14,6 +14,8 @@ pub mod idt;
 pub mod context;
 pub mod io;
 pub mod syscall;
+pub mod percpu;
+pub mod ap_trampoline;
 
 use x86_64::instructions::{hlt, interrupts};
 

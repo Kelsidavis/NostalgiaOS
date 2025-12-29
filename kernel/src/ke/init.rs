@@ -36,8 +36,8 @@ pub unsafe fn init() {
     // Initialize the system process (process 0)
     process::init_system_process();
 
-    // Initialize the idle thread
-    idle::init_idle_thread();
+    // Initialize the idle thread for CPU 0 (BSP)
+    idle::init_idle_thread(0);
 
     // Initialize and start the APIC timer
     apic::init();

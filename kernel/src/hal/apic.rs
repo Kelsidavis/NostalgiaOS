@@ -640,3 +640,72 @@ pub unsafe fn start_ap(apic_id: u8, startup_vector: u8) {
 pub fn current_apic_id() -> u8 {
     get().id()
 }
+
+/// Start all Application Processors discovered by ACPI
+///
+/// This function:
+/// 1. Sets up the AP trampoline code in low memory
+/// 2. Sends INIT-SIPI-SIPI sequence to each AP
+/// 3. Waits for APs to complete initialization
+///
+/// # Safety
+/// Must be called after ACPI initialization and before enabling scheduling on APs
+pub unsafe fn start_all_aps() {
+    use crate::arch::x86_64::ap_trampoline;
+
+    crate::serial_println!("[SMP] Starting Application Processors...");
+
+    // Setup trampoline code in low memory
+    ap_trampoline::setup_trampoline();
+
+    // Store ap_main entry point address for trampoline to use
+    let entry_point = ap_trampoline::get_ap_entry_point();
+    let entry_addr_ptr = (ap_trampoline::TRAMPOLINE_ADDR + 0x100) as *mut u64; // Offset to ap_entry_point_addr
+    core::ptr::write_volatile(entry_addr_ptr, entry_point);
+
+    // Get processor count from ACPI
+    let processor_count = super::acpi::get_processor_count();
+    crate::serial_println!("[SMP] ACPI reported {} total processors", processor_count);
+
+    let mut ap_count = 0u32;
+
+    // Start each AP (skip index 0, which is the BSP)
+    for i in 1..processor_count {
+        if let Some(proc_info) = super::acpi::get_processor(i) {
+            if !proc_info.enabled {
+                crate::serial_println!("[SMP] Skipping disabled processor {} (APIC ID {})",
+                    i, proc_info.apic_id);
+                continue;
+            }
+
+            crate::serial_println!("[SMP] Starting AP {} (APIC ID {})...",
+                i, proc_info.apic_id);
+
+            // Send INIT-SIPI-SIPI sequence
+            // Startup vector = 0x08 (trampoline at 0x8000)
+            start_ap(proc_info.apic_id, 0x08);
+
+            ap_count += 1;
+
+            // Wait a bit before starting next AP
+            for _ in 0..50_000 {
+                core::hint::spin_loop();
+            }
+        }
+    }
+
+    if ap_count > 0 {
+        crate::serial_println!("[SMP] Waiting for {} APs to start (timeout 5s)...", ap_count);
+
+        // Wait for APs to signal they've started (5 second timeout)
+        if ap_trampoline::wait_for_aps(ap_count, 5000) {
+            crate::serial_println!("[SMP] All {} APs started successfully!", ap_count);
+        } else {
+            crate::serial_println!("[SMP] WARNING: Timeout waiting for APs. {} started, {} expected",
+                ap_trampoline::AP_STARTED_COUNT.load(core::sync::atomic::Ordering::Acquire),
+                ap_count);
+        }
+    } else {
+        crate::serial_println!("[SMP] No additional processors to start (single CPU system)");
+    }
+}

@@ -12,6 +12,9 @@ use core::ptr;
 use super::list::ListEntry;
 use super::thread::{KThread, constants::MAXIMUM_PRIORITY};
 
+/// Maximum number of processors (from ACPI)
+pub use crate::hal::acpi::MAX_PROCESSORS as MAX_CPUS;
+
 /// Kernel Processor Control Block
 ///
 /// This structure contains per-processor scheduling state.
@@ -132,31 +135,99 @@ impl Default for KPrcb {
     }
 }
 
-/// The boot processor's PRCB (processor 0)
-static mut BSP_PRCB: KPrcb = KPrcb::new();
+/// Array of PRCBs for all processors
+static mut PRCB_ARRAY: [KPrcb; MAX_CPUS] = [const { KPrcb::new() }; MAX_CPUS];
+
+/// Number of active CPUs (updated as APs start)
+static mut ACTIVE_CPU_COUNT: usize = 1;
+
+/// Initialize a specific processor's PRCB
+///
+/// # Safety
+/// Must be called once per CPU during initialization
+pub unsafe fn init_prcb(cpu_id: usize) {
+    if cpu_id < MAX_CPUS {
+        PRCB_ARRAY[cpu_id].init(cpu_id as u32);
+
+        // Set GS base to point to this CPU's PRCB
+        let prcb_addr = &PRCB_ARRAY[cpu_id] as *const KPrcb as u64;
+        crate::arch::x86_64::percpu::set_gs_base(prcb_addr);
+    }
+}
 
 /// Initialize the boot processor's PRCB
 ///
 /// # Safety
 /// Must be called exactly once during kernel initialization
 pub unsafe fn init_bsp_prcb() {
-    BSP_PRCB.init(0);
+    init_prcb(0);
 }
 
-/// Get a reference to the current processor's PRCB
+/// Get a reference to the current processor's PRCB (via GS segment)
 ///
-/// For now, this always returns the BSP's PRCB since we only support
-/// single processor. In SMP, this would read from GS segment or similar.
+/// This reads the PRCB pointer from the GS segment base, allowing
+/// fast per-CPU data access without locks.
 pub fn get_current_prcb() -> &'static KPrcb {
-    unsafe { &BSP_PRCB }
+    unsafe {
+        let prcb_ptr = crate::arch::x86_64::percpu::get_gs_base() as *const KPrcb;
+        if prcb_ptr.is_null() {
+            // GS not initialized yet, fall back to BSP (during early boot)
+            &PRCB_ARRAY[0]
+        } else {
+            &*prcb_ptr
+        }
+    }
 }
 
-/// Get a mutable reference to the current processor's PRCB
+/// Get a mutable reference to the current processor's PRCB (via GS segment)
 ///
 /// # Safety
 /// Caller must ensure proper synchronization (typically IRQL >= DISPATCH_LEVEL)
 pub unsafe fn get_current_prcb_mut() -> &'static mut KPrcb {
-    &mut BSP_PRCB
+    let prcb_ptr = crate::arch::x86_64::percpu::get_gs_base() as *mut KPrcb;
+    if prcb_ptr.is_null() {
+        // GS not initialized yet, fall back to BSP (during early boot)
+        &mut PRCB_ARRAY[0]
+    } else {
+        &mut *prcb_ptr
+    }
+}
+
+/// Get a reference to a specific CPU's PRCB by index
+///
+/// # Safety
+/// Caller must ensure cpu_id is valid (< active CPU count)
+pub unsafe fn get_prcb(cpu_id: usize) -> Option<&'static KPrcb> {
+    if cpu_id < MAX_CPUS {
+        Some(&PRCB_ARRAY[cpu_id])
+    } else {
+        None
+    }
+}
+
+/// Get a mutable reference to a specific CPU's PRCB by index
+///
+/// # Safety
+/// Caller must ensure cpu_id is valid and proper synchronization
+pub unsafe fn get_prcb_mut(cpu_id: usize) -> Option<&'static mut KPrcb> {
+    if cpu_id < MAX_CPUS {
+        Some(&mut PRCB_ARRAY[cpu_id])
+    } else {
+        None
+    }
+}
+
+/// Get the number of active CPUs
+pub fn get_active_cpu_count() -> usize {
+    unsafe { ACTIVE_CPU_COUNT }
+}
+
+/// Increment the active CPU count (called when an AP starts)
+///
+/// # Safety
+/// Must be called with proper synchronization during AP startup
+pub unsafe fn increment_active_cpu_count() {
+    ACTIVE_CPU_COUNT += 1;
 }
 
 /// Get the currently running thread
