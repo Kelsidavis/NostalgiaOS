@@ -118,6 +118,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    pagetable      Page table walker (cr3, walk, translate)");
         outln!("    msr            MSR browser (common, syscall, apic)");
         outln!("    port           I/O port browser (scan, inb/outb)");
+        outln!("    apic           APIC viewer (lvt, ioapic, isr/irr)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -7368,4 +7369,367 @@ fn show_port_list() {
     outln!("PCI Configuration:");
     outln!("  0xCF8       Config address");
     outln!("  0xCFC       Config data");
+}
+
+// ============================================================================
+// APIC Viewer Command
+// ============================================================================
+
+/// APIC viewer for interrupt controller diagnostics
+pub fn cmd_apic(args: &[&str]) {
+    if args.is_empty() {
+        show_apic_overview();
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "help") {
+        show_apic_help();
+    } else if eq_ignore_case(cmd, "status") {
+        show_apic_overview();
+    } else if eq_ignore_case(cmd, "regs") || eq_ignore_case(cmd, "registers") {
+        show_apic_registers();
+    } else if eq_ignore_case(cmd, "lvt") {
+        show_apic_lvt();
+    } else if eq_ignore_case(cmd, "timer") {
+        show_apic_timer_detail();
+    } else if eq_ignore_case(cmd, "isr") {
+        show_apic_isr_irr();
+    } else if eq_ignore_case(cmd, "ioapic") {
+        show_ioapic();
+    } else if eq_ignore_case(cmd, "eoi") {
+        // Send End-Of-Interrupt (for testing)
+        unsafe { apic_write(0xB0, 0) };
+        outln!("EOI sent to local APIC");
+    } else {
+        outln!("Unknown apic command: {}", cmd);
+        show_apic_help();
+    }
+}
+
+fn show_apic_help() {
+    outln!("APIC Viewer");
+    outln!("");
+    outln!("Usage: apic [command]");
+    outln!("");
+    outln!("Commands:");
+    outln!("  status       Overview of APIC status (default)");
+    outln!("  regs         Show all local APIC registers");
+    outln!("  lvt          Show Local Vector Table entries");
+    outln!("  timer        Detailed timer configuration");
+    outln!("  isr          Show ISR/IRR/TMR status");
+    outln!("  ioapic       Show I/O APIC information");
+    outln!("  eoi          Send End-Of-Interrupt");
+}
+
+/// Read from local APIC register (memory-mapped)
+unsafe fn apic_read(offset: u32) -> u32 {
+    // Standard local APIC base address
+    let base = 0xFEE0_0000u64;
+    let addr = (base + offset as u64) as *const u32;
+    core::ptr::read_volatile(addr)
+}
+
+/// Write to local APIC register
+unsafe fn apic_write(offset: u32, value: u32) {
+    let base = 0xFEE0_0000u64;
+    let addr = (base + offset as u64) as *mut u32;
+    core::ptr::write_volatile(addr, value);
+}
+
+fn show_apic_overview() {
+    outln!("Local APIC Status");
+    outln!("");
+
+    unsafe {
+        // Read APIC ID and version
+        let id = apic_read(0x20);
+        let version = apic_read(0x30);
+        let tpr = apic_read(0x80);
+        let apr = apic_read(0x90);
+        let ppr = apic_read(0xA0);
+        let svr = apic_read(0xF0);
+        let esr = apic_read(0x280);
+
+        outln!("APIC ID:        0x{:02X}", (id >> 24) & 0xFF);
+        outln!("Version:        0x{:02X} (Max LVT: {})", version & 0xFF, ((version >> 16) & 0xFF) + 1);
+        outln!("");
+
+        outln!("Priority Registers:");
+        outln!("  TPR (Task):       0x{:02X} (class {})", tpr & 0xFF, (tpr >> 4) & 0xF);
+        outln!("  APR (Arbitration): 0x{:02X}", apr & 0xFF);
+        outln!("  PPR (Processor):  0x{:02X}", ppr & 0xFF);
+        outln!("");
+
+        outln!("Spurious Vector: 0x{:02X}  APIC Enable: {}", svr & 0xFF, (svr & 0x100) != 0);
+        outln!("Error Status:    0x{:08X}", esr);
+
+        if esr != 0 {
+            outln!("  Errors detected:");
+            if (esr & 0x01) != 0 {
+                outln!("    - Send checksum error");
+            }
+            if (esr & 0x02) != 0 {
+                outln!("    - Receive checksum error");
+            }
+            if (esr & 0x04) != 0 {
+                outln!("    - Send accept error");
+            }
+            if (esr & 0x08) != 0 {
+                outln!("    - Receive accept error");
+            }
+            if (esr & 0x20) != 0 {
+                outln!("    - Send illegal vector");
+            }
+            if (esr & 0x40) != 0 {
+                outln!("    - Receive illegal vector");
+            }
+            if (esr & 0x80) != 0 {
+                outln!("    - Illegal register address");
+            }
+        }
+    }
+}
+
+fn show_apic_registers() {
+    outln!("Local APIC Registers");
+    outln!("");
+
+    unsafe {
+        // Key register offsets
+        let regs = [
+            (0x020, "ID"),
+            (0x030, "Version"),
+            (0x080, "TPR"),
+            (0x090, "APR"),
+            (0x0A0, "PPR"),
+            (0x0B0, "EOI"),
+            (0x0D0, "LDR"),
+            (0x0E0, "DFR"),
+            (0x0F0, "SVR"),
+            (0x280, "ESR"),
+            (0x300, "ICR_LO"),
+            (0x310, "ICR_HI"),
+            (0x320, "LVT_Timer"),
+            (0x330, "LVT_Thermal"),
+            (0x340, "LVT_PerfMon"),
+            (0x350, "LVT_LINT0"),
+            (0x360, "LVT_LINT1"),
+            (0x370, "LVT_Error"),
+            (0x380, "Timer_ICR"),
+            (0x390, "Timer_CCR"),
+            (0x3E0, "Timer_DCR"),
+        ];
+
+        for (offset, name) in regs {
+            let val = apic_read(offset);
+            outln!("  0x{:03X} {:12}: 0x{:08X}", offset, name, val);
+        }
+    }
+}
+
+fn show_apic_lvt() {
+    outln!("Local Vector Table (LVT)");
+    outln!("");
+
+    unsafe {
+        let lvt_entries = [
+            (0x320, "Timer"),
+            (0x330, "Thermal"),
+            (0x340, "PerfMon"),
+            (0x350, "LINT0"),
+            (0x360, "LINT1"),
+            (0x370, "Error"),
+        ];
+
+        for (offset, name) in lvt_entries {
+            let val = apic_read(offset);
+            let vector = val & 0xFF;
+            let delivery = (val >> 8) & 0x7;
+            let status = (val >> 12) & 0x1;
+            let polarity = (val >> 13) & 0x1;
+            let remote = (val >> 14) & 0x1;
+            let trigger = (val >> 15) & 0x1;
+            let masked = (val >> 16) & 0x1;
+
+            let delivery_str = match delivery {
+                0 => "Fixed",
+                2 => "SMI",
+                4 => "NMI",
+                5 => "INIT",
+                7 => "ExtINT",
+                _ => "???",
+            };
+
+            outln!("{}:", name);
+            outln!("  Vector: 0x{:02X}  Delivery: {} ({})", vector, delivery, delivery_str);
+            outln!("  Masked: {}  Status: {}  Polarity: {}  Trigger: {}",
+                   masked != 0,
+                   if status != 0 { "Pending" } else { "Idle" },
+                   if polarity != 0 { "Low" } else { "High" },
+                   if trigger != 0 { "Level" } else { "Edge" });
+            outln!("");
+        }
+    }
+}
+
+fn show_apic_timer_detail() {
+    outln!("APIC Timer Configuration");
+    outln!("");
+
+    unsafe {
+        let lvt_timer = apic_read(0x320);
+        let icr = apic_read(0x380);
+        let ccr = apic_read(0x390);
+        let dcr = apic_read(0x3E0);
+
+        let vector = lvt_timer & 0xFF;
+        let mode = (lvt_timer >> 17) & 0x3;
+        let masked = (lvt_timer >> 16) & 0x1;
+
+        let mode_str = match mode {
+            0 => "One-shot",
+            1 => "Periodic",
+            2 => "TSC-Deadline",
+            _ => "Reserved",
+        };
+
+        let divisor = match dcr & 0xB {
+            0x0 => 2,
+            0x1 => 4,
+            0x2 => 8,
+            0x3 => 16,
+            0x8 => 32,
+            0x9 => 64,
+            0xA => 128,
+            0xB => 1,
+            _ => 0,
+        };
+
+        outln!("LVT Timer:      0x{:08X}", lvt_timer);
+        outln!("  Vector:       0x{:02X}", vector);
+        outln!("  Mode:         {} ({})", mode, mode_str);
+        outln!("  Masked:       {}", masked != 0);
+        outln!("");
+
+        outln!("Initial Count:  {} (0x{:08X})", icr, icr);
+        outln!("Current Count:  {} (0x{:08X})", ccr, ccr);
+        outln!("Divide Config:  0x{:X} (divide by {})", dcr & 0xB, divisor);
+
+        if icr > 0 && divisor > 0 {
+            let percent = if icr > 0 {
+                ((icr - ccr) as u64 * 100) / icr as u64
+            } else {
+                0
+            };
+            outln!("");
+            outln!("Progress:       {}% ({}/{})", percent, icr - ccr, icr);
+        }
+    }
+}
+
+fn show_apic_isr_irr() {
+    outln!("APIC ISR/IRR/TMR Status");
+    outln!("");
+
+    unsafe {
+        outln!("In-Service Register (ISR) - interrupts being serviced:");
+        show_apic_bitmap(0x100, 8);
+
+        outln!("");
+        outln!("Interrupt Request Register (IRR) - pending interrupts:");
+        show_apic_bitmap(0x200, 8);
+
+        outln!("");
+        outln!("Trigger Mode Register (TMR) - level (1) vs edge (0):");
+        show_apic_bitmap(0x180, 8);
+    }
+}
+
+unsafe fn show_apic_bitmap(base_offset: u32, count: usize) {
+    for i in 0..count {
+        let offset = base_offset + (i as u32 * 0x10);
+        let val = apic_read(offset);
+        if val != 0 {
+            out!("  {:3}-{:3}: ", i * 32, i * 32 + 31);
+            for bit in 0..32 {
+                if (val & (1 << bit)) != 0 {
+                    out!("{} ", i * 32 + bit);
+                }
+            }
+            outln!("");
+        }
+    }
+}
+
+fn show_ioapic() {
+    outln!("I/O APIC Information");
+    outln!("");
+
+    // Standard I/O APIC base address
+    let ioapic_base = 0xFEC0_0000u64;
+
+    unsafe {
+        // Read I/O APIC ID
+        let id = ioapic_read(ioapic_base, 0x00);
+        let version = ioapic_read(ioapic_base, 0x01);
+        let arb = ioapic_read(ioapic_base, 0x02);
+
+        let max_redir = ((version >> 16) & 0xFF) + 1;
+
+        outln!("I/O APIC at 0x{:08X}:", ioapic_base);
+        outln!("  ID:           0x{:02X}", (id >> 24) & 0xF);
+        outln!("  Version:      0x{:02X}", version & 0xFF);
+        outln!("  Max Entries:  {}", max_redir);
+        outln!("  Arbitration:  0x{:02X}", (arb >> 24) & 0xF);
+        outln!("");
+
+        outln!("Redirection Table:");
+        let entries_to_show = max_redir.min(24) as u8;
+        for i in 0..entries_to_show {
+            let lo = ioapic_read(ioapic_base, 0x10 + i * 2);
+            let hi = ioapic_read(ioapic_base, 0x11 + i * 2);
+
+            let vector = lo & 0xFF;
+            let delivery = (lo >> 8) & 0x7;
+            let dest_mode = (lo >> 11) & 0x1;
+            let polarity = (lo >> 13) & 0x1;
+            let trigger = (lo >> 15) & 0x1;
+            let masked = (lo >> 16) & 0x1;
+            let dest = (hi >> 24) & 0xFF;
+
+            if masked == 0 || vector != 0 {
+                let delivery_str = match delivery {
+                    0 => "Fixed",
+                    1 => "LowPri",
+                    2 => "SMI",
+                    4 => "NMI",
+                    5 => "INIT",
+                    7 => "ExtINT",
+                    _ => "???",
+                };
+
+                outln!(
+                    "  IRQ{:2}: Vec 0x{:02X} -> CPU{} [{}{}{}{}]",
+                    i,
+                    vector,
+                    dest,
+                    delivery_str,
+                    if polarity != 0 { " Low" } else { "" },
+                    if trigger != 0 { " Level" } else { "" },
+                    if masked != 0 { " MASKED" } else { "" }
+                );
+            }
+        }
+    }
+}
+
+/// Read from I/O APIC register
+unsafe fn ioapic_read(base: u64, reg: u8) -> u32 {
+    let ioregsel = base as *mut u32;
+    let iowin = (base + 0x10) as *mut u32;
+
+    core::ptr::write_volatile(ioregsel, reg as u32);
+    core::ptr::read_volatile(iowin)
 }

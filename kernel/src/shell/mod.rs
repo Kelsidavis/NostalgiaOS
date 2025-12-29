@@ -146,7 +146,7 @@ const HISTORY_SIZE: usize = 32;
 
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
-    "acpi",
+    "acpi", "apic",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "dir", "dump", "echo", "erase", "ex", "exit",
     "hal", "help", "history",
@@ -1121,6 +1121,9 @@ impl Shell {
         // I/O port browser
         } else if eq_ignore_case(cmd, "port") {
             commands::cmd_port(&args[1..argc]);
+        // APIC viewer
+        } else if eq_ignore_case(cmd, "apic") {
+            commands::cmd_apic(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
