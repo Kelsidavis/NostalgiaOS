@@ -146,12 +146,12 @@ const HISTORY_SIZE: usize = 32;
 
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
-    "acpi", "apic",
+    "acpi", "apic", "apcq",
     "bt",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "desc", "descriptor", "dir", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
     "hal", "handles", "help", "history", "hpet",
-    "int", "io", "irqstat",
+    "int", "io", "irql", "irqstat",
     "ke",
     "ldr", "ls",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
@@ -160,7 +160,7 @@ const COMMANDS: &[&str] = &[
     "pagetable", "pci", "pe", "pfn", "pool", "port", "prcb", "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
-    "sc", "se", "services", "smbios", "stack", "suspend", "sysinfo",
+    "sc", "sched", "se", "services", "smbios", "stack", "suspend", "sysinfo",
     "tasks", "time", "timer", "timerq", "touch", "type",
     "usertest",
     "veh", "ver", "version",
@@ -1164,6 +1164,15 @@ impl Shell {
         // PRCB viewer
         } else if eq_ignore_case(cmd, "prcb") {
             commands::cmd_prcb(&args[1..argc]);
+        // IRQL viewer
+        } else if eq_ignore_case(cmd, "irql") {
+            commands::cmd_irql(&args[1..argc]);
+        // APC queue viewer
+        } else if eq_ignore_case(cmd, "apcq") {
+            commands::cmd_apcq(&args[1..argc]);
+        // Scheduler viewer
+        } else if eq_ignore_case(cmd, "sched") {
+            commands::cmd_sched(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

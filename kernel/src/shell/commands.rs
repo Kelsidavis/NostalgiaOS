@@ -132,6 +132,9 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    obdir          Object Manager namespace viewer (types, tree)");
         outln!("    handles        System handle table viewer (stats, list)");
         outln!("    prcb           PRCB viewer (threads, ready, ipi)");
+        outln!("    irql           IRQL viewer (current, levels, state)");
+        outln!("    apcq           APC queue viewer (stats, pending)");
+        outln!("    sched          Scheduler viewer (stats, ready, current)");
         outln!("    veh            Vectored Exception Handler info/test");
         outln!("    seh            Structured Exception Handler info/test");
         outln!("");
@@ -11228,5 +11231,390 @@ fn show_prcb_ipi() {
     outln!("Current Packet:");
     for (i, p) in prcb.current_packet.iter().enumerate() {
         outln!("  Param[{}]:       {:#018x}", i, p.load(Ordering::Relaxed));
+    }
+}
+
+// ============================================================================
+// IRQL Viewer Command
+// ============================================================================
+
+/// IRQL viewer command
+pub fn cmd_irql(args: &[&str]) {
+    let subcmd = if args.is_empty() { "current" } else { args[0] };
+
+    if eq_ignore_case(subcmd, "help") || eq_ignore_case(subcmd, "?") {
+        outln!("IRQL - Interrupt Request Level Viewer");
+        outln!("");
+        outln!("Commands:");
+        outln!("  irql               Show current IRQL (default)");
+        outln!("  irql current       Show current IRQL");
+        outln!("  irql levels        Show all IRQL levels");
+        outln!("  irql state         Show interrupt state");
+        outln!("  irql help          Show this help");
+        return;
+    }
+
+    if eq_ignore_case(subcmd, "current") {
+        show_irql_current();
+    } else if eq_ignore_case(subcmd, "levels") {
+        show_irql_levels();
+    } else if eq_ignore_case(subcmd, "state") {
+        show_irql_state();
+    } else {
+        outln!("Unknown irql command: {}", subcmd);
+        outln!("Use 'irql help' for usage");
+    }
+}
+
+fn show_irql_current() {
+    use crate::ke::kpcr::{ke_get_current_irql, irql, get_current_kpcr};
+
+    let current_irql = ke_get_current_irql();
+    let kpcr = get_current_kpcr();
+
+    outln!("Current IRQL State");
+    outln!("==================");
+    outln!("");
+
+    outln!("IRQL Value:        {}", current_irql);
+
+    // Show level name
+    let level_name = match current_irql {
+        0 => "PASSIVE_LEVEL",
+        1 => "APC_LEVEL",
+        2 => "DISPATCH_LEVEL",
+        28 => "CLOCK_LEVEL",
+        29 => "IPI_LEVEL",
+        30 => "POWER_LEVEL",
+        31 => "HIGH_LEVEL",
+        n if n >= 3 && n < 28 => "DEVICE_LEVEL",
+        _ => "UNKNOWN",
+    };
+    outln!("Level Name:        {}", level_name);
+
+    outln!("");
+    outln!("Permissions at this level:");
+    if current_irql <= irql::PASSIVE_LEVEL {
+        outln!("  - Page faults:       ALLOWED");
+        outln!("  - APCs:              ALLOWED");
+        outln!("  - Thread preemption: ALLOWED");
+    } else if current_irql <= irql::APC_LEVEL {
+        outln!("  - Page faults:       ALLOWED");
+        outln!("  - APCs:              DISABLED");
+        outln!("  - Thread preemption: ALLOWED");
+    } else if current_irql <= irql::DISPATCH_LEVEL {
+        outln!("  - Page faults:       FORBIDDEN");
+        outln!("  - APCs:              DISABLED");
+        outln!("  - Thread preemption: DISABLED");
+    } else {
+        outln!("  - All interrupts:    MASKED");
+    }
+}
+
+fn show_irql_levels() {
+    use crate::ke::kpcr::irql;
+
+    outln!("NT IRQL Levels");
+    outln!("==============");
+    outln!("");
+
+    outln!("{:<3} {:<18} {}", "Lvl", "Name", "Description");
+    outln!("--------------------------------------------------------------");
+    outln!("{:>3} {:<18} {}", irql::PASSIVE_LEVEL, "PASSIVE_LEVEL", "Normal thread execution");
+    outln!("{:>3} {:<18} {}", irql::APC_LEVEL, "APC_LEVEL", "APCs disabled");
+    outln!("{:>3} {:<18} {}", irql::DISPATCH_LEVEL, "DISPATCH_LEVEL", "Thread preemption disabled");
+    outln!("{:>3} {:<18} {}", "3-27", "DEVICE_LEVELS", "Device interrupt levels");
+    outln!("{:>3} {:<18} {}", irql::CLOCK_LEVEL, "CLOCK_LEVEL", "Clock/timer interrupt");
+    outln!("{:>3} {:<18} {}", irql::IPI_LEVEL, "IPI_LEVEL", "Inter-processor interrupt");
+    outln!("{:>3} {:<18} {}", irql::POWER_LEVEL, "POWER_LEVEL", "Power fail interrupt");
+    outln!("{:>3} {:<18} {}", irql::HIGH_LEVEL, "HIGH_LEVEL", "All interrupts disabled");
+
+    outln!("");
+    outln!("SYNCH_LEVEL = DISPATCH_LEVEL on x86-64");
+}
+
+fn show_irql_state() {
+    use crate::ke::kpcr::{ke_get_current_irql, get_current_kpcr,
+                          ke_is_executing_interrupt, ke_is_dpc_active};
+
+    let current_irql = ke_get_current_irql();
+    let kpcr = get_current_kpcr();
+
+    outln!("Interrupt State");
+    outln!("===============");
+    outln!("");
+
+    outln!("Current IRQL:      {}", current_irql);
+    outln!("Processor Number:  {}", kpcr.number);
+    outln!("Interrupt Count:   {}", kpcr.interrupt_count);
+    outln!("");
+
+    outln!("State Flags:");
+    outln!("  In Interrupt:    {}", if ke_is_executing_interrupt() { "YES" } else { "No" });
+    outln!("  DPC Active:      {}", if ke_is_dpc_active() { "YES" } else { "No" });
+    outln!("  Debugger Active: {}", if kpcr.debugger_active != 0 { "YES" } else { "No" });
+
+    outln!("");
+    outln!("Exception Stacks:");
+    if kpcr.nmi_stack != 0 {
+        outln!("  NMI Stack:       {:#018x}", kpcr.nmi_stack);
+    } else {
+        outln!("  NMI Stack:       (not configured)");
+    }
+    if kpcr.double_fault_stack != 0 {
+        outln!("  Double Fault:    {:#018x}", kpcr.double_fault_stack);
+    } else {
+        outln!("  Double Fault:    (not configured)");
+    }
+    if kpcr.machine_check_stack != 0 {
+        outln!("  Machine Check:   {:#018x}", kpcr.machine_check_stack);
+    } else {
+        outln!("  Machine Check:   (not configured)");
+    }
+}
+
+// ============================================================================
+// APC Queue Viewer Command
+// ============================================================================
+
+/// APC queue viewer command
+pub fn cmd_apcq(args: &[&str]) {
+    let subcmd = if args.is_empty() { "stats" } else { args[0] };
+
+    if eq_ignore_case(subcmd, "help") || eq_ignore_case(subcmd, "?") {
+        outln!("APCQ - APC Queue Viewer");
+        outln!("");
+        outln!("Commands:");
+        outln!("  apcq               Show APC status (default)");
+        outln!("  apcq stats         Show APC queue statistics");
+        outln!("  apcq pending       Check if APCs are pending");
+        outln!("  apcq help          Show this help");
+        return;
+    }
+
+    if eq_ignore_case(subcmd, "stats") {
+        show_apc_stats();
+    } else if eq_ignore_case(subcmd, "pending") {
+        show_apc_pending();
+    } else {
+        outln!("Unknown apcq command: {}", subcmd);
+        outln!("Use 'apcq help' for usage");
+    }
+}
+
+fn show_apc_stats() {
+    use crate::ke::apc::ki_check_apc_pending;
+    use crate::ke::prcb::get_current_prcb;
+
+    let prcb = get_current_prcb();
+    let apc_pending = ki_check_apc_pending();
+
+    outln!("APC Queue Statistics");
+    outln!("====================");
+    outln!("");
+
+    if prcb.current_thread.is_null() {
+        outln!("No current thread - APC information unavailable");
+        return;
+    }
+
+    unsafe {
+        let thread = &*prcb.current_thread;
+        let apc_state = &thread.apc_state;
+
+        outln!("Current Thread: {:#018x}", prcb.current_thread as u64);
+        outln!("Thread ID:      {}", thread.thread_id);
+        outln!("");
+
+        outln!("APC State:");
+        outln!("  Kernel APC Pending:     {}", if apc_state.kernel_apc_pending { "YES" } else { "No" });
+        outln!("  Kernel APC In Progress: {}", if apc_state.kernel_apc_in_progress { "YES" } else { "No" });
+        outln!("  User APC Pending:       {}", if apc_state.user_apc_pending { "YES" } else { "No" });
+        outln!("");
+
+        outln!("Queue Status:");
+        outln!("  Kernel APC Queue:       {}",
+            if apc_state.is_kernel_apc_queue_empty() { "Empty" } else { "Has APCs" });
+        outln!("  User APC Queue:         {}",
+            if apc_state.is_user_apc_queue_empty() { "Empty" } else { "Has APCs" });
+
+        outln!("");
+        outln!("Thread Flags:");
+        outln!("  Alertable:              {}", if thread.alertable { "Yes" } else { "No" });
+        outln!("  Special APC Disable:    {}", thread.special_apc_disable);
+    }
+}
+
+fn show_apc_pending() {
+    use crate::ke::apc::ki_check_apc_pending;
+
+    let pending = ki_check_apc_pending();
+
+    outln!("APC Pending Status");
+    outln!("==================");
+    outln!("");
+
+    if pending {
+        outln!("APCs are PENDING");
+        outln!("");
+        outln!("Pending APCs will be delivered when:");
+        outln!("  - Returning from kernel to user mode");
+        outln!("  - Thread enters alertable wait state");
+        outln!("  - IRQL drops to PASSIVE_LEVEL");
+    } else {
+        outln!("No APCs pending");
+    }
+}
+
+// ============================================================================
+// Scheduler Viewer Command
+// ============================================================================
+
+/// Scheduler viewer command
+pub fn cmd_sched(args: &[&str]) {
+    let subcmd = if args.is_empty() { "stats" } else { args[0] };
+
+    if eq_ignore_case(subcmd, "help") || eq_ignore_case(subcmd, "?") {
+        outln!("SCHED - Scheduler Viewer");
+        outln!("");
+        outln!("Commands:");
+        outln!("  sched              Show scheduler state (default)");
+        outln!("  sched stats        Show scheduler statistics");
+        outln!("  sched ready        Show ready queue summary");
+        outln!("  sched current      Show current thread info");
+        outln!("  sched help         Show this help");
+        return;
+    }
+
+    if eq_ignore_case(subcmd, "stats") {
+        show_sched_stats();
+    } else if eq_ignore_case(subcmd, "ready") {
+        show_sched_ready();
+    } else if eq_ignore_case(subcmd, "current") {
+        show_sched_current();
+    } else {
+        outln!("Unknown sched command: {}", subcmd);
+        outln!("Use 'sched help' for usage");
+    }
+}
+
+fn show_sched_stats() {
+    use crate::ke::prcb::{get_current_prcb, ke_get_current_processor_number};
+    use crate::ke::thread::constants::MAXIMUM_PRIORITY;
+
+    let prcb = get_current_prcb();
+    let cpu_num = ke_get_current_processor_number();
+
+    outln!("Scheduler Statistics");
+    outln!("====================");
+    outln!("");
+
+    outln!("Processor:         {}", cpu_num);
+    outln!("Context Switches:  {}", prcb.context_switches);
+    outln!("Ready Summary:     {:#010x}", prcb.ready_summary);
+    outln!("Quantum End:       {}", if prcb.quantum_end { "Yes" } else { "No" });
+
+    outln!("");
+    outln!("Priority Configuration:");
+    outln!("  Maximum Priority:  {}", MAXIMUM_PRIORITY);
+
+    // Count ready priorities
+    let mut ready_count = 0;
+    for pri in 0..MAXIMUM_PRIORITY {
+        if (prcb.ready_summary & (1 << pri)) != 0 {
+            ready_count += 1;
+        }
+    }
+    outln!("  Active Priorities: {}", ready_count);
+
+    if let Some(highest) = prcb.find_highest_ready_priority() {
+        outln!("  Highest Ready:     {}", highest);
+    } else {
+        outln!("  Highest Ready:     None");
+    }
+}
+
+fn show_sched_ready() {
+    use crate::ke::prcb::get_current_prcb;
+    use crate::ke::thread::constants::MAXIMUM_PRIORITY;
+
+    let prcb = get_current_prcb();
+
+    outln!("Ready Queue Summary");
+    outln!("===================");
+    outln!("");
+
+    outln!("Ready Summary Bitmap: {:#034b}", prcb.ready_summary);
+    outln!("");
+
+    if prcb.ready_summary == 0 {
+        outln!("All ready queues are empty");
+        outln!("(Idle thread would run)");
+        return;
+    }
+
+    outln!("Priority  Status");
+    outln!("--------  ------");
+    for pri in (0..MAXIMUM_PRIORITY).rev() {
+        if (prcb.ready_summary & (1 << pri)) != 0 {
+            outln!("{:>8}  READY", pri);
+        }
+    }
+
+    outln!("");
+    if let Some(highest) = prcb.find_highest_ready_priority() {
+        outln!("Next priority to run: {}", highest);
+    }
+}
+
+fn show_sched_current() {
+    use crate::ke::prcb::get_current_prcb;
+    use crate::ke::thread::ThreadState;
+
+    let prcb = get_current_prcb();
+
+    outln!("Current Thread Information");
+    outln!("==========================");
+    outln!("");
+
+    if prcb.current_thread.is_null() {
+        outln!("No current thread (should not happen!)");
+        return;
+    }
+
+    unsafe {
+        let thread = &*prcb.current_thread;
+
+        outln!("Thread Address:    {:#018x}", prcb.current_thread as u64);
+        outln!("Thread ID:         {}", thread.thread_id);
+        outln!("");
+
+        outln!("Scheduling:");
+        outln!("  Priority:        {}", thread.priority);
+        outln!("  Base Priority:   {}", thread.base_priority);
+        outln!("  Quantum:         {}", thread.quantum);
+        outln!("  Affinity:        {:#018x}", thread.affinity);
+
+        outln!("");
+        outln!("State:");
+        let state_name = match thread.state {
+            ThreadState::Initialized => "Initialized",
+            ThreadState::Ready => "Ready",
+            ThreadState::Running => "Running",
+            ThreadState::Standby => "Standby",
+            ThreadState::Terminated => "Terminated",
+            ThreadState::Waiting => "Waiting",
+            ThreadState::Transition => "Transition",
+            ThreadState::DeferredReady => "DeferredReady",
+            ThreadState::Suspended => "Suspended",
+        };
+        outln!("  Thread State:    {}", state_name);
+        outln!("  Wait Reason:     {}", thread.wait_reason);
+        outln!("  Alertable:       {}", if thread.alertable { "Yes" } else { "No" });
+
+        if !thread.process.is_null() {
+            outln!("");
+            outln!("Process:           {:#018x}", thread.process as u64);
+        }
     }
 }
