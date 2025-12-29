@@ -679,6 +679,93 @@ pub fn get_pipe_stats() -> PipeStats {
     stats
 }
 
+/// Named pipe snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct PipeSnapshot {
+    /// Pipe name
+    pub name: [u8; 64],
+    /// Name length
+    pub name_len: u8,
+    /// Max instances allowed
+    pub max_instances: u32,
+    /// Current instance count
+    pub instance_count: u32,
+    /// Pipe type flags
+    pub type_flags: u32,
+    /// Instances in listening state
+    pub listening_count: u32,
+    /// Instances in connected state
+    pub connected_count: u32,
+}
+
+impl PipeSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            name: [0u8; 64],
+            name_len: 0,
+            max_instances: 0,
+            instance_count: 0,
+            type_flags: 0,
+            listening_count: 0,
+            connected_count: 0,
+        }
+    }
+}
+
+/// Get snapshots of all active named pipes
+pub fn io_get_pipe_snapshots(max_count: usize) -> ([PipeSnapshot; 32], usize) {
+    let mut snapshots = [PipeSnapshot::empty(); 32];
+    let mut count = 0;
+
+    let limit = max_count.min(32);
+
+    unsafe {
+        for pipe in PIPE_POOL.iter() {
+            if count >= limit {
+                break;
+            }
+
+            if pipe.in_use {
+                let snap = &mut snapshots[count];
+
+                // Copy name (up to 64 bytes)
+                let name_len = pipe.name_len.min(64);
+                snap.name[..name_len].copy_from_slice(&pipe.name[..name_len]);
+                snap.name_len = name_len as u8;
+                snap.max_instances = pipe.max_instances;
+                snap.instance_count = pipe.instance_count;
+                snap.type_flags = pipe.type_flags;
+
+                // Count instance states
+                snap.listening_count = 0;
+                snap.connected_count = 0;
+                for instance in pipe.instances.iter() {
+                    if instance.in_use {
+                        match instance.state {
+                            PipeState::Listening => snap.listening_count += 1,
+                            PipeState::Connected => snap.connected_count += 1,
+                            _ => {}
+                        }
+                    }
+                }
+
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get pipe type name
+pub fn pipe_type_name(type_flags: u32) -> &'static str {
+    if (type_flags & pipe_type::MESSAGE_TYPE) != 0 {
+        "Message"
+    } else {
+        "Byte"
+    }
+}
+
 // ============================================================================
 // Initialization
 // ============================================================================

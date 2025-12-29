@@ -147,7 +147,7 @@ const HISTORY_SIZE: usize = 32;
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq",
-    "bt",
+    "blocks", "bt",
     "cat", "cd", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "debug", "del", "desc", "descriptor", "devdrv", "dir", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
     "files",
@@ -158,13 +158,13 @@ const COMMANDS: &[&str] = &[
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net",
     "ob", "obdir",
-    "pagetable", "pci", "pe", "pfn", "pool", "pooltag", "port", "prcb", "ps", "pwd",
+    "pagetable", "pci", "pe", "pfn", "pipes", "pool", "pooltag", "port", "prcb", "ps", "pwd",
     "quit",
-    "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
+    "ramdisk", "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
     "sc", "sched", "se", "services", "smbios", "stack", "suspend", "sysinfo",
     "tasks", "time", "timer", "timerq", "touch", "type",
     "usertest",
-    "veh", "ver", "version",
+    "veh", "ver", "version", "volumes",
     "waitq",
 ];
 
@@ -1193,6 +1193,18 @@ impl Shell {
         // Completion port viewer
         } else if eq_ignore_case(cmd, "iocp") {
             commands::cmd_iocp(&args[1..argc]);
+        // Named pipe viewer
+        } else if eq_ignore_case(cmd, "pipes") {
+            commands::cmd_pipes(&args[1..argc]);
+        // RAM disk viewer
+        } else if eq_ignore_case(cmd, "ramdisk") {
+            commands::cmd_ramdisk(&args[1..argc]);
+        // Volume viewer
+        } else if eq_ignore_case(cmd, "volumes") {
+            commands::cmd_volumes(&args[1..argc]);
+        // Block device viewer
+        } else if eq_ignore_case(cmd, "blocks") {
+            commands::cmd_blocks(&args[1..argc]);
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);

@@ -12322,3 +12322,455 @@ fn show_iocp_list() {
     outln!("");
     outln!("Total: {} ports", count);
 }
+
+// ============================================================================
+// Named Pipes Command (pipes)
+// ============================================================================
+
+/// pipes - Named pipe viewer
+///
+/// Display named pipe statistics and list active pipes.
+///
+/// Usage: pipes [stats|list]
+///
+/// Subcommands:
+///   stats  - Show pipe pool statistics (default)
+///   list   - List all active named pipes
+pub fn cmd_pipes(args: &[&str]) {
+    if args.is_empty() {
+        show_pipe_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_pipe_stats();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_pipe_list();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("pipes - Named Pipe Viewer");
+        outln!("");
+        outln!("Usage: pipes [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show pipe pool statistics (default)");
+        outln!("  list   - List all active named pipes");
+        outln!("");
+        outln!("Examples:");
+        outln!("  pipes         - Show pipe statistics");
+        outln!("  pipes list    - List all active pipes");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'pipes help' for usage information");
+    }
+}
+
+fn show_pipe_stats() {
+    use crate::io::{get_pipe_stats, MAX_NAMED_PIPES, MAX_PIPE_INSTANCES};
+
+    let stats = get_pipe_stats();
+
+    outln!("Named Pipe Statistics");
+    outln!("=====================");
+    outln!("");
+    outln!("Max Pipes:          {}", MAX_NAMED_PIPES);
+    outln!("Active Pipes:       {}", stats.active_pipes);
+    outln!("Max Instances/Pipe: {}", MAX_PIPE_INSTANCES);
+    outln!("Total Instances:    {}", stats.total_instances);
+    outln!("Connected:          {}", stats.connected_instances);
+}
+
+fn show_pipe_list() {
+    use crate::io::{io_get_pipe_snapshots, pipe_type_name};
+
+    outln!("Active Named Pipes");
+    outln!("==================");
+    outln!("");
+
+    let (snapshots, count) = io_get_pipe_snapshots(32);
+
+    if count == 0 {
+        outln!("No active named pipes");
+        return;
+    }
+
+    outln!("{:<40} {:<10} {:<10} {:<10} {:<10}",
+        "Name", "Type", "Instances", "Listening", "Connected");
+    outln!("--------------------------------------------------------------------------------");
+
+    for i in 0..count {
+        let pipe = &snapshots[i];
+        let name_len = pipe.name_len as usize;
+        let name = core::str::from_utf8(&pipe.name[..name_len]).unwrap_or("<invalid>");
+
+        outln!("{:<40} {:<10} {:<10} {:<10} {:<10}",
+            name,
+            pipe_type_name(pipe.type_flags),
+            pipe.instance_count,
+            pipe.listening_count,
+            pipe.connected_count
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} active pipes", count);
+}
+
+// ============================================================================
+// RAM Disk Command (ramdisk)
+// ============================================================================
+
+/// ramdisk - RAM disk viewer
+///
+/// Display RAM disk statistics and list active RAM disks.
+///
+/// Usage: ramdisk [stats|list]
+///
+/// Subcommands:
+///   stats  - Show RAM disk statistics (default)
+///   list   - List all active RAM disks
+pub fn cmd_ramdisk(args: &[&str]) {
+    if args.is_empty() {
+        show_ramdisk_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_ramdisk_stats();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_ramdisk_list();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("ramdisk - RAM Disk Viewer");
+        outln!("");
+        outln!("Usage: ramdisk [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show RAM disk statistics (default)");
+        outln!("  list   - List all active RAM disks");
+        outln!("");
+        outln!("Examples:");
+        outln!("  ramdisk       - Show RAM disk statistics");
+        outln!("  ramdisk list  - List all active RAM disks");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'ramdisk help' for usage information");
+    }
+}
+
+fn show_ramdisk_stats() {
+    use crate::io::{get_ramdisk_stats, DEFAULT_RAMDISK_SIZE};
+
+    let stats = get_ramdisk_stats();
+
+    outln!("RAM Disk Statistics");
+    outln!("===================");
+    outln!("");
+    outln!("Max RAM Disks:      {}", stats.max_ramdisks);
+    outln!("Active RAM Disks:   {}", stats.active_ramdisks);
+    outln!("Total Size:         {} KB", stats.total_size / 1024);
+    outln!("Total Sectors:      {}", stats.total_sectors);
+    outln!("Default Size:       {} KB", DEFAULT_RAMDISK_SIZE / 1024);
+}
+
+fn show_ramdisk_list() {
+    use crate::io::io_get_ramdisk_snapshots;
+
+    outln!("Active RAM Disks");
+    outln!("================");
+    outln!("");
+
+    let (snapshots, count) = io_get_ramdisk_snapshots(8);
+
+    if count == 0 {
+        outln!("No active RAM disks");
+        return;
+    }
+
+    outln!("{:<6} {:<10} {:<12} {:<12}",
+        "Slot", "Dev Index", "Size (KB)", "Sectors");
+    outln!("------------------------------------------");
+
+    for i in 0..count {
+        let disk = &snapshots[i];
+
+        outln!("{:<6} {:<10} {:<12} {:<12}",
+            disk.slot,
+            disk.dev_index,
+            disk.size / 1024,
+            disk.sector_count
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} RAM disks", count);
+}
+
+// ============================================================================
+// Volumes Command (volumes)
+// ============================================================================
+
+/// volumes - Volume/partition viewer
+///
+/// Display volume statistics and list all detected volumes.
+///
+/// Usage: volumes [stats|list]
+///
+/// Subcommands:
+///   stats  - Show volume statistics (default)
+///   list   - List all detected volumes
+pub fn cmd_volumes(args: &[&str]) {
+    if args.is_empty() {
+        show_volume_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_volume_stats();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_volume_list();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("volumes - Volume/Partition Viewer");
+        outln!("");
+        outln!("Usage: volumes [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats  - Show volume statistics (default)");
+        outln!("  list   - List all detected volumes");
+        outln!("");
+        outln!("Examples:");
+        outln!("  volumes       - Show volume statistics");
+        outln!("  volumes list  - List all detected volumes");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'volumes help' for usage information");
+    }
+}
+
+fn show_volume_stats() {
+    use crate::io::{get_volume_stats, MAX_VOLUMES};
+
+    let stats = get_volume_stats();
+
+    outln!("Volume Statistics");
+    outln!("=================");
+    outln!("");
+    outln!("Max Volumes:       {}", MAX_VOLUMES);
+    outln!("Active Volumes:    {}", stats.active_volumes);
+    outln!("Total Size:        {} MB", stats.total_size_mb);
+    outln!("Bootable Volumes:  {}", stats.bootable_count);
+}
+
+fn show_volume_list() {
+    use crate::io::{io_get_volume_snapshots, partition_type};
+
+    outln!("Detected Volumes");
+    outln!("================");
+    outln!("");
+
+    let (snapshots, count) = io_get_volume_snapshots(32);
+
+    if count == 0 {
+        outln!("No volumes detected");
+        return;
+    }
+
+    outln!("{:<6} {:<6} {:<6} {:<12} {:<12} {:<10} {:<8}",
+        "Vol#", "Disk", "Part", "Start LBA", "Size (MB)", "Type", "Boot");
+    outln!("----------------------------------------------------------------------");
+
+    for i in 0..count {
+        let vol = &snapshots[i];
+        let boot_str = if vol.bootable { "*" } else { "" };
+
+        outln!("{:<6} {:<6} {:<6} {:<12} {:<12} {:<10} {:<8}",
+            vol.volume_number,
+            vol.disk_index,
+            vol.partition_index,
+            vol.start_lba,
+            vol.size_mb,
+            partition_type::name(vol.partition_type),
+            boot_str
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} volumes (* = bootable)", count);
+}
+
+// ============================================================================
+// Block Devices Command (blocks)
+// ============================================================================
+
+/// blocks - Block device viewer
+///
+/// Display block device statistics and list all registered devices.
+///
+/// Usage: blocks [stats|list|detail <index>]
+///
+/// Subcommands:
+///   stats         - Show block device statistics (default)
+///   list          - List all registered block devices
+///   detail <idx>  - Show detailed info for device at index
+pub fn cmd_blocks(args: &[&str]) {
+    if args.is_empty() {
+        show_block_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_block_stats();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_block_list();
+    } else if eq_ignore_ascii_case(subcmd, "detail") {
+        if args.len() < 2 {
+            outln!("Usage: blocks detail <index>");
+            return;
+        }
+        if let Ok(idx) = args[1].parse::<u8>() {
+            show_block_detail(idx);
+        } else {
+            outln!("Invalid device index: {}", args[1]);
+        }
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("blocks - Block Device Viewer");
+        outln!("");
+        outln!("Usage: blocks [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats         - Show block device statistics (default)");
+        outln!("  list          - List all registered block devices");
+        outln!("  detail <idx>  - Show detailed info for device at index");
+        outln!("");
+        outln!("Examples:");
+        outln!("  blocks           - Show block device statistics");
+        outln!("  blocks list      - List all block devices");
+        outln!("  blocks detail 0  - Show details for device 0");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'blocks help' for usage information");
+    }
+}
+
+fn show_block_stats() {
+    use crate::io::{get_block_stats, MAX_BLOCK_DEVICES};
+
+    let stats = get_block_stats();
+
+    outln!("Block Device Statistics");
+    outln!("=======================");
+    outln!("");
+    outln!("Max Devices:       {}", MAX_BLOCK_DEVICES);
+    outln!("Registered:        {}", stats.device_count);
+    outln!("Total Reads:       {}", stats.total_reads);
+    outln!("Total Writes:      {}", stats.total_writes);
+    outln!("Sectors Read:      {}", stats.total_sectors_read);
+    outln!("Sectors Written:   {}", stats.total_sectors_written);
+    outln!("Total Errors:      {}", stats.total_errors);
+}
+
+fn show_block_list() {
+    use crate::io::{io_get_block_snapshots, block_device_type_name};
+
+    outln!("Registered Block Devices");
+    outln!("========================");
+    outln!("");
+
+    let (snapshots, count) = io_get_block_snapshots(16);
+
+    if count == 0 {
+        outln!("No block devices registered");
+        return;
+    }
+
+    outln!("{:<4} {:<8} {:<10} {:<10} {:<10} {:<10}",
+        "Idx", "Name", "Type", "Size (MB)", "Reads", "Writes");
+    outln!("------------------------------------------------------------");
+
+    for i in 0..count {
+        let dev = &snapshots[i];
+        let name_len = dev.name.iter().position(|&b| b == 0).unwrap_or(16);
+        let name = core::str::from_utf8(&dev.name[..name_len]).unwrap_or("<invalid>");
+
+        outln!("{:<4} {:<8} {:<10} {:<10} {:<10} {:<10}",
+            dev.index,
+            name,
+            block_device_type_name(dev.device_type),
+            dev.size_mb,
+            dev.reads,
+            dev.writes
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} devices", count);
+}
+
+fn show_block_detail(index: u8) {
+    use crate::io::{io_get_block_snapshots, block_device_type_name, block_flags};
+
+    let (snapshots, count) = io_get_block_snapshots(16);
+
+    // Find the device with the given index
+    let mut found: Option<&crate::io::BlockDeviceSnapshot> = None;
+    for i in 0..count {
+        if snapshots[i].index == index {
+            found = Some(&snapshots[i]);
+            break;
+        }
+    }
+
+    let dev = match found {
+        Some(d) => d,
+        None => {
+            outln!("Device {} not found", index);
+            return;
+        }
+    };
+
+    let name_len = dev.name.iter().position(|&b| b == 0).unwrap_or(16);
+    let name = core::str::from_utf8(&dev.name[..name_len]).unwrap_or("<invalid>");
+    let model_len = dev.model.iter().position(|&b| b == 0).unwrap_or(32);
+    let model = core::str::from_utf8(&dev.model[..model_len]).unwrap_or("<unknown>");
+
+    outln!("Block Device Details: {}", name);
+    outln!("==============================");
+    outln!("");
+    outln!("Index:           {}", dev.index);
+    outln!("Name:            {}", name);
+    outln!("Type:            {}", block_device_type_name(dev.device_type));
+    outln!("Model:           {}", model);
+    outln!("Size:            {} MB", dev.size_mb);
+    outln!("Total Sectors:   {}", dev.total_sectors);
+    outln!("Present:         {}", if dev.present { "Yes" } else { "No" });
+    outln!("");
+    outln!("Flags:");
+    if (dev.flags & block_flags::REMOVABLE) != 0 {
+        outln!("  - Removable");
+    }
+    if (dev.flags & block_flags::READONLY) != 0 {
+        outln!("  - Read-Only");
+    }
+    if (dev.flags & block_flags::DMA) != 0 {
+        outln!("  - DMA Support");
+    }
+    if (dev.flags & block_flags::LBA48) != 0 {
+        outln!("  - LBA48 Support");
+    }
+    if (dev.flags & block_flags::BOOT) != 0 {
+        outln!("  - Boot Device");
+    }
+    outln!("");
+    outln!("I/O Statistics:");
+    outln!("  Read Operations:    {}", dev.reads);
+    outln!("  Write Operations:   {}", dev.writes);
+    outln!("  Sectors Read:       {}", dev.sectors_read);
+    outln!("  Sectors Written:    {}", dev.sectors_written);
+    outln!("  Errors:             {}", dev.errors);
+}

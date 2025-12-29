@@ -418,6 +418,118 @@ pub fn list_volumes() {
 }
 
 // ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// Volume statistics
+#[derive(Debug, Clone, Copy)]
+pub struct VolumeStats {
+    /// Maximum volumes
+    pub max_volumes: usize,
+    /// Active volumes
+    pub active_volumes: u32,
+    /// Total size in MB
+    pub total_size_mb: u64,
+    /// Bootable volumes
+    pub bootable_count: u32,
+}
+
+/// Volume snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct VolumeSnapshot {
+    /// Volume number
+    pub volume_number: u8,
+    /// Physical disk index
+    pub disk_index: u8,
+    /// Partition index
+    pub partition_index: u8,
+    /// Starting LBA
+    pub start_lba: u64,
+    /// Total sectors
+    pub total_sectors: u64,
+    /// Size in MB
+    pub size_mb: u64,
+    /// Partition type
+    pub partition_type: u8,
+    /// Is bootable
+    pub bootable: bool,
+    /// Volume label
+    pub label: [u8; 16],
+}
+
+impl VolumeSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            volume_number: 0,
+            disk_index: 0,
+            partition_index: 0,
+            start_lba: 0,
+            total_sectors: 0,
+            size_mb: 0,
+            partition_type: 0,
+            bootable: false,
+            label: [0u8; 16],
+        }
+    }
+}
+
+/// Get volume statistics
+pub fn get_volume_stats() -> VolumeStats {
+    let mut stats = VolumeStats {
+        max_volumes: MAX_VOLUMES,
+        active_volumes: 0,
+        total_size_mb: 0,
+        bootable_count: 0,
+    };
+
+    unsafe {
+        for vol in VOLUMES.iter() {
+            if vol.active {
+                stats.active_volumes += 1;
+                stats.total_size_mb += vol.size_mb();
+                if vol.bootable {
+                    stats.bootable_count += 1;
+                }
+            }
+        }
+    }
+
+    stats
+}
+
+/// Get snapshots of all volumes
+pub fn io_get_volume_snapshots(max_count: usize) -> ([VolumeSnapshot; 32], usize) {
+    let mut snapshots = [VolumeSnapshot::empty(); 32];
+    let mut count = 0;
+
+    let limit = max_count.min(32).min(MAX_VOLUMES);
+
+    unsafe {
+        for vol in VOLUMES.iter() {
+            if count >= limit {
+                break;
+            }
+
+            if vol.active {
+                let snap = &mut snapshots[count];
+                snap.volume_number = vol.volume_number;
+                snap.disk_index = vol.disk_index;
+                snap.partition_index = vol.partition_index;
+                snap.start_lba = vol.start_lba;
+                snap.total_sectors = vol.total_sectors;
+                snap.size_mb = vol.size_mb();
+                snap.partition_type = vol.partition_type;
+                snap.bootable = vol.bootable;
+                snap.label = vol.label;
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}
+
+// ============================================================================
 // Volume I/O
 // ============================================================================
 

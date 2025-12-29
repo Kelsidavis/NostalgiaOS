@@ -704,6 +704,109 @@ pub fn list_devices() {
     }
 }
 
+/// Block device snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct BlockDeviceSnapshot {
+    /// Device index
+    pub index: u8,
+    /// Device name
+    pub name: [u8; 16],
+    /// Device type
+    pub device_type: BlockDeviceType,
+    /// Flags
+    pub flags: u32,
+    /// Size in MB
+    pub size_mb: u64,
+    /// Total sectors
+    pub total_sectors: u64,
+    /// Read operations
+    pub reads: u64,
+    /// Write operations
+    pub writes: u64,
+    /// Sectors read
+    pub sectors_read: u64,
+    /// Sectors written
+    pub sectors_written: u64,
+    /// Errors
+    pub errors: u32,
+    /// Is present
+    pub present: bool,
+    /// Model string (truncated)
+    pub model: [u8; 32],
+}
+
+impl BlockDeviceSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            index: 0,
+            name: [0u8; 16],
+            device_type: BlockDeviceType::Unknown,
+            flags: 0,
+            size_mb: 0,
+            total_sectors: 0,
+            reads: 0,
+            writes: 0,
+            sectors_read: 0,
+            sectors_written: 0,
+            errors: 0,
+            present: false,
+            model: [0u8; 32],
+        }
+    }
+}
+
+/// Get snapshots of all block devices
+pub fn io_get_block_snapshots(max_count: usize) -> ([BlockDeviceSnapshot; 16], usize) {
+    let mut snapshots = [BlockDeviceSnapshot::empty(); 16];
+    let mut count = 0;
+
+    let limit = max_count.min(16).min(MAX_BLOCK_DEVICES);
+
+    unsafe {
+        for dev in BLOCK_DEVICES.iter() {
+            if count >= limit {
+                break;
+            }
+
+            if dev.registered {
+                let snap = &mut snapshots[count];
+                snap.index = dev.index;
+                snap.name = dev.name;
+                snap.device_type = dev.device_type;
+                snap.flags = dev.flags;
+                snap.size_mb = dev.geometry.size_mb();
+                snap.total_sectors = dev.geometry.total_sectors;
+                snap.reads = dev.reads.load(Ordering::Relaxed);
+                snap.writes = dev.writes.load(Ordering::Relaxed);
+                snap.sectors_read = dev.sectors_read.load(Ordering::Relaxed);
+                snap.sectors_written = dev.sectors_written.load(Ordering::Relaxed);
+                snap.errors = dev.errors.load(Ordering::Relaxed);
+                snap.present = dev.is_present();
+                // Copy model (truncated to 32 bytes)
+                let model_len = dev.model.iter().position(|&b| b == 0).unwrap_or(32).min(32);
+                snap.model[..model_len].copy_from_slice(&dev.model[..model_len]);
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}
+
+/// Get device type name
+pub fn block_device_type_name(dev_type: BlockDeviceType) -> &'static str {
+    match dev_type {
+        BlockDeviceType::Unknown => "Unknown",
+        BlockDeviceType::HardDisk => "HardDisk",
+        BlockDeviceType::SSD => "SSD",
+        BlockDeviceType::Optical => "Optical",
+        BlockDeviceType::Floppy => "Floppy",
+        BlockDeviceType::USB => "USB",
+        BlockDeviceType::RamDisk => "RamDisk",
+        BlockDeviceType::Network => "Network",
+    }
+}
+
 /// Initialize block device subsystem
 pub fn init() {
     crate::serial_println!("[BLOCK] Block device subsystem initialized ({} max devices)", MAX_BLOCK_DEVICES);

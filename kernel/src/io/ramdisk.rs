@@ -342,6 +342,99 @@ pub fn ramdisk_count() -> u8 {
     RAMDISK_COUNT.load(Ordering::SeqCst)
 }
 
+// ============================================================================
+// Inspection Functions
+// ============================================================================
+
+/// RAM disk statistics
+#[derive(Debug, Clone, Copy)]
+pub struct RamdiskStats {
+    /// Maximum number of RAM disks
+    pub max_ramdisks: usize,
+    /// Number of active RAM disks
+    pub active_ramdisks: u8,
+    /// Total allocated size in bytes
+    pub total_size: u64,
+    /// Total sectors across all disks
+    pub total_sectors: u64,
+}
+
+/// RAM disk snapshot for inspection
+#[derive(Clone, Copy)]
+pub struct RamdiskSnapshot {
+    /// Slot index
+    pub slot: u8,
+    /// Block device index
+    pub dev_index: u8,
+    /// Size in bytes
+    pub size: u64,
+    /// Sector count
+    pub sector_count: u64,
+    /// Is active
+    pub active: bool,
+}
+
+impl RamdiskSnapshot {
+    pub const fn empty() -> Self {
+        Self {
+            slot: 0,
+            dev_index: 0xFF,
+            size: 0,
+            sector_count: 0,
+            active: false,
+        }
+    }
+}
+
+/// Get RAM disk statistics
+pub fn get_ramdisk_stats() -> RamdiskStats {
+    let mut stats = RamdiskStats {
+        max_ramdisks: MAX_RAM_DISKS,
+        active_ramdisks: ramdisk_count(),
+        total_size: 0,
+        total_sectors: 0,
+    };
+
+    unsafe {
+        for instance in RAMDISK_INSTANCES.iter() {
+            if instance.active.load(Ordering::SeqCst) {
+                stats.total_size += instance.size as u64;
+                stats.total_sectors += instance.sector_count;
+            }
+        }
+    }
+
+    stats
+}
+
+/// Get snapshots of all RAM disks
+pub fn io_get_ramdisk_snapshots(max_count: usize) -> ([RamdiskSnapshot; 8], usize) {
+    let mut snapshots = [RamdiskSnapshot::empty(); 8];
+    let mut count = 0;
+
+    let limit = max_count.min(8).min(MAX_RAM_DISKS);
+
+    unsafe {
+        for (i, instance) in RAMDISK_INSTANCES.iter().enumerate() {
+            if count >= limit {
+                break;
+            }
+
+            if instance.active.load(Ordering::SeqCst) {
+                let snap = &mut snapshots[count];
+                snap.slot = i as u8;
+                snap.dev_index = instance.dev_index.load(Ordering::SeqCst);
+                snap.size = instance.size as u64;
+                snap.sector_count = instance.sector_count;
+                snap.active = true;
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}
+
 /// Initialize the RAM disk subsystem
 pub fn init() {
     crate::serial_println!("[RAMDISK] RAM disk driver initialized");
