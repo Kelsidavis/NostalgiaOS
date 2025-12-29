@@ -4064,7 +4064,11 @@ pub fn cmd_debug(args: &[&str]) {
         outln!("  bugcheck         Test blue screen of death");
         outln!("  break            Trigger debug break");
         outln!("  stack            Show current stack pointer");
-        outln!("  regs             Show register state");
+        outln!("  regs             Show general purpose registers");
+        outln!("  cr               Show control registers (CR0-CR4)");
+        outln!("  flags            Show RFLAGS register");
+        outln!("  gdt              Show GDT base and limit");
+        outln!("  idt              Show IDT base and limit");
         outln!("  veh              Show VEH handler count");
         outln!("  seh              Show SEH frame count");
         return;
@@ -4115,6 +4119,12 @@ pub fn cmd_debug(args: &[&str]) {
         let rdi: u64;
         let r8: u64;
         let r9: u64;
+        let r10: u64;
+        let r11: u64;
+        let r12: u64;
+        let r13: u64;
+        let r14: u64;
+        let r15: u64;
 
         unsafe {
             core::arch::asm!(
@@ -4126,6 +4136,12 @@ pub fn cmd_debug(args: &[&str]) {
                 "mov {}, rdi",
                 "mov {}, r8",
                 "mov {}, r9",
+                "mov {}, r10",
+                "mov {}, r11",
+                "mov {}, r12",
+                "mov {}, r13",
+                "mov {}, r14",
+                "mov {}, r15",
                 out(reg) rax,
                 out(reg) rbx,
                 out(reg) rcx,
@@ -4134,6 +4150,12 @@ pub fn cmd_debug(args: &[&str]) {
                 out(reg) rdi,
                 out(reg) r8,
                 out(reg) r9,
+                out(reg) r10,
+                out(reg) r11,
+                out(reg) r12,
+                out(reg) r13,
+                out(reg) r14,
+                out(reg) r15,
             );
         }
 
@@ -4142,6 +4164,101 @@ pub fn cmd_debug(args: &[&str]) {
         outln!("  RCX: {:#018x}  RDX: {:#018x}", rcx, rdx);
         outln!("  RSI: {:#018x}  RDI: {:#018x}", rsi, rdi);
         outln!("  R8:  {:#018x}  R9:  {:#018x}", r8, r9);
+        outln!("  R10: {:#018x}  R11: {:#018x}", r10, r11);
+        outln!("  R12: {:#018x}  R13: {:#018x}", r12, r13);
+        outln!("  R14: {:#018x}  R15: {:#018x}", r14, r15);
+    } else if eq_ignore_case(cmd, "cr") {
+        let cr0: u64;
+        let cr2: u64;
+        let cr3: u64;
+        let cr4: u64;
+
+        unsafe {
+            core::arch::asm!(
+                "mov {}, cr0",
+                "mov {}, cr2",
+                "mov {}, cr3",
+                "mov {}, cr4",
+                out(reg) cr0,
+                out(reg) cr2,
+                out(reg) cr3,
+                out(reg) cr4,
+            );
+        }
+
+        outln!("Control Registers:");
+        outln!("  CR0: {:#018x}", cr0);
+        outln!("       PE={} MP={} EM={} TS={} ET={} NE={} WP={} AM={} NW={} CD={} PG={}",
+            (cr0 >> 0) & 1, (cr0 >> 1) & 1, (cr0 >> 2) & 1, (cr0 >> 3) & 1,
+            (cr0 >> 4) & 1, (cr0 >> 5) & 1, (cr0 >> 16) & 1, (cr0 >> 18) & 1,
+            (cr0 >> 29) & 1, (cr0 >> 30) & 1, (cr0 >> 31) & 1);
+        outln!("  CR2: {:#018x} (Page Fault Linear Address)", cr2);
+        outln!("  CR3: {:#018x} (Page Directory Base)", cr3);
+        outln!("  CR4: {:#018x}", cr4);
+        outln!("       VME={} PVI={} TSD={} DE={} PSE={} PAE={} MCE={} PGE={}",
+            (cr4 >> 0) & 1, (cr4 >> 1) & 1, (cr4 >> 2) & 1, (cr4 >> 3) & 1,
+            (cr4 >> 4) & 1, (cr4 >> 5) & 1, (cr4 >> 6) & 1, (cr4 >> 7) & 1);
+        outln!("       PCE={} OSFXSR={} OSXMMEXCPT={} UMIP={} FSGSBASE={} PCIDE={}",
+            (cr4 >> 8) & 1, (cr4 >> 9) & 1, (cr4 >> 10) & 1, (cr4 >> 11) & 1,
+            (cr4 >> 16) & 1, (cr4 >> 17) & 1);
+    } else if eq_ignore_case(cmd, "flags") {
+        let rflags: u64;
+
+        unsafe {
+            core::arch::asm!(
+                "pushfq",
+                "pop {}",
+                out(reg) rflags,
+            );
+        }
+
+        outln!("RFLAGS: {:#018x}", rflags);
+        outln!("  CF={} PF={} AF={} ZF={} SF={} TF={} IF={} DF={} OF={}",
+            (rflags >> 0) & 1, (rflags >> 2) & 1, (rflags >> 4) & 1,
+            (rflags >> 6) & 1, (rflags >> 7) & 1, (rflags >> 8) & 1,
+            (rflags >> 9) & 1, (rflags >> 10) & 1, (rflags >> 11) & 1);
+        outln!("  IOPL={} NT={} RF={} VM={} AC={} VIF={} VIP={} ID={}",
+            (rflags >> 12) & 3, (rflags >> 14) & 1, (rflags >> 16) & 1,
+            (rflags >> 17) & 1, (rflags >> 18) & 1, (rflags >> 19) & 1,
+            (rflags >> 20) & 1, (rflags >> 21) & 1);
+    } else if eq_ignore_case(cmd, "gdt") {
+        #[repr(C, packed)]
+        struct DescriptorTablePointer {
+            limit: u16,
+            base: u64,
+        }
+
+        let mut gdtr = DescriptorTablePointer { limit: 0, base: 0 };
+
+        unsafe {
+            core::arch::asm!(
+                "sgdt [{}]",
+                in(reg) &mut gdtr,
+            );
+        }
+
+        outln!("Global Descriptor Table:");
+        outln!("  Base:  {:#018x}", gdtr.base);
+        outln!("  Limit: {:#06x} ({} entries)", gdtr.limit, (gdtr.limit + 1) / 8);
+    } else if eq_ignore_case(cmd, "idt") {
+        #[repr(C, packed)]
+        struct DescriptorTablePointer {
+            limit: u16,
+            base: u64,
+        }
+
+        let mut idtr = DescriptorTablePointer { limit: 0, base: 0 };
+
+        unsafe {
+            core::arch::asm!(
+                "sidt [{}]",
+                in(reg) &mut idtr,
+            );
+        }
+
+        outln!("Interrupt Descriptor Table:");
+        outln!("  Base:  {:#018x}", idtr.base);
+        outln!("  Limit: {:#06x} ({} entries)", idtr.limit, (idtr.limit + 1) / 16);
     } else if eq_ignore_case(cmd, "veh") {
         let count = ke::rtl_get_vectored_handler_count();
         outln!("Vectored Exception Handlers:");
