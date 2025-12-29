@@ -67,6 +67,7 @@ pub mod cc;
 pub mod cm;
 pub mod ex;
 pub mod fs;
+pub mod fsrtl;
 pub mod hal;
 pub mod io;
 pub mod ke;
