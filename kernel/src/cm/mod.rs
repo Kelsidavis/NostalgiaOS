@@ -128,6 +128,7 @@ pub use operations::{
     cm_enumerate_key,
     cm_enumerate_value,
     cm_get_key_name,
+    cm_get_key_last_write_time,
     cm_query_key_info,
     cm_read_string,
     cm_read_dword,

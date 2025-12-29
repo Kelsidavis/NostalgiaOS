@@ -5556,7 +5556,7 @@ fn sys_enumerate_key(
             // Fill in the structure
             unsafe {
                 let info = key_info as *mut KeyBasicInformation;
-                (*info).last_write_time = 0; // TODO: Get from key
+                (*info).last_write_time = crate::cm::cm_get_key_last_write_time(subkey_handle) as i64;
                 (*info).title_index = 0;
                 (*info).name_length = name_len as u32;
 

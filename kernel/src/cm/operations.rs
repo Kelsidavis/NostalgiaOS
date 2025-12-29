@@ -464,6 +464,13 @@ pub unsafe fn cm_get_key_name(handle: CmKeyHandle) -> Option<&'static str> {
     Some(key.name.as_str())
 }
 
+/// Get key last write time
+pub unsafe fn cm_get_key_last_write_time(handle: CmKeyHandle) -> u64 {
+    cm_get_key(handle.index())
+        .map(|key| key.last_write_time)
+        .unwrap_or(0)
+}
+
 /// Enumerate values
 pub unsafe fn cm_enumerate_value(
     handle: CmKeyHandle,
