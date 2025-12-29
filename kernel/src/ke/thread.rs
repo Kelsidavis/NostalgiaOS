@@ -229,7 +229,7 @@ impl KThread {
             quantum: constants::THREAD_QUANTUM,
             priority_decrement: 0,
             saturation: 0,
-            affinity: 1, // Default to processor 0
+            affinity: 0xFFFFFFFFFFFFFFFF, // Default to all processors (SMP)
             wait_list_entry: ListEntry::new(),
             thread_list_entry: ListEntry::new(),
             kernel_stack: ptr::null_mut(),

@@ -40,27 +40,58 @@ pub unsafe fn ki_ready_thread(thread: *mut KThread) {
 /// Select the highest priority ready thread
 ///
 /// Removes and returns the first thread from the highest priority non-empty queue.
+/// With SMP support, this enforces affinity - only selects threads that can run
+/// on this CPU.
 ///
 /// # Safety
 /// Must be called with interrupts disabled
 pub unsafe fn ki_select_ready_thread(prcb: &mut KPrcb) -> Option<*mut KThread> {
-    // Find highest priority with ready threads
-    let priority = prcb.find_highest_ready_priority()?;
+    let cpu_mask = 1u64 << prcb.number;
 
-    // Get the queue for this priority
-    let queue = &mut prcb.ready_queues[priority];
+    // Try each priority level from highest to lowest
+    let mut priority = prcb.find_highest_ready_priority()?;
 
-    // Remove first thread from queue
-    let entry = queue.remove_head();
+    loop {
+        let queue = &mut prcb.ready_queues[priority];
 
-    // Check if queue is now empty
-    if queue.is_empty() {
+        // Scan this priority's queue for a thread with compatible affinity
+        let mut entry = queue.flink;
+        while !entry.is_null() && entry != queue as *mut _ {
+            let thread = containing_record!(entry, KThread, wait_list_entry);
+            let next_entry = (*entry).flink;
+
+            // Check if this thread can run on this CPU
+            if (*thread).affinity & cpu_mask != 0 {
+                // Found a compatible thread - remove it from queue
+                (*entry).remove_entry();
+
+                // Check if queue is now empty
+                if queue.is_empty() {
+                    prcb.clear_ready_bit(priority);
+                }
+
+                return Some(thread);
+            }
+
+            entry = next_entry;
+        }
+
+        // No compatible threads at this priority, try next priority
+        if priority == 0 {
+            break; // Checked all priorities
+        }
+
+        // Clear the ready bit for this priority since we didn't find anything
         prcb.clear_ready_bit(priority);
+
+        // Find next priority
+        match prcb.find_highest_ready_priority() {
+            Some(p) if p < priority => priority = p,
+            _ => break,
+        }
     }
 
-    // Get thread from list entry
-    let thread = containing_record!(entry, KThread, wait_list_entry);
-    Some(thread)
+    None
 }
 
 /// Remove a thread from the ready queue
@@ -116,6 +147,77 @@ pub unsafe fn ki_quantum_end() {
     }
 }
 
+/// Try to steal work from another CPU's ready queue
+///
+/// This implements work stealing for load balancing. When a CPU has no local
+/// ready threads, it attempts to steal the highest-priority thread from the
+/// busiest CPU.
+///
+/// # Safety
+/// Must be called with interrupts disabled
+pub unsafe fn ki_try_steal_thread(prcb: &mut KPrcb) -> Option<*mut KThread> {
+    let cpu_count = super::prcb::get_active_cpu_count();
+    if cpu_count <= 1 {
+        // Single CPU - nothing to steal
+        return None;
+    }
+
+    let current_cpu = prcb.number as usize;
+    let cpu_mask = 1u64 << current_cpu;
+
+    // Find the busiest CPU (most ready threads)
+    let mut busiest_cpu = None;
+    let mut max_ready_count = 2; // Only steal if target has 3+ threads
+
+    for target_cpu in 0..cpu_count {
+        if target_cpu == current_cpu {
+            continue;
+        }
+
+        if let Some(target_prcb) = super::prcb::get_prcb(target_cpu) {
+            let ready_count = target_prcb.ready_summary.count_ones();
+            if ready_count > max_ready_count {
+                max_ready_count = ready_count;
+                busiest_cpu = Some(target_cpu);
+            }
+        }
+    }
+
+    // Try to steal from the busiest CPU
+    if let Some(target_cpu) = busiest_cpu {
+        if let Some(target_prcb) = super::prcb::get_prcb_mut(target_cpu) {
+            // Find highest priority with ready threads
+            if let Some(priority) = target_prcb.find_highest_ready_priority() {
+                let queue = &mut target_prcb.ready_queues[priority];
+
+                // Scan for a thread with compatible affinity
+                let mut entry = queue.flink;
+                while !entry.is_null() && entry != queue as *mut _ {
+                    let thread = containing_record!(entry, KThread, wait_list_entry);
+                    let next_entry = (*entry).flink;
+
+                    // Check if this thread can run on our CPU
+                    if (*thread).affinity & cpu_mask != 0 {
+                        // Found a compatible thread - steal it!
+                        (*entry).remove_entry();
+
+                        // Update target CPU's ready summary
+                        if queue.is_empty() {
+                            target_prcb.clear_ready_bit(priority);
+                        }
+
+                        return Some(thread);
+                    }
+
+                    entry = next_entry;
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// Request a dispatch interrupt
 ///
 /// Schedules the scheduler to run at DISPATCH_LEVEL to perform a context switch.
@@ -128,11 +230,17 @@ pub unsafe fn ki_dispatch_interrupt() {
 
     // If no next thread selected, pick one
     if prcb.next_thread.is_null() {
+        // First try local ready queue with affinity enforcement
         if let Some(thread) = ki_select_ready_thread(prcb) {
             prcb.next_thread = thread;
-        } else if prcb.current_thread != prcb.idle_thread {
-            // No ready threads and we're not the idle thread - switch to idle
-            prcb.next_thread = prcb.idle_thread;
+        } else {
+            // No local threads - try stealing work from another CPU
+            if let Some(thread) = ki_try_steal_thread(prcb) {
+                prcb.next_thread = thread;
+            } else if prcb.current_thread != prcb.idle_thread {
+                // No ready threads anywhere - switch to idle
+                prcb.next_thread = prcb.idle_thread;
+            }
         }
     }
 
