@@ -7861,13 +7861,17 @@ fn sys_query_information_process(
 
             unsafe {
                 let info = process_information as *mut IoCounters;
-                // We don't track I/O yet, return zeros
-                (*info).read_operation_count = 0;
-                (*info).write_operation_count = 0;
-                (*info).other_operation_count = 0;
-                (*info).read_transfer_count = 0;
-                (*info).write_transfer_count = 0;
-                (*info).other_transfer_count = 0;
+                if !eprocess.is_null() {
+                    let p = &*eprocess;
+                    (*info).read_operation_count = p.read_operation_count;
+                    (*info).write_operation_count = p.write_operation_count;
+                    (*info).other_operation_count = p.other_operation_count;
+                    (*info).read_transfer_count = p.read_transfer_count;
+                    (*info).write_transfer_count = p.write_transfer_count;
+                    (*info).other_transfer_count = p.other_transfer_count;
+                } else {
+                    core::ptr::write_bytes(info, 0, 1);
+                }
             }
 
             STATUS_SUCCESS
@@ -7924,13 +7928,12 @@ fn sys_query_information_process(
                 let info = process_information as *mut ProcessTimes;
                 if !eprocess.is_null() {
                     let p = &*eprocess;
-                    // Convert ticks to 100-nanosecond intervals
+                    // Convert ticks to 100-nanosecond intervals for create/exit time
                     (*info).create_time = (p.create_time as i64) * 10000;
                     (*info).exit_time = if p.exit_time > 0 { (p.exit_time as i64) * 10000 } else { 0 };
-                    // Estimate kernel/user time
-                    let total_time = crate::hal::apic::get_tick_count().saturating_sub(p.create_time);
-                    (*info).kernel_time = (total_time as i64) * 10000;
-                    (*info).user_time = 0;
+                    // Use tracked kernel/user time from EProcess
+                    (*info).kernel_time = p.kernel_time as i64;
+                    (*info).user_time = p.user_time as i64;
                 } else {
                     (*info).create_time = 0;
                     (*info).exit_time = 0;
@@ -8038,9 +8041,16 @@ fn sys_query_information_process(
             }
 
             unsafe {
-                // Get actual handle count if we have an object table
-                let count = if !eprocess.is_null() && !(*eprocess).object_table.is_null() {
-                    (*(*eprocess).object_table).count()
+                // Use tracked handle count, or fall back to object table count
+                let count = if !eprocess.is_null() {
+                    let p = &*eprocess;
+                    if p.handle_count > 0 {
+                        p.handle_count
+                    } else if !p.object_table.is_null() {
+                        (*p.object_table).count()
+                    } else {
+                        10 // Default
+                    }
                 } else {
                     10 // Default handle count
                 };
@@ -8063,8 +8073,12 @@ fn sys_query_information_process(
             }
 
             unsafe {
-                // Single processor affinity
-                *(process_information as *mut u64) = 1;
+                let affinity = if !eprocess.is_null() {
+                    (*eprocess).pcb.affinity
+                } else {
+                    1 // Single processor
+                };
+                *(process_information as *mut u64) = affinity;
             }
 
             STATUS_SUCCESS
@@ -8083,8 +8097,13 @@ fn sys_query_information_process(
             }
 
             unsafe {
-                // Priority boost not disabled
-                *(process_information as *mut u32) = 0;
+                // Returns TRUE if priority boost is disabled
+                let disabled = if !eprocess.is_null() {
+                    (*eprocess).priority_boost_disabled
+                } else {
+                    false
+                };
+                *(process_information as *mut u32) = if disabled { 1 } else { 0 };
             }
 
             STATUS_SUCCESS
@@ -8197,8 +8216,12 @@ fn sys_query_information_process(
             }
 
             unsafe {
-                // Not a critical process
-                *(process_information as *mut u32) = 0;
+                let break_on_term = if !eprocess.is_null() {
+                    (*eprocess).break_on_termination
+                } else {
+                    false
+                };
+                *(process_information as *mut u32) = if break_on_term { 1 } else { 0 };
             }
 
             STATUS_SUCCESS
@@ -8340,11 +8363,17 @@ fn sys_query_information_process(
 
             unsafe {
                 let info = process_information as *mut ProcessCycleTimeInfo;
-                // Read current TSC
-                let tsc: u64;
-                core::arch::asm!("rdtsc", "shl rdx, 32", "or rax, rdx", out("rax") tsc, out("rdx") _);
-                (*info).accumulated_cycles = tsc;
-                (*info).current_cycle_count = tsc;
+                if !eprocess.is_null() {
+                    let p = &*eprocess;
+                    (*info).accumulated_cycles = p.cycle_time;
+                    // Current cycle count - read TSC for current value
+                    let tsc: u64;
+                    core::arch::asm!("rdtsc", "shl rdx, 32", "or rax, rdx", out("rax") tsc, out("rdx") _);
+                    (*info).current_cycle_count = tsc;
+                } else {
+                    (*info).accumulated_cycles = 0;
+                    (*info).current_cycle_count = 0;
+                }
             }
 
             STATUS_SUCCESS
@@ -8363,8 +8392,12 @@ fn sys_query_information_process(
             }
 
             unsafe {
-                // Default page priority (5 = normal)
-                *(process_information as *mut u32) = 5;
+                let page_priority = if !eprocess.is_null() {
+                    (*eprocess).page_priority as u32
+                } else {
+                    5 // Normal
+                };
+                *(process_information as *mut u32) = page_priority;
             }
 
             STATUS_SUCCESS
@@ -8985,10 +9018,9 @@ fn sys_query_information_thread(
                     // 1 tick = 1ms = 10000 * 100ns
                     (*info).create_time = (t.create_time as i64) * 10000;
                     (*info).exit_time = if t.exit_time > 0 { (t.exit_time as i64) * 10000 } else { 0 };
-                    // Estimate kernel/user time (we don't track this precisely yet)
-                    let total_time = crate::hal::apic::get_tick_count().saturating_sub(t.create_time);
-                    (*info).kernel_time = (total_time as i64) * 10000;
-                    (*info).user_time = 0; // No user mode yet
+                    // Use tracked kernel/user time from EThread
+                    (*info).kernel_time = t.kernel_time as i64;
+                    (*info).user_time = t.user_time as i64;
                 } else {
                     (*info).create_time = 0;
                     (*info).exit_time = 0;
@@ -9158,8 +9190,12 @@ fn sys_query_information_thread(
             }
 
             unsafe {
-                // Return processor 0 for now (single processor)
-                *(thread_information as *mut u32) = 0;
+                let ideal_processor = if !ethread.is_null() {
+                    (*ethread).ideal_processor as u32
+                } else {
+                    0 // Processor 0
+                };
+                *(thread_information as *mut u32) = ideal_processor;
             }
 
             STATUS_SUCCESS
@@ -9178,9 +9214,13 @@ fn sys_query_information_thread(
             }
 
             unsafe {
-                // Priority boost disabled = 0, enabled = 1
-                // We don't track this yet, assume enabled
-                *(thread_information as *mut u32) = 0; // Not disabled
+                // Returns TRUE if priority boost is disabled
+                let disabled = if !ethread.is_null() {
+                    (*ethread).priority_boost_disabled
+                } else {
+                    false
+                };
+                *(thread_information as *mut u32) = if disabled { 1 } else { 0 };
             }
 
             STATUS_SUCCESS
@@ -9224,8 +9264,12 @@ fn sys_query_information_thread(
             }
 
             unsafe {
-                // We don't implement debugger hiding yet
-                *(thread_information as *mut u8) = 0;
+                let hidden = if !ethread.is_null() {
+                    (*ethread).hide_from_debugger
+                } else {
+                    false
+                };
+                *(thread_information as *mut u8) = if hidden { 1 } else { 0 };
             }
 
             STATUS_SUCCESS
@@ -9244,8 +9288,12 @@ fn sys_query_information_thread(
             }
 
             unsafe {
-                // Not implemented yet
-                *(thread_information as *mut u32) = 0;
+                let break_on_term = if !ethread.is_null() {
+                    (*ethread).break_on_termination
+                } else {
+                    false
+                };
+                *(thread_information as *mut u32) = if break_on_term { 1 } else { 0 };
             }
 
             STATUS_SUCCESS
@@ -9288,8 +9336,12 @@ fn sys_query_information_thread(
             }
 
             unsafe {
-                // Default I/O priority (IoPriorityNormal = 2)
-                *(thread_information as *mut u32) = 2;
+                let io_priority = if !ethread.is_null() {
+                    (*ethread).io_priority as u32
+                } else {
+                    2 // IoPriorityNormal
+                };
+                *(thread_information as *mut u32) = io_priority;
             }
 
             STATUS_SUCCESS
@@ -9309,11 +9361,17 @@ fn sys_query_information_thread(
 
             unsafe {
                 let info = thread_information as *mut ThreadCycleTimeInformation;
-                // Read current TSC
-                let tsc: u64;
-                core::arch::asm!("rdtsc", "shl rdx, 32", "or rax, rdx", out("rax") tsc, out("rdx") _);
-                (*info).accumulated_cycles = tsc;
-                (*info).current_cycle_count = tsc;
+                if !ethread.is_null() {
+                    // Use thread's tracked cycle time
+                    (*info).accumulated_cycles = (*ethread).cycle_time;
+                    // Current cycle count - read TSC for current value
+                    let tsc: u64;
+                    core::arch::asm!("rdtsc", "shl rdx, 32", "or rax, rdx", out("rax") tsc, out("rdx") _);
+                    (*info).current_cycle_count = tsc;
+                } else {
+                    (*info).accumulated_cycles = 0;
+                    (*info).current_cycle_count = 0;
+                }
             }
 
             STATUS_SUCCESS
@@ -9332,8 +9390,12 @@ fn sys_query_information_thread(
             }
 
             unsafe {
-                // Default page priority (5 = normal)
-                *(thread_information as *mut u32) = 5;
+                let page_priority = if !ethread.is_null() {
+                    (*ethread).page_priority as u32
+                } else {
+                    5 // Normal
+                };
+                *(thread_information as *mut u32) = page_priority;
             }
 
             STATUS_SUCCESS
@@ -11574,15 +11636,105 @@ fn sys_read_virtual_memory(
 
     // Cross-process memory read
     if target_pid != current_pid {
-        // Cross-process read requires:
-        // 1. Attach to target process address space (KeAttachProcess)
-        // 2. Validate and copy memory
-        // 3. Detach (KeDetachProcess)
+        // Cross-process read requires CR3 switching
+        // 1. Look up target process to get its CR3
+        // 2. Use a kernel intermediate buffer (since user buffer becomes inaccessible after CR3 switch)
+        // 3. Copy from target address space to kernel buffer
+        // 4. Switch back and copy to user buffer
 
-        // For now, cross-process read is not fully implemented
-        // Would need CR3 switching and proper address space management
-        crate::serial_println!("  Cross-process read not yet implemented");
-        return STATUS_NOT_IMPLEMENTED;
+        use crate::ps::cid::ps_lookup_process_by_id;
+        use crate::ps::eprocess::EProcess;
+        use crate::mm::pte::{mm_get_cr3, mm_set_cr3};
+
+        // Look up target process
+        let target_process = unsafe { ps_lookup_process_by_id(target_pid) as *mut EProcess };
+        if target_process.is_null() {
+            crate::serial_println!("  Target process {} not found", target_pid);
+            return STATUS_INVALID_HANDLE;
+        }
+
+        // Get target process's CR3 (directory table base)
+        let target_cr3 = unsafe { (*target_process).pcb.directory_table_base };
+        if target_cr3 == 0 {
+            // Process uses kernel address space (system process)
+            crate::serial_println!("  Target process has no private address space");
+            return STATUS_ACCESS_VIOLATION;
+        }
+
+        crate::serial_println!("  Cross-process read: target CR3={:#x}", target_cr3);
+
+        // Use a static kernel buffer for the transfer (max 4KB per operation)
+        const MAX_CROSS_PROCESS_SIZE: usize = 4096;
+        static mut CROSS_PROCESS_BUFFER: [u8; MAX_CROSS_PROCESS_SIZE] = [0u8; MAX_CROSS_PROCESS_SIZE];
+
+        let mut bytes_copied = 0usize;
+        let current_cr3 = mm_get_cr3();
+
+        // Copy in chunks
+        while bytes_copied < buffer_size {
+            let chunk_size = core::cmp::min(buffer_size - bytes_copied, MAX_CROSS_PROCESS_SIZE);
+            let src_addr = base_address + bytes_copied;
+
+            // Disable interrupts during CR3 switch
+            let flags: u64;
+            unsafe {
+                core::arch::asm!("pushfq; pop {}; cli", out(reg) flags, options(preserves_flags));
+            }
+
+            // Switch to target process address space
+            unsafe { mm_set_cr3(target_cr3); }
+
+            // Copy from target address space to kernel buffer
+            // NOTE: We can't validate the address in target's space easily,
+            // so we use a simple boundary check
+            let copy_result = if src_addr < 0x0000_8000_0000_0000 {
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        src_addr as *const u8,
+                        CROSS_PROCESS_BUFFER.as_mut_ptr(),
+                        chunk_size,
+                    );
+                }
+                true
+            } else {
+                false
+            };
+
+            // Switch back to caller's address space
+            unsafe { mm_set_cr3(current_cr3); }
+
+            // Restore interrupts
+            unsafe {
+                core::arch::asm!("push {}; popfq", in(reg) flags, options(preserves_flags));
+            }
+
+            if !copy_result {
+                crate::serial_println!("  Cross-process read failed: invalid address {:#x}", src_addr);
+                if bytes_copied > 0 && number_of_bytes_read != 0 {
+                    unsafe { *(number_of_bytes_read as *mut usize) = bytes_copied; }
+                }
+                return STATUS_ACCESS_VIOLATION;
+            }
+
+            // Copy from kernel buffer to caller's buffer
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    CROSS_PROCESS_BUFFER.as_ptr(),
+                    (buffer + bytes_copied) as *mut u8,
+                    chunk_size,
+                );
+            }
+
+            bytes_copied += chunk_size;
+        }
+
+        // Store bytes read
+        if number_of_bytes_read != 0 {
+            unsafe { *(number_of_bytes_read as *mut usize) = bytes_copied; }
+        }
+
+        crate::serial_println!("  Cross-process read complete: {} bytes", bytes_copied);
+        return STATUS_SUCCESS;
     }
 
     // Same-process read - validate source address
@@ -11662,8 +11814,103 @@ fn sys_write_virtual_memory(
     // Cross-process memory write
     if target_pid != current_pid {
         // Cross-process write requires CR3 switching
-        crate::serial_println!("  Cross-process write not yet implemented");
-        return STATUS_NOT_IMPLEMENTED;
+        // 1. Look up target process to get its CR3
+        // 2. Copy from caller's buffer to kernel intermediate buffer
+        // 3. Switch to target's address space and copy to destination
+        // 4. Switch back
+
+        use crate::ps::cid::ps_lookup_process_by_id;
+        use crate::ps::eprocess::EProcess;
+        use crate::mm::pte::{mm_get_cr3, mm_set_cr3};
+
+        // Look up target process
+        let target_process = unsafe { ps_lookup_process_by_id(target_pid) as *mut EProcess };
+        if target_process.is_null() {
+            crate::serial_println!("  Target process {} not found", target_pid);
+            return STATUS_INVALID_HANDLE;
+        }
+
+        // Get target process's CR3 (directory table base)
+        let target_cr3 = unsafe { (*target_process).pcb.directory_table_base };
+        if target_cr3 == 0 {
+            // Process uses kernel address space (system process)
+            crate::serial_println!("  Target process has no private address space");
+            return STATUS_ACCESS_VIOLATION;
+        }
+
+        crate::serial_println!("  Cross-process write: target CR3={:#x}", target_cr3);
+
+        // Use a static kernel buffer for the transfer (max 4KB per operation)
+        const MAX_CROSS_PROCESS_SIZE: usize = 4096;
+        static mut CROSS_PROCESS_WRITE_BUFFER: [u8; MAX_CROSS_PROCESS_SIZE] = [0u8; MAX_CROSS_PROCESS_SIZE];
+
+        let mut bytes_copied = 0usize;
+        let current_cr3 = mm_get_cr3();
+
+        // Copy in chunks
+        while bytes_copied < buffer_size {
+            let chunk_size = core::cmp::min(buffer_size - bytes_copied, MAX_CROSS_PROCESS_SIZE);
+            let dst_addr = base_address + bytes_copied;
+
+            // Copy from caller's buffer to kernel buffer (while still in caller's address space)
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    (buffer + bytes_copied) as *const u8,
+                    CROSS_PROCESS_WRITE_BUFFER.as_mut_ptr(),
+                    chunk_size,
+                );
+            }
+
+            // Disable interrupts during CR3 switch
+            let flags: u64;
+            unsafe {
+                core::arch::asm!("pushfq; pop {}; cli", out(reg) flags, options(preserves_flags));
+            }
+
+            // Switch to target process address space
+            unsafe { mm_set_cr3(target_cr3); }
+
+            // Copy from kernel buffer to target address space
+            // NOTE: Simple boundary check for user-mode addresses
+            let copy_result = if dst_addr < 0x0000_8000_0000_0000 {
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        CROSS_PROCESS_WRITE_BUFFER.as_ptr(),
+                        dst_addr as *mut u8,
+                        chunk_size,
+                    );
+                }
+                true
+            } else {
+                false
+            };
+
+            // Switch back to caller's address space
+            unsafe { mm_set_cr3(current_cr3); }
+
+            // Restore interrupts
+            unsafe {
+                core::arch::asm!("push {}; popfq", in(reg) flags, options(preserves_flags));
+            }
+
+            if !copy_result {
+                crate::serial_println!("  Cross-process write failed: invalid address {:#x}", dst_addr);
+                if bytes_copied > 0 && number_of_bytes_written != 0 {
+                    unsafe { *(number_of_bytes_written as *mut usize) = bytes_copied; }
+                }
+                return STATUS_ACCESS_VIOLATION;
+            }
+
+            bytes_copied += chunk_size;
+        }
+
+        // Store bytes written
+        if number_of_bytes_written != 0 {
+            unsafe { *(number_of_bytes_written as *mut usize) = bytes_copied; }
+        }
+
+        crate::serial_println!("  Cross-process write complete: {} bytes", bytes_copied);
+        return STATUS_SUCCESS;
     }
 
     // Same-process write - validate destination address

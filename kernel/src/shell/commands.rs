@@ -103,6 +103,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("");
         outln!("  Debugging:");
         outln!("    veh            Vectored Exception Handler info/test");
+        outln!("    seh            Structured Exception Handler info/test");
         outln!("");
         outln!("  Use UP/DOWN arrows to navigate command history.");
     } else {
@@ -1463,5 +1464,101 @@ fn test_veh_handler_first(exception_info: *mut crate::ke::ExceptionPointers) -> 
 
     // Handle the exception - stop search and continue execution
     ExceptionDisposition::EXCEPTION_CONTINUE_EXECUTION
+}
+
+/// SEH (Structured Exception Handler) information and testing
+///
+/// Usage: seh [add|remove|list|test]
+pub fn cmd_seh(args: &[&str]) {
+    use crate::ke::{
+        rtl_push_exception_handler,
+        rtl_get_seh_frame_count, MAX_SEH_FRAMES,
+    };
+
+    if args.is_empty() {
+        // Show SEH status
+        outln!("Structured Exception Handler (SEH) Status");
+        outln!("==========================================");
+        outln!("Registered frames: {}/{}", rtl_get_seh_frame_count(), MAX_SEH_FRAMES);
+        outln!();
+        outln!("Commands:");
+        outln!("  seh add     - Add a test SEH handler");
+        outln!("  seh list    - List SEH chain info");
+        outln!("  seh test    - Test exception dispatch through SEH");
+        return;
+    }
+
+    match args[0] {
+        "add" => {
+            // Add a test SEH handler
+            let frame = rtl_push_exception_handler(test_seh_handler, 0x1000);
+            if !frame.is_null() {
+                outln!("Added SEH handler at frame {:p}", frame);
+                outln!("Total frames: {}", rtl_get_seh_frame_count());
+            } else {
+                outln!("Failed to add SEH handler (list full?)");
+            }
+        }
+        "list" => {
+            outln!("SEH Handler Chain");
+            outln!("=================");
+            outln!("Registered frames: {}/{}", rtl_get_seh_frame_count(), MAX_SEH_FRAMES);
+            outln!();
+            outln!("Exception dispatch order:");
+            outln!("  1. Vectored Exception Handlers (VEH)");
+            outln!("  2. Structured Exception Handlers (SEH) <- This chain");
+            outln!("  3. Unhandled Exception Filter");
+            outln!("  4. Second Chance (termination)");
+        }
+        "test" => {
+            outln!("Testing SEH exception dispatch...");
+            outln!("SEH frames: {}", rtl_get_seh_frame_count());
+            outln!("VEH handlers: {}", crate::ke::rtl_get_vectored_handler_count());
+            outln!();
+
+            // Create a test exception
+            use crate::ke::{ExceptionRecord, Context, ke_raise_exception};
+
+            let record = ExceptionRecord::breakpoint(0x5678 as *mut u8);
+            let mut context = Context::new();
+
+            outln!("Raising test breakpoint exception...");
+            let result = unsafe {
+                ke_raise_exception(&record, &mut context, true)
+            };
+            outln!("ke_raise_exception returned: {}", result);
+
+            outln!();
+            outln!("SEH test complete.");
+        }
+        _ => {
+            outln!("Unknown SEH command: {}", args[0]);
+            outln!("Use: seh add, seh list, seh test");
+        }
+    }
+}
+
+/// Test SEH handler - logs and continues search
+fn test_seh_handler(
+    exception_record: *mut crate::ke::ExceptionRecord,
+    establisher_frame: u64,
+    _context: *mut crate::ke::Context,
+    _dispatcher_context: *mut crate::ke::DispatcherContext,
+) -> i32 {
+    use crate::ke::ExceptionDisposition;
+
+    unsafe {
+        if !exception_record.is_null() {
+            let record = &*exception_record;
+            crate::serial_println!(
+                "[SEH-TEST] Exception code={:#x} frame={:#x}",
+                record.exception_code,
+                establisher_frame
+            );
+        }
+    }
+
+    // Continue search - let other handlers try
+    ExceptionDisposition::EXCEPTION_CONTINUE_SEARCH
 }
 

@@ -628,6 +628,365 @@ pub fn rtl_get_vectored_handler_count() -> usize {
 }
 
 // =============================================================================
+// Structured Exception Handling (SEH) Framework
+// =============================================================================
+
+/// Maximum number of SEH frames per thread
+pub const MAX_SEH_FRAMES: usize = 64;
+
+/// SEH handler function type
+///
+/// The handler receives exception record, establisher frame, context, and
+/// dispatcher context. Returns an EXCEPTION_DISPOSITION value.
+pub type SehExceptionHandler = fn(
+    exception_record: *mut ExceptionRecord,
+    establisher_frame: u64,
+    context: *mut Context,
+    dispatcher_context: *mut DispatcherContext,
+) -> i32;
+
+/// Dispatcher context for SEH handlers
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct DispatcherContext {
+    /// Control PC where exception occurred
+    pub control_pc: u64,
+    /// Image base of the module
+    pub image_base: u64,
+    /// Runtime function entry (for table-based unwinding)
+    pub function_entry: u64,
+    /// Establisher frame pointer
+    pub establisher_frame: u64,
+    /// Target instruction pointer for unwind
+    pub target_ip: u64,
+    /// Context record
+    pub context_record: *mut Context,
+    /// Language-specific handler
+    pub language_handler: u64,
+    /// Handler-specific data
+    pub handler_data: u64,
+}
+
+impl DispatcherContext {
+    pub const fn new() -> Self {
+        Self {
+            control_pc: 0,
+            image_base: 0,
+            function_entry: 0,
+            establisher_frame: 0,
+            target_ip: 0,
+            context_record: ptr::null_mut(),
+            language_handler: 0,
+            handler_data: 0,
+        }
+    }
+}
+
+impl Default for DispatcherContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Exception registration record for x86-style SEH
+///
+/// This is the traditional linked-list based SEH used in 32-bit Windows.
+/// For x64, we use this alongside table-based unwinding for compatibility.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct ExceptionRegistrationRecord {
+    /// Pointer to next registration record in chain
+    pub next: *mut ExceptionRegistrationRecord,
+    /// Exception handler function
+    pub handler: Option<SehExceptionHandler>,
+    /// Establisher frame (stack frame pointer)
+    pub frame_pointer: u64,
+}
+
+impl ExceptionRegistrationRecord {
+    pub const fn new() -> Self {
+        Self {
+            next: ptr::null_mut(),
+            handler: None,
+            frame_pointer: 0,
+        }
+    }
+}
+
+// Safety: Registration records are accessed only from the owning thread
+unsafe impl Send for ExceptionRegistrationRecord {}
+unsafe impl Sync for ExceptionRegistrationRecord {}
+
+/// Sentinel value for end of exception chain
+pub const EXCEPTION_CHAIN_END: *mut ExceptionRegistrationRecord =
+    usize::MAX as *mut ExceptionRegistrationRecord;
+
+/// Per-thread SEH state
+struct ThreadSehState {
+    /// Head of exception registration chain
+    exception_list: *mut ExceptionRegistrationRecord,
+    /// Pool of SEH frames for this thread
+    frames: [ExceptionRegistrationRecord; MAX_SEH_FRAMES],
+    /// Number of frames in use
+    frame_count: usize,
+}
+
+impl ThreadSehState {
+    const fn new() -> Self {
+        Self {
+            exception_list: EXCEPTION_CHAIN_END,
+            frames: [ExceptionRegistrationRecord::new(); MAX_SEH_FRAMES],
+            frame_count: 0,
+        }
+    }
+}
+
+// Safety: ThreadSehState is accessed under a lock and raw pointers
+// point to data within the same structure
+unsafe impl Send for ThreadSehState {}
+unsafe impl Sync for ThreadSehState {}
+
+/// Global SEH state (in a real implementation, this would be per-thread via TLS)
+static SEH_STATE: Mutex<ThreadSehState> = Mutex::new(ThreadSehState::new());
+
+/// Push an exception handler onto the current thread's SEH chain
+///
+/// # Arguments
+/// * `handler` - The exception handler function
+/// * `frame_pointer` - The stack frame pointer for this handler
+///
+/// # Returns
+/// Pointer to the registration record, or null on failure
+pub fn rtl_push_exception_handler(
+    handler: SehExceptionHandler,
+    frame_pointer: u64,
+) -> *mut ExceptionRegistrationRecord {
+    let mut state = SEH_STATE.lock();
+
+    if state.frame_count >= MAX_SEH_FRAMES {
+        return ptr::null_mut();
+    }
+
+    let index = state.frame_count;
+    state.frames[index] = ExceptionRegistrationRecord {
+        next: state.exception_list,
+        handler: Some(handler),
+        frame_pointer,
+    };
+
+    // Get pointer to the frame we just set up
+    let frame_ptr = &mut state.frames[index] as *mut ExceptionRegistrationRecord;
+
+    // Link into chain
+    state.exception_list = frame_ptr;
+    state.frame_count += 1;
+
+    frame_ptr
+}
+
+/// Pop an exception handler from the current thread's SEH chain
+///
+/// # Arguments
+/// * `registration` - The registration record to remove (must be head of chain)
+///
+/// # Returns
+/// true if successful, false if the record wasn't found at head
+pub fn rtl_pop_exception_handler(
+    registration: *mut ExceptionRegistrationRecord,
+) -> bool {
+    let mut state = SEH_STATE.lock();
+
+    if state.exception_list != registration {
+        return false;
+    }
+
+    if state.exception_list == EXCEPTION_CHAIN_END {
+        return false;
+    }
+
+    unsafe {
+        state.exception_list = (*registration).next;
+    }
+
+    if state.frame_count > 0 {
+        state.frame_count -= 1;
+    }
+
+    true
+}
+
+/// Get the current exception handler chain head
+pub fn rtl_get_exception_list() -> *mut ExceptionRegistrationRecord {
+    SEH_STATE.lock().exception_list
+}
+
+/// Set the exception handler chain head (used during unwind)
+pub fn rtl_set_exception_list(list: *mut ExceptionRegistrationRecord) {
+    SEH_STATE.lock().exception_list = list;
+}
+
+/// Walk the SEH chain and dispatch exception to handlers
+///
+/// # Arguments
+/// * `exception_record` - The exception that occurred
+/// * `context` - Thread context at time of exception
+///
+/// # Returns
+/// true if a handler handled the exception (EXCEPTION_CONTINUE_EXECUTION)
+/// false if no handler handled it (should try second chance or terminate)
+pub fn rtl_dispatch_exception_seh(
+    exception_record: *mut ExceptionRecord,
+    context: *mut Context,
+) -> bool {
+    let state = SEH_STATE.lock();
+    let mut current = state.exception_list;
+    let mut nested_frame: *mut ExceptionRegistrationRecord = ptr::null_mut();
+
+    drop(state); // Release lock before calling handlers
+
+    while current != EXCEPTION_CHAIN_END && !current.is_null() {
+        unsafe {
+            let registration = &*current;
+
+            // Check if we have a handler
+            if let Some(handler) = registration.handler {
+                // Set up dispatcher context
+                let mut dispatcher_context = DispatcherContext::new();
+                dispatcher_context.establisher_frame = registration.frame_pointer;
+                dispatcher_context.context_record = context;
+
+                // Get exception flags
+                let exception_flags = if !exception_record.is_null() {
+                    (*exception_record).exception_flags
+                } else {
+                    0
+                };
+
+                // Check for nested exception
+                if !nested_frame.is_null() && current == nested_frame {
+                    // Clear nested flag
+                    if !exception_record.is_null() {
+                        (*exception_record).exception_flags &= !ExceptionFlags::EXCEPTION_NESTED_CALL;
+                    }
+                    nested_frame = ptr::null_mut();
+                }
+
+                // Call the handler
+                let disposition = handler(
+                    exception_record,
+                    registration.frame_pointer,
+                    context,
+                    &mut dispatcher_context,
+                );
+
+                match disposition {
+                    d if d == ExceptionDisposition::EXCEPTION_CONTINUE_EXECUTION => {
+                        // Handler handled the exception
+                        if exception_flags & ExceptionFlags::EXCEPTION_NONCONTINUABLE != 0 {
+                            // Can't continue from non-continuable exception
+                            crate::serial_println!(
+                                "[SEH] Handler tried to continue non-continuable exception"
+                            );
+                            return false;
+                        }
+                        crate::serial_println!("[SEH] Handler handled exception, continuing");
+                        return true;
+                    }
+                    d if d == ExceptionDisposition::EXCEPTION_CONTINUE_SEARCH => {
+                        // Try next handler
+                        crate::serial_println!(
+                            "[SEH] Handler at frame {:#x} passed, trying next",
+                            registration.frame_pointer
+                        );
+                    }
+                    d if d == ExceptionDisposition::EXCEPTION_EXECUTE_HANDLER => {
+                        // Execute this handler (for __except blocks)
+                        // This would involve unwinding to this frame
+                        crate::serial_println!(
+                            "[SEH] Handler at frame {:#x} will execute",
+                            registration.frame_pointer
+                        );
+                        // In a full implementation, we'd unwind to this frame
+                        // For now, treat as handled
+                        return true;
+                    }
+                    _ => {
+                        // Nested exception or other disposition
+                        crate::serial_println!(
+                            "[SEH] Handler returned disposition {}",
+                            disposition
+                        );
+                        // Mark as nested and continue
+                        if !exception_record.is_null() {
+                            (*exception_record).exception_flags |=
+                                ExceptionFlags::EXCEPTION_NESTED_CALL;
+                        }
+                        nested_frame = current;
+                    }
+                }
+            }
+
+            // Move to next handler in chain
+            current = registration.next;
+        }
+    }
+
+    // No handler handled the exception
+    crate::serial_println!("[SEH] No handler found in chain");
+    false
+}
+
+/// Get the count of registered SEH frames
+pub fn rtl_get_seh_frame_count() -> usize {
+    SEH_STATE.lock().frame_count
+}
+
+// =============================================================================
+// Unhandled Exception Filter
+// =============================================================================
+
+/// Unhandled exception filter function type
+pub type UnhandledExceptionFilter = fn(*mut ExceptionPointers) -> i32;
+
+/// Global unhandled exception filter
+static UNHANDLED_FILTER: Mutex<Option<UnhandledExceptionFilter>> = Mutex::new(None);
+
+/// Set the unhandled exception filter
+///
+/// # Returns
+/// The previous filter, or None if there was none
+pub fn rtl_set_unhandled_exception_filter(
+    filter: Option<UnhandledExceptionFilter>,
+) -> Option<UnhandledExceptionFilter> {
+    let mut current = UNHANDLED_FILTER.lock();
+    let previous = *current;
+    *current = filter;
+    previous
+}
+
+/// Call the unhandled exception filter if set
+///
+/// # Returns
+/// EXCEPTION_CONTINUE_EXECUTION, EXCEPTION_CONTINUE_SEARCH, or EXCEPTION_EXECUTE_HANDLER
+pub fn rtl_call_unhandled_exception_filter(
+    exception_record: *mut ExceptionRecord,
+    context: *mut Context,
+) -> i32 {
+    let filter = *UNHANDLED_FILTER.lock();
+
+    if let Some(filter_fn) = filter {
+        let mut pointers = ExceptionPointers {
+            exception_record,
+            context_record: context,
+        };
+        filter_fn(&mut pointers)
+    } else {
+        // No filter set, continue search (will lead to termination)
+        ExceptionDisposition::EXCEPTION_CONTINUE_SEARCH
+    }
+}
+
+// =============================================================================
 // Exception Dispatch Functions
 // =============================================================================
 
@@ -685,11 +1044,31 @@ pub unsafe fn ke_raise_exception(
             return 0; // STATUS_SUCCESS
         }
 
-        // Step 2: Would dispatch to frame-based SEH here
-        // TODO: Implement SEH chain walking and dispatch
+        // Step 2: Dispatch to frame-based SEH chain
+        if rtl_dispatch_exception_seh(
+            exception_record as *mut ExceptionRecord,
+            context,
+        ) {
+            // An SEH handler handled the exception
+            crate::serial_println!("SEH handler handled exception, continuing execution");
+            return 0; // STATUS_SUCCESS
+        }
 
-        // Step 3: Would call unhandled exception filter here
-        // TODO: Implement unhandled exception filter
+        // Step 3: Call unhandled exception filter
+        let filter_result = rtl_call_unhandled_exception_filter(
+            exception_record as *mut ExceptionRecord,
+            context,
+        );
+
+        if filter_result == ExceptionDisposition::EXCEPTION_CONTINUE_EXECUTION {
+            crate::serial_println!("Unhandled filter handled exception, continuing");
+            return 0; // STATUS_SUCCESS
+        } else if filter_result == ExceptionDisposition::EXCEPTION_EXECUTE_HANDLER {
+            // Execute handler (typically terminates process gracefully)
+            crate::serial_println!("Unhandled filter requested handler execution");
+            // Fall through to second chance
+        }
+        // EXCEPTION_CONTINUE_SEARCH falls through to second chance
     }
 
     // If first chance handling fails, this becomes a second chance exception
@@ -699,6 +1078,7 @@ pub unsafe fn ke_raise_exception(
             "Second chance exception not handled - process would be terminated"
         );
         // In a real implementation, we would terminate the process here
+        // For kernel-mode exceptions, we might bugcheck
     }
 
     0 // STATUS_SUCCESS (exception was handled or logged)

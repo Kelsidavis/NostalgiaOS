@@ -119,6 +119,32 @@ pub struct EThread {
 
     /// Hard error mode
     pub hard_error_mode: u32,
+
+    // Time accounting
+    /// Kernel mode execution time (100ns units)
+    pub kernel_time: u64,
+    /// User mode execution time (100ns units)
+    pub user_time: u64,
+    /// CPU cycle count for this thread
+    pub cycle_time: u64,
+
+    // Priority and scheduling
+    /// I/O priority (0=Very Low, 1=Low, 2=Normal, 3=High, 4=Critical)
+    pub io_priority: u8,
+    /// Page priority (0-7, higher = more important)
+    pub page_priority: u8,
+    /// Ideal processor (preferred CPU)
+    pub ideal_processor: u8,
+    /// Processor group for ideal processor
+    pub ideal_processor_group: u16,
+
+    // Debug flags
+    /// Hide thread from debugger
+    pub hide_from_debugger: bool,
+    /// Break on termination
+    pub break_on_termination: bool,
+    /// Priority boost disabled
+    pub priority_boost_disabled: bool,
 }
 
 // Safety: EThread uses locks and atomics
@@ -153,6 +179,19 @@ impl EThread {
             freeze_count: 0,
             last_error_value: 0,
             hard_error_mode: 0,
+            // Time accounting
+            kernel_time: 0,
+            user_time: 0,
+            cycle_time: 0,
+            // Priority and scheduling
+            io_priority: 2, // Normal
+            page_priority: 5, // Normal
+            ideal_processor: 0,
+            ideal_processor_group: 0,
+            // Debug flags
+            hide_from_debugger: false,
+            break_on_termination: false,
+            priority_boost_disabled: false,
         }
     }
 

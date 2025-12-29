@@ -7,6 +7,25 @@
 //! - **Communication Port**: Bidirectional communication channel
 
 use super::message::MAX_MESSAGE_SIZE;
+use crate::ke::prcb::get_current_thread;
+
+/// Get the current process ID and thread ID
+///
+/// Returns (pid, tid) tuple. Returns (0, 0) if no current thread is running.
+#[inline]
+unsafe fn get_current_context() -> (u32, u32) {
+    let thread = get_current_thread();
+    if thread.is_null() {
+        return (0, 0);
+    }
+    let tid = (*thread).thread_id;
+    let process = (*thread).process;
+    if process.is_null() {
+        return (0, tid);
+    }
+    let pid = (*process).process_id;
+    (pid, tid)
+}
 
 /// Maximum number of ports
 pub const MAX_PORTS: usize = 64;
@@ -438,8 +457,9 @@ pub unsafe fn lpc_create_port(
             port.port_type = port_type;
             port.flags = PortFlags::IN_USE;
             port.max_message_size = max_message_size;
-            port.owner_pid = 0; // TODO: Get current process
-            port.owner_tid = 0; // TODO: Get current thread
+            let (pid, tid) = get_current_context();
+            port.owner_pid = pid;
+            port.owner_tid = tid;
 
             PORT_STATS.allocated_ports += 1;
             if port_type == LpcPortType::ServerConnection {
@@ -504,10 +524,11 @@ pub unsafe fn lpc_connect_port(server_name: &str, context: &[u8]) -> Option<u16>
 
     // Set up connection request
     let client_port = &mut PORT_TABLE[client_idx as usize];
+    let (client_pid, client_tid) = (client_port.owner_pid, client_port.owner_tid);
     client_port.connection.state = LpcConnectionState::Pending;
     client_port.connection.server_port = server_idx as u16;
     client_port.connection.client_port = client_idx;
-    client_port.connection.client_pid = 0; // TODO: Current process
+    client_port.connection.client_pid = client_pid;
     client_port.connection.context_size = context.len().min(256) as u16;
 
     // Add to server's pending connections
@@ -516,9 +537,9 @@ pub unsafe fn lpc_connect_port(server_name: &str, context: &[u8]) -> Option<u16>
         state: LpcConnectionState::Pending,
         client_port: client_idx,
         server_port: server_idx as u16,
-        client_pid: 0,
+        client_pid,
         server_pid: server_port.owner_pid,
-        client_tid: 0,
+        client_tid,
         server_tid: server_port.owner_tid,
         context_size: context.len().min(256) as u16,
         _reserved: 0,

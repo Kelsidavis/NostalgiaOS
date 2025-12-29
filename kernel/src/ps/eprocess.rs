@@ -128,6 +128,47 @@ pub struct EProcess {
 
     /// Section object (for mapped executable)
     pub section_object: *mut u8,
+
+    // I/O counters
+    /// Read operation count
+    pub read_operation_count: u64,
+    /// Write operation count
+    pub write_operation_count: u64,
+    /// Other operation count
+    pub other_operation_count: u64,
+    /// Read transfer count (bytes)
+    pub read_transfer_count: u64,
+    /// Write transfer count (bytes)
+    pub write_transfer_count: u64,
+    /// Other transfer count (bytes)
+    pub other_transfer_count: u64,
+
+    // Time accounting
+    /// Kernel mode execution time (100ns units)
+    pub kernel_time: u64,
+    /// User mode execution time (100ns units)
+    pub user_time: u64,
+    /// CPU cycle time counter
+    pub cycle_time: u64,
+
+    // Priority
+    /// Process priority class (NORMAL_PRIORITY_CLASS, etc.)
+    pub priority_class: u8,
+    /// I/O priority (0=Very Low, 1=Low, 2=Normal, 3=High, 4=Critical)
+    pub io_priority: u8,
+    /// Page priority (0-7)
+    pub page_priority: u8,
+
+    // Counters and flags
+    /// Handle count
+    pub handle_count: u32,
+    /// Break on termination (for debugging)
+    pub break_on_termination: bool,
+    /// Priority boost disabled
+    pub priority_boost_disabled: bool,
+
+    /// Process cookie (for ASLR)
+    pub cookie: u32,
 }
 
 // Safety: EProcess uses locks and atomics
@@ -165,6 +206,26 @@ impl EProcess {
             debug_port: ptr::null_mut(),
             job: ptr::null_mut(),
             section_object: ptr::null_mut(),
+            // I/O counters
+            read_operation_count: 0,
+            write_operation_count: 0,
+            other_operation_count: 0,
+            read_transfer_count: 0,
+            write_transfer_count: 0,
+            other_transfer_count: 0,
+            // Time accounting
+            kernel_time: 0,
+            user_time: 0,
+            cycle_time: 0,
+            // Priority
+            priority_class: 0x20, // NORMAL_PRIORITY_CLASS
+            io_priority: 2, // Normal
+            page_priority: 5, // Normal
+            // Counters and flags
+            handle_count: 0,
+            break_on_termination: false,
+            priority_boost_disabled: false,
+            cookie: 0,
         }
     }
 

@@ -91,13 +91,22 @@ pub use exception::{
     Context, ExceptionRecord, ExceptionPointers, M128A, LegacyFloatingSaveArea,
     ke_raise_exception, ke_continue, ke_get_context, ke_set_context,
     ContextFlags, ExceptionCode, ExceptionFlags, ExceptionDisposition,
-    EXCEPTION_MAXIMUM_PARAMETERS, MAX_VEH_HANDLERS,
+    EXCEPTION_MAXIMUM_PARAMETERS, MAX_VEH_HANDLERS, MAX_SEH_FRAMES,
     // VEH functions
     VectoredExceptionHandler,
     rtl_add_vectored_exception_handler,
     rtl_remove_vectored_exception_handler,
     rtl_call_vectored_exception_handlers,
     rtl_get_vectored_handler_count,
+    // SEH functions
+    SehExceptionHandler, DispatcherContext, ExceptionRegistrationRecord,
+    EXCEPTION_CHAIN_END,
+    rtl_push_exception_handler, rtl_pop_exception_handler,
+    rtl_get_exception_list, rtl_set_exception_list,
+    rtl_dispatch_exception_seh, rtl_get_seh_frame_count,
+    // Unhandled exception filter
+    UnhandledExceptionFilter,
+    rtl_set_unhandled_exception_filter, rtl_call_unhandled_exception_filter,
 };
 
 // Re-export debug types

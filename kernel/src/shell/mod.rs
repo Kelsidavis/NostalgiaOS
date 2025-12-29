@@ -1042,6 +1042,8 @@ impl Shell {
             commands::cmd_shutdown();
         } else if eq_ignore_case(cmd, "veh") {
             commands::cmd_veh(&args[1..argc]);
+        } else if eq_ignore_case(cmd, "seh") {
+            commands::cmd_seh(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
