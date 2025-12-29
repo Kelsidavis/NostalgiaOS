@@ -3598,15 +3598,26 @@ fn sys_set_timer(
     // Convert to milliseconds
     // Negative = relative time, positive = absolute time
     let timeout_ms = if due_time_100ns < 0 {
-        // Relative time in 100ns units, convert to ms
+        // Relative time in 100ns units (negative), convert to ms
         ((-due_time_100ns) / 10_000) as u32
     } else if due_time_100ns == 0 {
         // Immediate expiration
         0u32
     } else {
-        // Absolute time - for now, treat as relative from current time
-        // TODO: Proper absolute time support
-        (due_time_100ns / 10_000) as u32
+        // Absolute time - convert to relative by subtracting current time
+        // Get current time (Jan 1, 1601 epoch, 100ns units)
+        let tick_count = crate::hal::apic::get_tick_count();
+        let base_time: i64 = 132_537_600_000_000_000; // Approximate base time
+        let current_time = base_time + (tick_count as i64 * 10000);
+
+        if due_time_100ns <= current_time {
+            // Already expired - trigger immediately
+            0u32
+        } else {
+            // Calculate relative time until absolute deadline
+            let relative_100ns = due_time_100ns - current_time;
+            (relative_100ns / 10_000) as u32
+        }
     };
 
     // Get timer from pool
@@ -10830,7 +10841,10 @@ fn sys_set_information_thread(
                 crate::serial_println!("[SYSCALL] Warning: ideal processor {} not available", ideal_proc);
             }
 
-            // TODO: Store ideal processor hint for scheduler
+            // Store ideal processor hint in thread structure
+            if !ethread.is_null() {
+                unsafe { (*ethread).ideal_processor = ideal_proc as u8; }
+            }
 
             STATUS_SUCCESS
         }
@@ -10846,8 +10860,10 @@ fn sys_set_information_thread(
             crate::serial_println!("[SYSCALL] SetInformationThread: priority boost disabled = {}",
                 disable_boost != 0);
 
-            // TODO: Store priority boost disable flag in thread
-            // When set, the thread won't receive temporary priority boosts
+            // Store priority boost disable flag in thread
+            if !ethread.is_null() {
+                unsafe { (*ethread).priority_boost_disabled = disable_boost != 0; }
+            }
 
             STATUS_SUCCESS
         }
@@ -10873,8 +10889,10 @@ fn sys_set_information_thread(
             // This class takes no input data - just sets a flag
             crate::serial_println!("[SYSCALL] SetInformationThread: hide from debugger");
 
-            // TODO: Set hidden from debugger flag
-            // This makes the thread invisible to debugger enumeration
+            // Set hidden from debugger flag
+            if !ethread.is_null() {
+                unsafe { (*ethread).hide_from_debugger = true; }
+            }
 
             STATUS_SUCCESS
         }
@@ -10893,8 +10911,10 @@ fn sys_set_information_thread(
             // Setting this requires SeDebugPrivilege in real NT
             // For now, we allow it
 
-            // TODO: Set critical thread flag - if set, terminating this thread
-            // will cause a system crash (bugcheck)
+            // Store critical thread flag
+            if !ethread.is_null() {
+                unsafe { (*ethread).break_on_termination = break_on_term != 0; }
+            }
 
             STATUS_SUCCESS
         }
