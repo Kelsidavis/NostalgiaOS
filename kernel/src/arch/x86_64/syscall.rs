@@ -10038,16 +10038,31 @@ fn sys_query_information_token(
 
             unsafe {
                 let stats = token_information as *mut TokenStatistics;
-                (*stats).token_id = token_id as u64;
-                (*stats).authentication_id = 0x3E7; // SYSTEM_LUID
-                (*stats).expiration_time = i64::MAX;
-                (*stats).token_type = 1; // TokenPrimary
-                (*stats).impersonation_level = 0;
-                (*stats).dynamic_charged = 4096;
-                (*stats).dynamic_available = 4096;
-                (*stats).group_count = 1;
-                (*stats).privilege_count = 5;
-                (*stats).modified_id = token_id as u64;
+                if let Some(token) = get_token_ptr(token_handle) {
+                    (*stats).token_id = (*token).token_id.low_part as u64;
+                    (*stats).authentication_id = (*token).authentication_id.low_part as u64
+                        | (((*token).authentication_id.high_part as u64) << 32);
+                    (*stats).expiration_time = (*token).expiration_time as i64;
+                    (*stats).token_type = (*token).token_type as u32;
+                    (*stats).impersonation_level = (*token).impersonation_level as u32;
+                    (*stats).dynamic_charged = 4096;
+                    (*stats).dynamic_available = 4096;
+                    (*stats).group_count = (*token).group_count as u32;
+                    (*stats).privilege_count = (*token).privileges.privilege_count;
+                    (*stats).modified_id = token_id as u64;
+                } else {
+                    // Fallback to defaults
+                    (*stats).token_id = token_id as u64;
+                    (*stats).authentication_id = 0x3E7; // SYSTEM_LUID
+                    (*stats).expiration_time = i64::MAX;
+                    (*stats).token_type = 1; // TokenPrimary
+                    (*stats).impersonation_level = 0;
+                    (*stats).dynamic_charged = 4096;
+                    (*stats).dynamic_available = 4096;
+                    (*stats).group_count = 1;
+                    (*stats).privilege_count = 5;
+                    (*stats).modified_id = token_id as u64;
+                }
             }
 
             0
@@ -10063,7 +10078,12 @@ fn sys_query_information_token(
 
             // Return TokenPrimary (1) or TokenImpersonation (2)
             unsafe {
-                *(token_information as *mut u32) = 1; // TokenPrimary
+                let token_type = if let Some(token) = get_token_ptr(token_handle) {
+                    (*token).token_type as u32
+                } else {
+                    1 // Default to Primary
+                };
+                *(token_information as *mut u32) = token_type;
             }
 
             0
@@ -10077,9 +10097,14 @@ fn sys_query_information_token(
                 return 0x80000005u32 as isize;
             }
 
-            // Return elevated status (1 = elevated)
+            // Return elevated status from token
             unsafe {
-                *(token_information as *mut u32) = 1;
+                let is_elevated = if let Some(token) = get_token_ptr(token_handle) {
+                    if (*token).is_elevated { 1u32 } else { 0u32 }
+                } else {
+                    1 // Default to elevated
+                };
+                *(token_information as *mut u32) = is_elevated;
             }
 
             0
