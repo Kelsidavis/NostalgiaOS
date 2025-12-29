@@ -203,6 +203,8 @@ pub enum SyscallNumber {
     NtGetContextThread = 132,
     NtSetContextThread = 133,
     NtQueryMutant = 134,
+    NtClearEvent = 135,
+    NtPulseEvent = 136,
 
     // Process creation (extended)
     NtCreateProcess = 140,
@@ -392,6 +394,8 @@ unsafe fn init_syscall_table() {
     register_syscall(SyscallNumber::NtQueryEvent as usize, sys_query_event);
     register_syscall(SyscallNumber::NtQuerySemaphore as usize, sys_query_semaphore);
     register_syscall(SyscallNumber::NtQueryMutant as usize, sys_query_mutant);
+    register_syscall(SyscallNumber::NtClearEvent as usize, sys_clear_event);
+    register_syscall(SyscallNumber::NtPulseEvent as usize, sys_pulse_event);
 
     // Memory management syscalls
     register_syscall(SyscallNumber::NtAllocateVirtualMemory as usize, sys_allocate_virtual_memory);
@@ -2886,6 +2890,71 @@ fn sys_reset_event(
 
     unsafe { crate::ob::ob_dereference_object(object); }
 
+    0
+}
+
+/// NtClearEvent - Clear (unsignal) an event
+///
+/// This is equivalent to NtResetEvent but follows the NT naming convention.
+fn sys_clear_event(
+    handle: usize,
+    previous_state: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    // ClearEvent is identical to ResetEvent
+    sys_reset_event(handle, previous_state, 0, 0, 0, 0)
+}
+
+/// NtPulseEvent - Pulse an event
+///
+/// Sets the event, wakes any waiters, then immediately resets.
+/// For notification events: wakes all current waiters
+/// For synchronization events: wakes one waiter
+fn sys_pulse_event(
+    handle: usize,
+    previous_state: usize,
+    _: usize, _: usize, _: usize, _: usize,
+) -> isize {
+    // Try sync object pool first
+    if let Some((entry, obj_type)) = unsafe { get_sync_object(handle) } {
+        if obj_type != SyncObjectType::Event {
+            return -1;
+        }
+
+        let was_signaled = unsafe {
+            let event = &mut *core::ptr::addr_of_mut!((*entry).data.event);
+            event.pulse()
+        };
+
+        if previous_state != 0 {
+            unsafe { *(previous_state as *mut i32) = was_signaled as i32; }
+        }
+
+        crate::serial_println!("[SYSCALL] NtPulseEvent(handle={:#x}) -> prev={}", handle, was_signaled);
+        return 0;
+    }
+
+    // Fall back to object manager handles
+    let object = unsafe {
+        let obj = crate::ob::ob_reference_object_by_handle(handle as u32, 0);
+        if obj.is_null() {
+            return -1;
+        }
+        obj
+    };
+
+    let was_signaled = unsafe {
+        let event = object as *mut crate::ke::event::KEvent;
+        (*event).pulse()
+    };
+
+    if previous_state != 0 {
+        unsafe { *(previous_state as *mut i32) = was_signaled as i32; }
+    }
+
+    unsafe { crate::ob::ob_dereference_object(object); }
+
+    crate::serial_println!("[SYSCALL] NtPulseEvent(handle={:#x}) via OB -> prev={}", handle, was_signaled);
     0
 }
 
