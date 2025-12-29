@@ -5176,12 +5176,12 @@ fn sys_query_directory_file(
 
     // Validate parameters
     if file_handle == 0 || file_information == 0 || length == 0 {
-        return -1; // STATUS_INVALID_PARAMETER
+        return STATUS_INVALID_PARAMETER;
     }
 
     // Validate user buffer
     if !is_valid_user_range(file_information as u64, length) {
-        return 0xC0000005u32 as isize; // STATUS_ACCESS_VIOLATION
+        return STATUS_ACCESS_VIOLATION;
     }
 
     if !probe_for_write(file_information as u64, length) {
@@ -5803,24 +5803,24 @@ fn sys_set_value_key(
     data_size: usize,
 ) -> isize {
     if key_handle == 0 || value_name_ptr == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
         Some(h) => h,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     // Read value name
     let name_result = unsafe { read_user_path(value_name_ptr, 260) };
     let (name_buf, name_len) = match name_result {
         Some((buf, len)) => (buf, len),
-        None => return -1,
+        None => return STATUS_INVALID_PARAMETER,
     };
 
     let value_name = match core::str::from_utf8(&name_buf[..name_len]) {
         Ok(s) => s,
-        Err(_) => return -1,
+        Err(_) => return STATUS_INVALID_PARAMETER,
     };
 
     crate::serial_println!("[SYSCALL] NtSetValueKey(handle={:#x}, name='{}', type={}, size={})",
@@ -5888,7 +5888,7 @@ fn sys_delete_key(
 
     let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
         Some(h) => h,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     // Get key name for deletion (we need the path)
@@ -5912,24 +5912,24 @@ fn sys_delete_value_key(
     _: usize, _: usize, _: usize, _: usize,
 ) -> isize {
     if key_handle == 0 || value_name_ptr == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
         Some(h) => h,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     // Read value name
     let name_result = unsafe { read_user_path(value_name_ptr, 260) };
     let (name_buf, name_len) = match name_result {
         Some((buf, len)) => (buf, len),
-        None => return -1,
+        None => return STATUS_INVALID_PARAMETER,
     };
 
     let value_name = match core::str::from_utf8(&name_buf[..name_len]) {
         Ok(s) => s,
-        Err(_) => return -1,
+        Err(_) => return STATUS_INVALID_PARAMETER,
     };
 
     crate::serial_println!("[SYSCALL] NtDeleteValueKey(handle={:#x}, name='{}')",
@@ -5971,14 +5971,14 @@ fn sys_enumerate_key(
     result_length: usize,
 ) -> isize {
     if key_handle == 0 || key_info == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let _ = key_info_class; // Simplified - always return basic info
 
     let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
         Some(h) => h,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtEnumerateKey(handle={:#x}, index={})",
@@ -6049,14 +6049,14 @@ fn sys_enumerate_value_key(
     result_length: usize,
 ) -> isize {
     if key_handle == 0 || key_value_info == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let _ = key_value_info_class; // Simplified
 
     let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
         Some(h) => h,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtEnumerateValueKey(handle={:#x}, index={})",
@@ -6132,14 +6132,14 @@ fn sys_query_key(
     _: usize,
 ) -> isize {
     if key_handle == 0 || key_info == 0 {
-        return -1;
+        return STATUS_INVALID_PARAMETER;
     }
 
     let _ = key_info_class; // Simplified - return full info
 
     let cm_handle = match unsafe { get_cm_key_handle(key_handle) } {
         Some(h) => h,
-        None => return -1,
+        None => return STATUS_INVALID_HANDLE,
     };
 
     crate::serial_println!("[SYSCALL] NtQueryKey(handle={:#x})", key_handle);
