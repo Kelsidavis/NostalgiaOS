@@ -32,6 +32,7 @@
 
 pub mod avl;
 pub mod bitmap;
+pub mod checksum;
 pub mod random;
 pub mod string;
 // pub mod heap;   // TODO: User-mode heap
@@ -40,5 +41,6 @@ pub mod string;
 // Re-exports for convenience
 pub use avl::*;
 pub use bitmap::*;
+pub use checksum::*;
 pub use random::*;
 pub use string::*;
