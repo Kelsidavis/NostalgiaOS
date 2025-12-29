@@ -82,7 +82,7 @@ pub unsafe fn rtl_image_directory_entry_to_data(
     }
 
     // Get file header to determine PE type
-    let file_header = nt_header.add(4) as *const ImageFileHeader;
+    let _file_header = nt_header.add(4) as *const ImageFileHeader;
     let optional_header_base = nt_header.add(4 + core::mem::size_of::<ImageFileHeader>());
     let magic = *(optional_header_base as *const u16);
 

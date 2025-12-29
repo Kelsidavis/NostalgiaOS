@@ -938,7 +938,6 @@ pub fn cmd_time() {
 /// Process Subsystem (PS) shell command
 pub fn cmd_ps(args: &[&str]) {
     use crate::ps;
-    use crate::ke::list::ListEntry;
 
     if args.is_empty() {
         // Default: show threads (backwards compatible)
@@ -4246,9 +4245,13 @@ pub fn cmd_debug(args: &[&str]) {
             );
         }
 
+        // Copy from packed struct to avoid alignment issues
+        let gdt_base = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(gdtr.base)) };
+        let gdt_limit = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(gdtr.limit)) };
+
         outln!("Global Descriptor Table:");
-        outln!("  Base:  {:#018x}", gdtr.base);
-        outln!("  Limit: {:#06x} ({} entries)", gdtr.limit, (gdtr.limit + 1) / 8);
+        outln!("  Base:  {:#018x}", gdt_base);
+        outln!("  Limit: {:#06x} ({} entries)", gdt_limit, (gdt_limit as u32 + 1) / 8);
     } else if eq_ignore_case(cmd, "idt") {
         #[repr(C, packed)]
         struct DescriptorTablePointer {
@@ -4265,9 +4268,13 @@ pub fn cmd_debug(args: &[&str]) {
             );
         }
 
+        // Copy from packed struct to avoid alignment issues
+        let idt_base = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(idtr.base)) };
+        let idt_limit = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(idtr.limit)) };
+
         outln!("Interrupt Descriptor Table:");
-        outln!("  Base:  {:#018x}", idtr.base);
-        outln!("  Limit: {:#06x} ({} entries)", idtr.limit, (idtr.limit + 1) / 16);
+        outln!("  Base:  {:#018x}", idt_base);
+        outln!("  Limit: {:#06x} ({} entries)", idt_limit, (idt_limit as u32 + 1) / 16);
     } else if eq_ignore_case(cmd, "peek") {
         if args.len() < 2 {
             outln!("Usage: debug peek <address> [count]");
@@ -4607,10 +4614,16 @@ pub fn cmd_debug(args: &[&str]) {
             core::arch::asm!("sidt [{}]", in(reg) &mut idtr);
         }
 
+        // Copy from packed structs to avoid alignment issues
+        let gdt_base = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(gdtr.base)) };
+        let gdt_limit = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(gdtr.limit)) };
+        let idt_base = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(idtr.base)) };
+        let idt_limit = unsafe { core::ptr::read_unaligned(core::ptr::addr_of!(idtr.limit)) };
+
         outln!("");
         outln!("[Descriptor Tables]");
-        outln!("  GDT: {:#018x} (limit: {:#x})", gdtr.base, gdtr.limit);
-        outln!("  IDT: {:#018x} (limit: {:#x})", idtr.base, idtr.limit);
+        outln!("  GDT: {:#018x} (limit: {:#x})", gdt_base, gdt_limit);
+        outln!("  IDT: {:#018x} (limit: {:#x})", idt_base, idt_limit);
 
         // Stack
         let rsp: u64;
