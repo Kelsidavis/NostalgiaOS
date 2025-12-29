@@ -1948,3 +1948,437 @@ pub fn cmd_net(args: &[&str]) {
         outln!("NET: unrecognized command '{}'", cmd);
     }
 }
+
+/// PE command - analyze PE (Portable Executable) files
+pub fn cmd_pe(args: &[&str]) {
+    if args.is_empty() {
+        outln!("PE - Portable Executable Analyzer");
+        outln!("");
+        outln!("Usage: pe <command> [options]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  info <address>     Show PE info at memory address");
+        outln!("  headers <address>  Show PE headers");
+        outln!("  sections <address> List sections");
+        outln!("  imports <address>  List imports");
+        outln!("  exports <address>  List exports");
+        outln!("  kernel             Analyze kernel image");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "kernel") {
+        // Analyze the kernel image itself
+        // The kernel is loaded by the bootloader, we can find it via a known symbol
+        outln!("Kernel PE Analysis:");
+        outln!("  Note: Kernel image analysis requires valid PE at load address");
+        outln!("  Use 'pe info <address>' with kernel base address");
+    } else if eq_ignore_case(cmd, "info") || eq_ignore_case(cmd, "headers") {
+        if args.len() < 2 {
+            outln!("Usage: pe {} <address>", cmd);
+            return;
+        }
+        let addr = parse_hex_address(args[1]);
+        if addr == 0 {
+            outln!("Invalid address: {}", args[1]);
+            return;
+        }
+        show_pe_info(addr, eq_ignore_case(cmd, "headers"));
+    } else if eq_ignore_case(cmd, "sections") {
+        if args.len() < 2 {
+            outln!("Usage: pe sections <address>");
+            return;
+        }
+        let addr = parse_hex_address(args[1]);
+        if addr == 0 {
+            outln!("Invalid address: {}", args[1]);
+            return;
+        }
+        show_pe_sections(addr);
+    } else if eq_ignore_case(cmd, "imports") {
+        if args.len() < 2 {
+            outln!("Usage: pe imports <address>");
+            return;
+        }
+        let addr = parse_hex_address(args[1]);
+        if addr == 0 {
+            outln!("Invalid address: {}", args[1]);
+            return;
+        }
+        show_pe_imports(addr);
+    } else if eq_ignore_case(cmd, "exports") {
+        if args.len() < 2 {
+            outln!("Usage: pe exports <address>");
+            return;
+        }
+        let addr = parse_hex_address(args[1]);
+        if addr == 0 {
+            outln!("Invalid address: {}", args[1]);
+            return;
+        }
+        show_pe_exports(addr);
+    } else {
+        outln!("Unknown pe command: {}", cmd);
+    }
+}
+
+/// Parse a hex address from string
+fn parse_hex_address(s: &str) -> u64 {
+    let s = s.trim();
+    let s = if s.starts_with("0x") || s.starts_with("0X") {
+        &s[2..]
+    } else {
+        s
+    };
+
+    let mut result: u64 = 0;
+    for c in s.chars() {
+        let digit = match c {
+            '0'..='9' => c as u64 - '0' as u64,
+            'a'..='f' => c as u64 - 'a' as u64 + 10,
+            'A'..='F' => c as u64 - 'A' as u64 + 10,
+            '_' => continue, // Allow underscores as separators
+            _ => return 0,
+        };
+        result = result.checked_mul(16).unwrap_or(0);
+        result = result.checked_add(digit).unwrap_or(0);
+    }
+    result
+}
+
+/// Show PE information
+fn show_pe_info(addr: u64, verbose: bool) {
+    use crate::ldr;
+
+    outln!("PE Analysis at {:#x}", addr);
+    outln!("");
+
+    unsafe {
+        let base = addr as *const u8;
+
+        // Check DOS header
+        let dos_header = &*(base as *const ldr::ImageDosHeader);
+        if !dos_header.is_valid() {
+            outln!("Error: Invalid DOS header (no MZ signature)");
+            return;
+        }
+
+        // Copy packed fields to avoid unaligned access
+        let e_magic = dos_header.e_magic;
+        let e_lfanew = dos_header.e_lfanew;
+
+        outln!("DOS Header:");
+        outln!("  Magic:        MZ ({:#06x})", e_magic);
+        outln!("  PE Offset:    {:#x}", e_lfanew);
+
+        // Parse PE info
+        match ldr::parse_pe(base) {
+            Ok(info) => {
+                outln!("");
+                outln!("PE Information:");
+                outln!("  Type:         {}", if info.is_64bit { "PE32+ (64-bit)" } else { "PE32 (32-bit)" });
+                outln!("  Machine:      {}", machine_name(info.machine));
+                outln!("  Image Base:   {:#x}", info.image_base);
+                outln!("  Image Size:   {:#x} ({} KB)", info.size_of_image, info.size_of_image / 1024);
+                outln!("  Entry Point:  {:#x}", info.entry_point_rva);
+                outln!("  Sections:     {}", info.number_of_sections);
+                outln!("  Subsystem:    {}", subsystem_name(info.subsystem));
+                outln!("  DLL:          {}", if info.is_dll { "Yes" } else { "No" });
+                outln!("  Relocatable:  {}", if info.has_relocations { "Yes" } else { "No" });
+
+                if verbose {
+                    outln!("");
+                    outln!("Additional Info:");
+                    outln!("  Section Align:  {:#x}", info.section_alignment);
+                    outln!("  File Align:     {:#x}", info.file_alignment);
+                    outln!("  Header Size:    {:#x}", info.size_of_headers);
+                    outln!("  Stack Reserve:  {:#x}", info.stack_reserve);
+                    outln!("  Stack Commit:   {:#x}", info.stack_commit);
+                    outln!("  Heap Reserve:   {:#x}", info.heap_reserve);
+                    outln!("  Heap Commit:    {:#x}", info.heap_commit);
+                    outln!("  DLL Chars:      {:#06x}", info.dll_characteristics);
+                }
+            }
+            Err(e) => {
+                outln!("Error parsing PE: {:?}", e);
+            }
+        }
+    }
+}
+
+/// Show PE sections
+fn show_pe_sections(addr: u64) {
+    use crate::ldr;
+
+    outln!("PE Sections at {:#x}", addr);
+    outln!("");
+
+    unsafe {
+        let base = addr as *const u8;
+
+        match ldr::get_section_headers(base) {
+            Some(sections) => {
+                outln!("{:<8} {:>10} {:>10} {:>10} {:>10} {:>8}",
+                    "Name", "VirtAddr", "VirtSize", "RawAddr", "RawSize", "Flags");
+                outln!("------------------------------------------------------------------");
+
+                for section in sections {
+                    let name = section.name_str();
+                    // Copy packed struct fields to avoid unaligned access
+                    let vaddr = section.virtual_address;
+                    let vsize = section.virtual_size;
+                    let raddr = section.pointer_to_raw_data;
+                    let rsize = section.size_of_raw_data;
+                    let flags = format_section_flags(section.characteristics);
+
+                    outln!("{:<8} {:#10x} {:#10x} {:#10x} {:#10x} {}",
+                        name, vaddr, vsize, raddr, rsize, flags);
+                }
+            }
+            None => {
+                outln!("Error: Could not read section headers");
+            }
+        }
+    }
+}
+
+/// Format section flags as string
+fn format_section_flags(flags: u32) -> &'static str {
+    use crate::ldr::section_characteristics::*;
+
+    let r = (flags & IMAGE_SCN_MEM_READ) != 0;
+    let w = (flags & IMAGE_SCN_MEM_WRITE) != 0;
+    let x = (flags & IMAGE_SCN_MEM_EXECUTE) != 0;
+
+    match (r, w, x) {
+        (true, false, false) => "R--",
+        (true, true, false) => "RW-",
+        (true, false, true) => "R-X",
+        (true, true, true) => "RWX",
+        (false, false, true) => "--X",
+        (false, true, false) => "-W-",
+        (false, true, true) => "-WX",
+        _ => "---",
+    }
+}
+
+/// Show PE imports
+fn show_pe_imports(addr: u64) {
+    use crate::ldr;
+
+    outln!("PE Imports at {:#x}", addr);
+    outln!("");
+
+    unsafe {
+        let base = addr as *const u8;
+
+        // Get import directory
+        match ldr::get_data_directory(base, ldr::directory_entry::IMAGE_DIRECTORY_ENTRY_IMPORT) {
+            Some(dir) if dir.is_present() => {
+                // Copy packed struct fields
+                let dir_rva = dir.virtual_address;
+                let dir_size = dir.size;
+                outln!("Import Directory RVA: {:#x}, Size: {:#x}", dir_rva, dir_size);
+                outln!("");
+
+                // Parse import descriptors
+                let import_base = base.add(dir_rva as usize);
+                let mut offset = 0usize;
+                let mut dll_count = 0;
+
+                loop {
+                    let desc = &*(import_base.add(offset) as *const ldr::ImageImportDescriptor);
+                    if desc.is_null() {
+                        break;
+                    }
+
+                    // Get DLL name
+                    let name_ptr = base.add(desc.name as usize);
+                    let name = cstr_to_str_safe(name_ptr, 128);
+
+                    outln!("  {}", name);
+                    dll_count += 1;
+
+                    offset += core::mem::size_of::<ldr::ImageImportDescriptor>();
+                    if offset > dir_size as usize {
+                        break;
+                    }
+                }
+
+                outln!("");
+                outln!("Total: {} DLLs", dll_count);
+            }
+            _ => {
+                outln!("No import directory found");
+            }
+        }
+    }
+}
+
+/// Show PE exports
+fn show_pe_exports(addr: u64) {
+    use crate::ldr;
+
+    outln!("PE Exports at {:#x}", addr);
+    outln!("");
+
+    unsafe {
+        let base = addr as *const u8;
+
+        // Get export directory
+        match ldr::get_data_directory(base, ldr::directory_entry::IMAGE_DIRECTORY_ENTRY_EXPORT) {
+            Some(dir) if dir.is_present() => {
+                // Copy packed struct field
+                let dir_rva = dir.virtual_address;
+                let exports = &*(base.add(dir_rva as usize) as *const ldr::ImageExportDirectory);
+
+                // Copy packed struct fields to avoid unaligned access
+                let exp_name = exports.name;
+                let exp_base = exports.base;
+                let exp_num_funcs = exports.number_of_functions;
+                let exp_num_names = exports.number_of_names;
+                let exp_addr_names = exports.address_of_names;
+
+                // Get DLL name
+                let name_ptr = base.add(exp_name as usize);
+                let dll_name = cstr_to_str_safe(name_ptr, 128);
+
+                outln!("DLL Name:     {}", dll_name);
+                outln!("Base Ordinal: {}", exp_base);
+                outln!("Functions:    {}", exp_num_funcs);
+                outln!("Names:        {}", exp_num_names);
+                outln!("");
+
+                // List first 20 exports
+                let name_table = base.add(exp_addr_names as usize) as *const u32;
+                let max_show = (exp_num_names as usize).min(20);
+
+                outln!("Exports (first {}):", max_show);
+                for i in 0..max_show {
+                    let name_rva = *name_table.add(i);
+                    let func_name = cstr_to_str_safe(base.add(name_rva as usize), 64);
+                    outln!("  {}", func_name);
+                }
+
+                if exp_num_names > 20 {
+                    outln!("  ... and {} more", exp_num_names - 20);
+                }
+            }
+            _ => {
+                outln!("No export directory found");
+            }
+        }
+    }
+}
+
+/// Safe C string to str conversion
+unsafe fn cstr_to_str_safe(ptr: *const u8, max_len: usize) -> &'static str {
+    if ptr.is_null() {
+        return "";
+    }
+
+    let mut len = 0;
+    while len < max_len && *ptr.add(len) != 0 {
+        len += 1;
+    }
+
+    core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr, len))
+}
+
+/// Get machine type name
+fn machine_name(machine: u16) -> &'static str {
+    use crate::ldr::machine_type::*;
+
+    match machine {
+        IMAGE_FILE_MACHINE_AMD64 => "AMD64 (x64)",
+        IMAGE_FILE_MACHINE_I386 => "Intel 386 (x86)",
+        IMAGE_FILE_MACHINE_ARM => "ARM",
+        IMAGE_FILE_MACHINE_ARM64 => "ARM64",
+        IMAGE_FILE_MACHINE_IA64 => "Intel Itanium",
+        _ => "Unknown",
+    }
+}
+
+/// Get subsystem name
+fn subsystem_name(subsystem: u16) -> &'static str {
+    use crate::ldr::subsystem::*;
+
+    match subsystem {
+        IMAGE_SUBSYSTEM_NATIVE => "Native",
+        IMAGE_SUBSYSTEM_WINDOWS_GUI => "Windows GUI",
+        IMAGE_SUBSYSTEM_WINDOWS_CUI => "Windows Console",
+        IMAGE_SUBSYSTEM_POSIX_CUI => "POSIX Console",
+        IMAGE_SUBSYSTEM_WINDOWS_CE_GUI => "Windows CE",
+        IMAGE_SUBSYSTEM_EFI_APPLICATION => "EFI Application",
+        IMAGE_SUBSYSTEM_EFI_BOOT_SERVICE_DRIVER => "EFI Boot Driver",
+        IMAGE_SUBSYSTEM_EFI_RUNTIME_DRIVER => "EFI Runtime Driver",
+        _ => "Unknown",
+    }
+}
+
+/// Memory dump command
+pub fn cmd_dump(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Usage: dump <address> [length]");
+        outln!("");
+        outln!("Dump memory in hex format");
+        outln!("  address  Memory address (hex, e.g., 0x1000)");
+        outln!("  length   Bytes to dump (default: 256, max: 4096)");
+        return;
+    }
+
+    let addr = parse_hex_address(args[0]);
+    if addr == 0 && args[0] != "0" && args[0] != "0x0" {
+        outln!("Invalid address: {}", args[0]);
+        return;
+    }
+
+    let len = if args.len() > 1 {
+        parse_hex_address(args[1]).min(4096) as usize
+    } else {
+        256
+    };
+
+    outln!("Memory dump at {:#x} ({} bytes):", addr, len);
+    outln!("");
+
+    unsafe {
+        let ptr = addr as *const u8;
+        let mut offset = 0usize;
+
+        while offset < len {
+            // Print address
+            out!("{:016x}  ", addr + offset as u64);
+
+            // Print hex bytes
+            for i in 0..16 {
+                if offset + i < len {
+                    out!("{:02x} ", *ptr.add(offset + i));
+                } else {
+                    out!("   ");
+                }
+                if i == 7 {
+                    out!(" ");
+                }
+            }
+
+            out!(" |");
+
+            // Print ASCII
+            for i in 0..16 {
+                if offset + i < len {
+                    let b = *ptr.add(offset + i);
+                    if b >= 0x20 && b < 0x7f {
+                        out!("{}", b as char);
+                    } else {
+                        out!(".");
+                    }
+                }
+            }
+
+            outln!("|");
+            offset += 16;
+        }
+    }
+}

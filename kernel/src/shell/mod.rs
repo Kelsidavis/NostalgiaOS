@@ -147,12 +147,12 @@ const HISTORY_SIZE: usize = 32;
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
     "cat", "cd", "clear", "cls", "copy", "cp",
-    "del", "dir", "echo", "erase", "exit",
+    "del", "dir", "dump", "echo", "erase", "exit",
     "help", "history",
     "ls",
     "md", "mem", "memory", "mkdir", "mv",
     "net",
-    "ps", "pwd",
+    "pe", "ps", "pwd",
     "quit",
     "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir",
     "sc", "services", "suspend",
@@ -1052,6 +1052,11 @@ impl Shell {
             commands::cmd_sc(&args[1..argc]);
         } else if eq_ignore_case(cmd, "net") {
             commands::cmd_net(&args[1..argc]);
+        // PE loader commands
+        } else if eq_ignore_case(cmd, "pe") {
+            commands::cmd_pe(&args[1..argc]);
+        } else if eq_ignore_case(cmd, "dump") {
+            commands::cmd_dump(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
