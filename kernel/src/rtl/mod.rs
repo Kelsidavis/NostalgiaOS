@@ -32,6 +32,7 @@
 
 pub mod atom;
 pub mod avl;
+pub mod base64;
 pub mod bitmap;
 pub mod checksum;
 pub mod compress;
@@ -48,6 +49,7 @@ pub mod time;
 // Re-exports for convenience
 pub use atom::*;
 pub use avl::*;
+pub use base64::{encode as base64_encode, decode as base64_decode};
 pub use bitmap::*;
 pub use checksum::*;
 pub use compress::*;
