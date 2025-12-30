@@ -324,3 +324,82 @@ pub fn send_icmp_echo_request(
 
     Ok(())
 }
+
+/// Send ICMP Echo Request with custom TTL (for traceroute)
+pub fn send_icmp_echo_with_ttl(
+    device_index: usize,
+    dest_ip: Ipv4Address,
+    identifier: u16,
+    sequence: u16,
+    ttl: u8,
+    data: &[u8],
+) -> Result<(), &'static str> {
+    let device = super::get_device(device_index).ok_or("Device not found")?;
+
+    let src_ip = device.ip_address.ok_or("No IP configured")?;
+    let src_mac = device.info.mac_address;
+
+    // For traceroute, try gateway if destination is not local
+    let dest_mac = if let Some(gw) = device.gateway {
+        // Use gateway MAC for non-local destinations
+        super::arp::arp_resolve(device_index, gw, 3000)
+            .ok_or("Gateway ARP failed")?
+    } else {
+        // Try direct resolution
+        super::arp::arp_resolve(device_index, dest_ip, 3000)
+            .ok_or("ARP resolution failed")?
+    };
+
+    // Build ICMP Echo Request
+    let mut icmp = IcmpHeader::echo_request(identifier, sequence);
+    icmp.compute_checksum(data);
+
+    let icmp_bytes = icmp.to_bytes();
+
+    // Build IP header with custom TTL
+    let payload_len = (ICMP_HEADER_SIZE + data.len()) as u16;
+    let mut ip_header = Ipv4Header::new(src_ip, dest_ip, IpProtocol::Icmp, payload_len, ttl);
+    ip_header.compute_checksum();
+
+    let ip_bytes = ip_header.to_bytes();
+
+    // Build full packet
+    let mut packet = Vec::with_capacity(ip_bytes.len() + icmp_bytes.len() + data.len());
+    packet.extend_from_slice(&ip_bytes);
+    packet.extend_from_slice(&icmp_bytes);
+    packet.extend_from_slice(data);
+
+    // Create Ethernet frame
+    let frame = create_ethernet_frame(dest_mac, src_mac, EtherType::Ipv4, &packet);
+
+    // Send
+    if let Some(device) = super::get_device_mut(device_index) {
+        device.transmit(&frame)?;
+        super::record_tx_packet(frame.len());
+    }
+
+    Ok(())
+}
+
+/// Traceroute result for a single hop
+#[derive(Debug, Clone)]
+pub struct TracerouteHop {
+    pub ttl: u8,
+    pub addr: Option<Ipv4Address>,
+    pub rtt_ms: Option<u32>,
+    pub response_type: Option<IcmpType>,
+}
+
+/// Statistics
+use core::sync::atomic::{AtomicU32, Ordering};
+static TRACEROUTE_COUNT: AtomicU32 = AtomicU32::new(0);
+
+/// Get traceroute statistics
+pub fn get_traceroute_count() -> u32 {
+    TRACEROUTE_COUNT.load(Ordering::Relaxed)
+}
+
+/// Increment traceroute counter
+pub fn increment_traceroute() {
+    TRACEROUTE_COUNT.fetch_add(1, Ordering::Relaxed);
+}

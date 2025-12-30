@@ -146,7 +146,7 @@ const HISTORY_SIZE: usize = 32;
 
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
-    "acpi", "apic", "apcq",
+    "acpi", "apic", "apcq", "arp",
     "blocks", "bt",
     "cache", "callback", "cat", "cc", "cd", "cid", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
@@ -162,7 +162,7 @@ const COMMANDS: &[&str] = &[
     "qotd", "quit",
     "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "route", "rtl", "shutdown",
     "sc", "sched", "se", "section", "services", "smbios", "stack", "suspend", "sysinfo",
-    "tasks", "teb", "time", "timer", "timerq", "timeserv", "touch", "type",
+    "tasks", "teb", "time", "timer", "timerq", "timeserv", "touch", "tracert", "type",
     "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "version", "volumes",
     "waitq", "whois", "worker", "wset",
@@ -1312,6 +1312,12 @@ impl Shell {
         // Route table
         } else if eq_ignore_case(cmd, "route") {
             commands::cmd_route(&args[1..argc]);
+        // Traceroute
+        } else if eq_ignore_case(cmd, "tracert") || eq_ignore_case(cmd, "traceroute") {
+            commands::cmd_tracert(&args[1..argc]);
+        // ARP cache
+        } else if eq_ignore_case(cmd, "arp") {
+            commands::cmd_arp(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

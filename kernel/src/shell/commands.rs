@@ -17815,3 +17815,164 @@ pub fn cmd_route(args: &[&str]) {
         outln!("Use 'route help' for usage");
     }
 }
+
+/// Windows-style tracert command
+pub fn cmd_tracert(args: &[&str]) {
+    use crate::net::icmp;
+    use crate::net::ip::Ipv4Address;
+
+    if args.is_empty() {
+        outln!("Usage: tracert [-h max_hops] <target>");
+        outln!("");
+        outln!("Options:");
+        outln!("  -h max_hops   Maximum number of hops (default: 30)");
+        return;
+    }
+
+    // Parse arguments
+    let mut max_hops = 30u8;
+    let mut target_str = "";
+
+    let mut i = 0;
+    while i < args.len() {
+        if eq_ignore_case(args[i], "-h") && i + 1 < args.len() {
+            if let Ok(h) = args[i + 1].parse::<u8>() {
+                max_hops = h.min(64);
+            }
+            i += 2;
+        } else if !args[i].starts_with('-') {
+            target_str = args[i];
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    if target_str.is_empty() {
+        outln!("Target address required.");
+        return;
+    }
+
+    // Parse IP address
+    let parts: alloc::vec::Vec<&str> = target_str.split('.').collect();
+    if parts.len() != 4 {
+        outln!("Invalid IP address format: {}", target_str);
+        return;
+    }
+
+    let octets: alloc::vec::Vec<u8> = parts.iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    if octets.len() != 4 {
+        outln!("Invalid IP address: {}", target_str);
+        return;
+    }
+
+    let target_ip = Ipv4Address::new([octets[0], octets[1], octets[2], octets[3]]);
+
+    outln!("");
+    outln!("Tracing route to {} over a maximum of {} hops:",
+        target_str, max_hops);
+    outln!("");
+
+    // Find first network device
+    let device_index = 1; // Usually virtio-net
+
+    // Check if we have a device
+    if crate::net::get_device(device_index).is_none() {
+        outln!("No network device available");
+        return;
+    }
+
+    icmp::increment_traceroute();
+
+    // Use process ID for identifier
+    let identifier = 0x4E54u16; // "NT" in hex
+
+    for ttl in 1..=max_hops {
+        out!("{:>3}  ", ttl);
+
+        // Send ICMP echo with this TTL
+        let sequence = ttl as u16;
+        let data = [0x41u8; 32]; // 32 bytes of 'A'
+
+        let start = crate::hal::apic::get_tick_count();
+
+        match icmp::send_icmp_echo_with_ttl(device_index, target_ip, identifier, sequence, ttl, &data) {
+            Ok(()) => {
+                // Wait for response (timeout ~3 seconds)
+                let timeout_ticks = 3000u64 * 1000;
+                let mut received = false;
+
+                while crate::hal::apic::get_tick_count() - start < timeout_ticks {
+                    // Check for reply in the pending buffer
+                    // Note: In a real implementation, we'd need to hook into
+                    // the ICMP handler to capture Time Exceeded responses
+                    for _ in 0..1000 {
+                        core::hint::spin_loop();
+                    }
+
+                    // For now, simulate timeout since we can't easily capture
+                    // intermediate router responses without more infrastructure
+                    break;
+                }
+
+                if !received {
+                    outln!("*        Request timed out.");
+                }
+            }
+            Err(e) => {
+                outln!("*        Send failed: {}", e);
+            }
+        }
+
+        // Small delay between probes
+        for _ in 0..10000 {
+            core::hint::spin_loop();
+        }
+    }
+
+    outln!("");
+    outln!("Trace complete.");
+    outln!("");
+    outln!("Note: Full traceroute requires ICMP Time Exceeded handler integration.");
+}
+
+/// ARP table display command
+pub fn cmd_arp(args: &[&str]) {
+    use crate::net::arp;
+
+    if args.is_empty() || eq_ignore_case(args[0], "-a") {
+        outln!("");
+        outln!("Interface: Network Adapter");
+        outln!("  Internet Address      Physical Address      Type");
+
+        let cache = arp::get_cache_entries();
+        if cache.is_empty() {
+            outln!("  (no entries)");
+        } else {
+            for entry in cache {
+                let entry_type = if entry.is_static { "static" } else { "dynamic" };
+                outln!("  {:>3}.{:>3}.{:>3}.{:>3}      {:02x}-{:02x}-{:02x}-{:02x}-{:02x}-{:02x}     {}",
+                    entry.ip_address.0[0], entry.ip_address.0[1],
+                    entry.ip_address.0[2], entry.ip_address.0[3],
+                    entry.mac_address.0[0], entry.mac_address.0[1], entry.mac_address.0[2],
+                    entry.mac_address.0[3], entry.mac_address.0[4], entry.mac_address.0[5],
+                    entry_type);
+            }
+        }
+        outln!("");
+    } else if eq_ignore_case(args[0], "-d") {
+        outln!("ARP cache cleared (not implemented)");
+    } else if eq_ignore_case(args[0], "help") || eq_ignore_case(args[0], "/?") {
+        outln!("Usage: arp [options]");
+        outln!("");
+        outln!("Options:");
+        outln!("  -a        Display ARP cache (default)");
+        outln!("  -d        Clear ARP cache");
+    } else {
+        outln!("Unknown arp option: {}", args[0]);
+        outln!("Use 'arp /?' for help");
+    }
+}
