@@ -15229,6 +15229,8 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  loopback   Process loopback queue");
         outln!("  udp        Show UDP socket status");
         outln!("  udpsend    Send UDP test packet");
+        outln!("  dns        Show DNS configuration");
+        outln!("  resolve    Resolve hostname to IP");
         return;
     }
 
@@ -15499,6 +15501,67 @@ pub fn cmd_netinfo(args: &[&str]) {
 
         // Close socket
         let _ = net::udp::socket_close(socket);
+    } else if eq_ignore_case(args[0], "dns") {
+        outln!("DNS Configuration:");
+        outln!("");
+
+        let server = net::dns::get_dns_server();
+        outln!("  DNS Server: {:?}", server);
+
+        if args.len() >= 2 && eq_ignore_case(args[1], "set") {
+            if args.len() < 3 {
+                outln!("");
+                outln!("Usage: netinfo dns set <ip>");
+                outln!("  Example: netinfo dns set 8.8.8.8");
+                return;
+            }
+
+            // Parse IP address
+            let ip_str = args[2];
+            let mut octets = [0u8; 4];
+            let mut octet_idx = 0;
+            let mut current = 0u32;
+
+            for c in ip_str.chars() {
+                if c == '.' {
+                    if octet_idx >= 3 || current > 255 {
+                        outln!("Invalid IP address format");
+                        return;
+                    }
+                    octets[octet_idx] = current as u8;
+                    octet_idx += 1;
+                    current = 0;
+                } else if let Some(d) = c.to_digit(10) {
+                    current = current * 10 + d;
+                } else {
+                    outln!("Invalid IP address format");
+                    return;
+                }
+            }
+            if octet_idx != 3 || current > 255 {
+                outln!("Invalid IP address format");
+                return;
+            }
+            octets[3] = current as u8;
+
+            let new_server = net::Ipv4Address::new(octets);
+            net::dns::set_dns_server(new_server);
+            outln!("  DNS server set to {:?}", new_server);
+        }
+    } else if eq_ignore_case(args[0], "resolve") {
+        if args.len() < 2 {
+            outln!("Usage: netinfo resolve <hostname>");
+            outln!("  Example: netinfo resolve example.com");
+            return;
+        }
+
+        let hostname = args[1];
+        outln!("Resolving {}...", hostname);
+
+        match net::dns::resolve(0, hostname) {
+            Some(ip) => outln!("  {} -> {:?}", hostname, ip),
+            None => outln!("  Resolution failed"),
+        }
     } else {
         outln!("Unknown command: {}", args[0]);
         outln!("Use 'netinfo' for help");

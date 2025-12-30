@@ -15,6 +15,7 @@ pub mod arp;
 pub mod ip;
 pub mod icmp;
 pub mod udp;
+pub mod dns;
 pub mod loopback;
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -96,6 +97,7 @@ pub fn init() {
     arp::init();
     icmp::init();
     udp::init();
+    dns::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 
