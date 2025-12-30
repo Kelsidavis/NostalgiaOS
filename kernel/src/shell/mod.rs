@@ -148,25 +148,25 @@ const HISTORY_SIZE: usize = 32;
 const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq", "arp", "assoc", "at", "attrib",
     "blocks", "bootcfg", "bt",
-    "cacls", "cache", "call", "callback", "cat", "cc", "cd", "chcp", "chkdsk", "choice", "cid", "cipher", "clear", "clip", "cls", "color", "comp", "compact", "copy", "cp", "cpufeatures", "cpuinfo",
-    "date", "daytime", "debug", "defrag", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "diskpart", "dmi", "doskey", "dpcq", "driverquery", "dump", "echo", "echoserv", "endlocal", "erase", "eventlog", "ex", "exception", "exit",
+    "cacls", "cache", "call", "callback", "cat", "cc", "cd", "change", "chcp", "chkdsk", "choice", "cid", "cipher", "clear", "clip", "cls", "color", "comp", "compact", "convert", "copy", "cp", "cpufeatures", "cpuinfo",
+    "date", "daytime", "debug", "defrag", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "diskpart", "dmi", "doskey", "dpcq", "driverquery", "dump", "echo", "echoserv", "endlocal", "erase", "eventcreate", "eventlog", "eventtriggers", "ex", "exception", "exit", "expand", "extrac32",
     "fc", "files", "find", "findstr", "finger", "for", "format", "fsutil", "ftype",
     "getmac", "goto", "gpresult", "gpupdate",
     "hal", "handles", "head", "heap", "help", "history", "hostname", "hpet",
     "icacls", "ident", "if", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
     "job", "ke", "keyedev",
-    "label", "ldr", "logoff", "lookaside", "ls", "luid",
-    "md", "mem", "memmap", "memory", "mkdir", "mm", "mode", "more", "msg", "msr", "mv",
-    "net", "netinfo", "netserv", "netstat", "nslookup", "ntfs",
+    "label", "ldr", "logman", "logoff", "lookaside", "ls", "luid",
+    "makecab", "md", "mem", "memmap", "memory", "mkdir", "mm", "mode", "more", "msg", "msr", "mv",
+    "nbtstat", "net", "netinfo", "netserv", "netsh", "netstat", "nslookup", "ntbackup", "ntfs",
     "ob", "obdir", "openfiles",
-    "pagetable", "partition", "path", "pause", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "popd", "port", "power", "prcb", "prefetch", "prompt", "ps", "pushd", "pwd",
-    "qotd", "quit",
-    "ramdisk", "rd", "reboot", "recover", "reg", "ren", "rename", "replace", "resume", "rm", "rmdir", "robocopy", "route", "rtl", "runas",
-    "sc", "sched", "schtasks", "se", "section", "services", "set", "setlocal", "setx", "shutdown", "smbios", "sort", "stack", "start", "subst", "suspend", "sysinfo", "systeminfo",
-    "tail", "taskkill", "tasklist", "tasks", "teb", "time", "timeout", "timer", "timerq", "timeserv", "title", "touch", "tracert", "tree", "type",
+    "pagetable", "partition", "path", "pathping", "pause", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "popd", "port", "power", "powercfg", "prcb", "prncnfg", "prndrvr", "prnjobs", "prnmngr", "prnport", "prnqctl", "prefetch", "print", "prompt", "ps", "pushd", "pwd",
+    "qotd", "query", "quit",
+    "ramdisk", "rd", "reboot", "recover", "reg", "regsvr32", "relog", "ren", "rename", "replace", "reset", "resume", "rm", "rmdir", "robocopy", "route", "rtl", "runas", "rundll32",
+    "sc", "sched", "schtasks", "se", "secedit", "section", "services", "set", "setlocal", "setx", "shutdown", "smbios", "sort", "stack", "start", "subst", "suspend", "sysinfo", "systeminfo",
+    "tail", "taskkill", "tasklist", "tasks", "teb", "time", "timeout", "timer", "timerq", "timeserv", "title", "touch", "tracerpt", "tracert", "tree", "type", "typeperf",
     "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "verify", "version", "volumes",
-    "waitq", "wc", "where", "whois", "whoami", "wmic", "worker", "wset", "xcopy",
+    "w32tm", "waitq", "wc", "where", "whois", "whoami", "wmic", "worker", "wset", "xcopy",
 ];
 
 /// Current working directory
@@ -1535,6 +1535,93 @@ impl Shell {
         // BOOTCFG - boot configuration
         } else if eq_ignore_case(cmd, "bootcfg") {
             commands::cmd_bootcfg(&args[1..argc]);
+        // NETSH - network shell
+        } else if eq_ignore_case(cmd, "netsh") {
+            commands::cmd_netsh(&args[1..argc]);
+        // NBTSTAT - NetBIOS over TCP/IP statistics
+        } else if eq_ignore_case(cmd, "nbtstat") {
+            commands::cmd_nbtstat(&args[1..argc]);
+        // PATHPING - network path diagnostics
+        } else if eq_ignore_case(cmd, "pathping") {
+            commands::cmd_pathping(&args[1..argc]);
+        // W32TM - Windows Time Service
+        } else if eq_ignore_case(cmd, "w32tm") {
+            commands::cmd_w32tm(&args[1..argc]);
+        // POWERCFG - power configuration
+        } else if eq_ignore_case(cmd, "powercfg") {
+            commands::cmd_powercfg(&args[1..argc]);
+        // CONVERT - convert FAT to NTFS
+        } else if eq_ignore_case(cmd, "convert") {
+            commands::cmd_convert(&args[1..argc]);
+        // EXPAND - expand compressed files
+        } else if eq_ignore_case(cmd, "expand") {
+            commands::cmd_expand(&args[1..argc]);
+        // MAKECAB - create cabinet files
+        } else if eq_ignore_case(cmd, "makecab") {
+            commands::cmd_makecab(&args[1..argc]);
+        // EXTRAC32 - extract cabinet files
+        } else if eq_ignore_case(cmd, "extrac32") {
+            commands::cmd_extrac32(&args[1..argc]);
+        // EVENTCREATE - create event log entry
+        } else if eq_ignore_case(cmd, "eventcreate") {
+            commands::cmd_eventcreate(&args[1..argc]);
+        // EVENTTRIGGERS - configure event triggers
+        } else if eq_ignore_case(cmd, "eventtriggers") {
+            commands::cmd_eventtriggers(&args[1..argc]);
+        // TYPEPERF - performance monitoring
+        } else if eq_ignore_case(cmd, "typeperf") {
+            commands::cmd_typeperf(&args[1..argc]);
+        // LOGMAN - performance logs and alerts
+        } else if eq_ignore_case(cmd, "logman") {
+            commands::cmd_logman(&args[1..argc]);
+        // RELOG - reprocess performance logs
+        } else if eq_ignore_case(cmd, "relog") {
+            commands::cmd_relog(&args[1..argc]);
+        // TRACERPT - trace report tool
+        } else if eq_ignore_case(cmd, "tracerpt") {
+            commands::cmd_tracerpt(&args[1..argc]);
+        // QUERY - Terminal Services query
+        } else if eq_ignore_case(cmd, "query") {
+            commands::cmd_query(&args[1..argc]);
+        // CHANGE - Terminal Services change settings
+        } else if eq_ignore_case(cmd, "change") {
+            commands::cmd_change(&args[1..argc]);
+        // RESET - Terminal Services reset session
+        } else if eq_ignore_case(cmd, "reset") {
+            commands::cmd_reset(&args[1..argc]);
+        // REGSVR32 - register COM DLLs
+        } else if eq_ignore_case(cmd, "regsvr32") {
+            commands::cmd_regsvr32(&args[1..argc]);
+        // RUNDLL32 - run DLL functions
+        } else if eq_ignore_case(cmd, "rundll32") {
+            commands::cmd_rundll32(&args[1..argc]);
+        // NTBACKUP - backup utility
+        } else if eq_ignore_case(cmd, "ntbackup") {
+            commands::cmd_ntbackup(&args[1..argc]);
+        // SECEDIT - security configuration
+        } else if eq_ignore_case(cmd, "secedit") {
+            commands::cmd_secedit(&args[1..argc]);
+        // PRINT - print files
+        } else if eq_ignore_case(cmd, "print") {
+            commands::cmd_print(&args[1..argc]);
+        // PRNCNFG - printer configuration
+        } else if eq_ignore_case(cmd, "prncnfg") {
+            commands::cmd_prncnfg(&args[1..argc]);
+        // PRNDRVR - printer driver management
+        } else if eq_ignore_case(cmd, "prndrvr") {
+            commands::cmd_prndrvr(&args[1..argc]);
+        // PRNJOBS - printer job management
+        } else if eq_ignore_case(cmd, "prnjobs") {
+            commands::cmd_prnjobs(&args[1..argc]);
+        // PRNMNGR - printer manager
+        } else if eq_ignore_case(cmd, "prnmngr") {
+            commands::cmd_prnmngr(&args[1..argc]);
+        // PRNPORT - printer port management
+        } else if eq_ignore_case(cmd, "prnport") {
+            commands::cmd_prnport(&args[1..argc]);
+        // PRNQCTL - printer queue control
+        } else if eq_ignore_case(cmd, "prnqctl") {
+            commands::cmd_prnqctl(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
