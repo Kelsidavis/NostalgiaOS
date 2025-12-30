@@ -475,6 +475,25 @@ pub unsafe fn ps_create_user_process_ex(
         return (ptr::null_mut(), ptr::null_mut());
     }
 
+    // Create a per-process address space with its own page tables
+    let address_space = crate::mm::mm_create_process_address_space();
+    match address_space {
+        Some(aspace) => {
+            // Store the address space in the process
+            (*process).address_space = aspace as *mut u8;
+
+            // Set the process pointer in the address space
+            (*aspace).process = process as *mut u8;
+
+            crate::serial_println!("[PS] Created address space for process {} (CR3={:#x})",
+                (*process).unique_process_id, (*aspace).pml4_physical);
+        }
+        None => {
+            crate::serial_println!("[PS] Failed to create address space for process");
+            // Continue without per-process address space (use shared)
+        }
+    }
+
     // Allocate and initialize PEB
     let peb = match allocate_peb() {
         Some(p) => p,

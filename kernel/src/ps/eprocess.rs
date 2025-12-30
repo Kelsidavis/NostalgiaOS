@@ -131,6 +131,9 @@ pub struct EProcess {
     /// Section object (for mapped executable)
     pub section_object: *mut u8,
 
+    /// Address space (MmAddressSpace) for per-process page tables and VAD tree
+    pub address_space: *mut u8,
+
     // I/O counters
     /// Read operation count
     pub read_operation_count: u64,
@@ -212,6 +215,7 @@ impl EProcess {
             debug_port: ptr::null_mut(),
             job: ptr::null_mut(),
             section_object: ptr::null_mut(),
+            address_space: ptr::null_mut(),
             // I/O counters
             read_operation_count: 0,
             write_operation_count: 0,

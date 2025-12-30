@@ -136,6 +136,7 @@ pub use address::{
     address_space_flags,
     wsle_flags,
     mm_create_address_space,
+    mm_create_process_address_space,
     mm_delete_address_space,
     mm_get_system_address_space,
     mm_attach_address_space,
@@ -146,6 +147,9 @@ pub use address::{
     mm_query_virtual_memory,
     mm_access_fault,
     mm_get_address_space_stats,
+    mm_map_user_page,
+    mm_map_user_range,
+    mm_get_address_space_cr3,
 };
 
 // Re-export physical memory types

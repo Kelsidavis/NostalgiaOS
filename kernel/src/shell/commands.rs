@@ -15081,3 +15081,131 @@ fn show_reg_info(path: &str) {
         }
     }
 }
+
+/// Test user mode process creation infrastructure
+pub fn cmd_userproc(args: &[&str]) {
+    if args.is_empty() {
+        outln!("User Mode Process Test");
+        outln!("");
+        outln!("Commands:");
+        outln!("  userproc create     - Create a test user process");
+        outln!("  userproc aspace     - Create and test address space");
+        outln!("  userproc info       - Show address space stats");
+        outln!("");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "create") {
+        outln!("Creating test user process...");
+        outln!("");
+
+        unsafe {
+            // Get the system process as parent
+            let parent = crate::ps::eprocess::get_system_process();
+            if parent.is_null() {
+                outln!("Error: Cannot get system process");
+                return;
+            }
+
+            // Create a user process with the test entry point
+            let entry_point = crate::mm::USER_TEST_BASE;
+            let stack_top = crate::mm::USER_STACK_TOP;
+
+            let (process, thread) = crate::ps::create::ps_create_user_process(
+                parent,
+                b"test.exe",
+                entry_point,
+                stack_top,
+                0, // CR3 will be created by the function
+            );
+
+            if process.is_null() {
+                outln!("Error: Failed to create process");
+                return;
+            }
+
+            outln!("Process created successfully:");
+            outln!("  PID:         {}", (*process).unique_process_id);
+            outln!("  Name:        {}", core::str::from_utf8_unchecked((*process).image_name()));
+            outln!("  Entry Point: {:#x}", entry_point);
+            outln!("  Stack:       {:#x}", stack_top);
+
+            // Check address space
+            let aspace = (*process).address_space as *const crate::mm::MmAddressSpace;
+            if !aspace.is_null() {
+                outln!("  CR3:         {:#x}", (*aspace).pml4_physical);
+                outln!("  VAD Count:   {}", (*aspace).vad_root.count);
+            } else {
+                outln!("  (using shared address space)");
+            }
+
+            if thread.is_null() {
+                outln!("");
+                outln!("Warning: Failed to create initial thread");
+            } else {
+                outln!("");
+                outln!("Thread created:");
+                outln!("  TID:         {}", (*thread).cid.unique_thread);
+                let teb = (*thread).teb;
+                if !teb.is_null() {
+                    outln!("  TEB:         {:p}", teb);
+                }
+            }
+        }
+    } else if eq_ignore_case(args[0], "aspace") {
+        outln!("Testing per-process address space...");
+        outln!("");
+
+        unsafe {
+            // Create an address space
+            match crate::mm::mm_create_process_address_space() {
+                Some(aspace) => {
+                    outln!("Address space created:");
+                    outln!("  PML4 Physical: {:#x}", (*aspace).pml4_physical);
+                    outln!("  Ref Count:     {}", (*aspace).ref_count.load(core::sync::atomic::Ordering::SeqCst));
+                    outln!("");
+
+                    // Test mapping a user page
+                    let test_addr: u64 = 0x400000; // 4MB
+                    let flags = crate::mm::pte_flags::USER_RWX;
+
+                    outln!("Mapping user page at {:#x}...", test_addr);
+                    if let Some(phys) = crate::mm::mm_map_user_page(aspace, test_addr, flags) {
+                        outln!("  Mapped to physical: {:#x}", phys);
+                        outln!("  Working set size:   {}", (*aspace).working_set.current_size);
+                        outln!("");
+
+                        // Release the reference
+                        (*aspace).release();
+                        outln!("Released address space reference");
+                    } else {
+                        outln!("  Failed to map page");
+                        // Clean up
+                        (*aspace).release();
+                    }
+                }
+                None => {
+                    outln!("Failed to create address space");
+                }
+            }
+        }
+    } else if eq_ignore_case(args[0], "info") {
+        outln!("Address Space Statistics:");
+        outln!("");
+
+        let stats = crate::mm::mm_get_address_space_stats();
+        outln!("  Total:     {}", stats.total);
+        outln!("  Allocated: {}", stats.allocated);
+        outln!("  Free:      {}", stats.free);
+        outln!("");
+
+        let pfn_stats = crate::mm::mm_get_stats();
+        outln!("PFN Statistics:");
+        outln!("  Total Pages: {}", pfn_stats.total_pages);
+        outln!("  Free Pages:  {}", pfn_stats.free_pages);
+        outln!("  Used Pages:  {}", pfn_stats.total_pages - pfn_stats.free_pages);
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'userproc' for help");
+    }
+}

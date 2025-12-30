@@ -358,11 +358,78 @@ pub unsafe fn mm_create_address_space() -> Option<*mut MmAddressSpace> {
     aspace.flags.store(address_space_flags::AS_ACTIVE, Ordering::SeqCst);
     aspace.ref_count.store(1, Ordering::SeqCst);
 
-    // TODO: Allocate page tables
-    // For now, we don't have physical page allocation working
-    // aspace.pml4_physical = mm_allocate_page()? * PAGE_SIZE;
+    // Allocate page tables using the specialized function
+    if !mm_init_process_page_tables_unlocked(aspace) {
+        // Failed to allocate page tables, free the slot
+        ADDRESS_SPACE_BITMAP &= !(1u64 << idx);
+        FREE_ADDRESS_SPACES.fetch_add(1, Ordering::SeqCst);
+        return None;
+    }
 
     Some(aspace as *mut MmAddressSpace)
+}
+
+/// Create a new process address space with its own page tables
+///
+/// This allocates a PML4 for the process and copies kernel mappings
+/// from the system address space. Returns the address space with
+/// its own CR3 value.
+pub unsafe fn mm_create_process_address_space() -> Option<*mut MmAddressSpace> {
+    mm_create_address_space()
+}
+
+/// Initialize page tables for a process address space
+///
+/// This internal function allocates a PML4 and copies kernel mappings.
+/// Must be called with ADDRESS_SPACE_LOCK held.
+unsafe fn mm_init_process_page_tables_unlocked(aspace: &mut MmAddressSpace) -> bool {
+    // Allocate a physical page for the PML4
+    let pml4_pfn = match super::pfn::mm_allocate_zeroed_page() {
+        Some(pfn) => pfn,
+        None => {
+            crate::serial_println!("[MM] Failed to allocate PML4 for process");
+            return false;
+        }
+    };
+
+    let pml4_phys = (pml4_pfn * super::pfn::PAGE_SIZE) as u64;
+
+    // Get the system PML4 to copy kernel mappings
+    let system_pml4_phys = mm_get_cr3();
+
+    // The PML4 should be identity-mapped in low memory or we need to access it
+    // via a physical address mapping. For now, since low memory is identity-mapped,
+    // we can access it directly.
+    let new_pml4 = pml4_phys as *mut [u64; 512];
+    let system_pml4 = system_pml4_phys as *const [u64; 512];
+
+    // Clear user space entries (0-255)
+    for i in 0..256 {
+        (*new_pml4)[i] = 0;
+    }
+
+    // Copy kernel space entries (256-511) from system PML4
+    // This ensures the kernel is accessible from all processes
+    for i in 256..512 {
+        (*new_pml4)[i] = (*system_pml4)[i];
+    }
+
+    // Store the physical address
+    aspace.pml4_physical = pml4_phys;
+    aspace.flags.fetch_or(address_space_flags::AS_OWNS_PAGE_TABLES, Ordering::SeqCst);
+
+    crate::serial_println!("[MM] Created process address space (PML4={:#x})", pml4_phys);
+
+    true
+}
+
+/// Get current CR3 value
+fn mm_get_cr3() -> u64 {
+    let cr3: u64;
+    unsafe {
+        core::arch::asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack, preserves_flags));
+    }
+    cr3
 }
 
 /// Delete an address space
@@ -392,8 +459,18 @@ pub unsafe fn mm_delete_address_space(aspace: *mut MmAddressSpace) {
     // Mark as deleting
     aspace_ref.flags.fetch_or(address_space_flags::AS_DELETING, Ordering::SeqCst);
 
-    // TODO: Free all VADs and pages
-    // TODO: Free page tables
+    // Free page tables if this address space owns them
+    if (aspace_ref.flags.load(Ordering::SeqCst) & address_space_flags::AS_OWNS_PAGE_TABLES) != 0 {
+        if aspace_ref.pml4_physical != 0 {
+            // Free the PML4 page
+            let pml4_pfn = (aspace_ref.pml4_physical / super::pfn::PAGE_SIZE as u64) as usize;
+            super::pfn::mm_free_page(pml4_pfn);
+            crate::serial_println!("[MM] Freed process PML4 at {:#x}", aspace_ref.pml4_physical);
+        }
+    }
+
+    // TODO: Free all VADs and their associated pages
+    // For now, VADs are just cleared when the address space is reset
 
     // Clear the address space
     *aspace_ref = MmAddressSpace::new();
@@ -868,4 +945,90 @@ pub fn copy_to_user(dest_addr: u64, src: &[u8]) -> Option<usize> {
     }
 
     Some(size)
+}
+
+// ============================================================================
+// Process Address Space User Memory Mapping
+// ============================================================================
+
+/// Map a user page in a process address space
+///
+/// Allocates a physical page and maps it at the given virtual address
+/// in the process's address space with user-accessible permissions.
+///
+/// # Arguments
+/// * `aspace` - The process's address space
+/// * `virt_addr` - Virtual address to map (page-aligned)
+/// * `flags` - PTE flags (should include USER bit)
+///
+/// # Returns
+/// The physical address of the mapped page, or None on failure
+pub unsafe fn mm_map_user_page(
+    aspace: *mut MmAddressSpace,
+    virt_addr: u64,
+    flags: u64,
+) -> Option<u64> {
+    if aspace.is_null() {
+        return None;
+    }
+
+    let aspace_ref = &mut *aspace;
+
+    if aspace_ref.pml4_physical == 0 {
+        crate::serial_println!("[MM] Cannot map user page: no page tables");
+        return None;
+    }
+
+    // Allocate a physical page
+    let pfn = super::pfn::mm_allocate_zeroed_page()?;
+    let phys_addr = (pfn * super::pfn::PAGE_SIZE) as u64;
+
+    // Map the page in the process's address space
+    if super::pte::mm_map_page(aspace_ref.pml4_physical, virt_addr, phys_addr, flags).is_err() {
+        // Failed to map, free the page
+        super::pfn::mm_free_page(pfn);
+        crate::serial_println!("[MM] Failed to map user page at {:#x}", virt_addr);
+        return None;
+    }
+
+    // Add to working set
+    aspace_ref.working_set.add_page(virt_addr);
+    aspace_ref.add_virtual_size(super::pfn::PAGE_SIZE as u64);
+
+    Some(phys_addr)
+}
+
+/// Map multiple user pages in a process address space
+///
+/// # Arguments
+/// * `aspace` - The process's address space
+/// * `base_addr` - Starting virtual address (page-aligned)
+/// * `page_count` - Number of pages to map
+/// * `flags` - PTE flags (should include USER bit)
+///
+/// # Returns
+/// true if all pages were mapped, false on failure
+pub unsafe fn mm_map_user_range(
+    aspace: *mut MmAddressSpace,
+    base_addr: u64,
+    page_count: usize,
+    flags: u64,
+) -> bool {
+    for i in 0..page_count {
+        let virt_addr = base_addr + (i * super::pfn::PAGE_SIZE) as u64;
+        if mm_map_user_page(aspace, virt_addr, flags).is_none() {
+            // Failed to map, should ideally unmap already mapped pages
+            crate::serial_println!("[MM] Failed to map user range at page {}", i);
+            return false;
+        }
+    }
+    true
+}
+
+/// Get the CR3 (page table physical address) for an address space
+pub fn mm_get_address_space_cr3(aspace: *const MmAddressSpace) -> u64 {
+    if aspace.is_null() {
+        return 0;
+    }
+    unsafe { (*aspace).pml4_physical }
 }

@@ -159,6 +159,7 @@ const COMMANDS: &[&str] = &[
     "net", "ntfs",
     "ob", "obdir",
     "pagetable", "partition", "pci", "pe", "peb", "pfn", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "ps", "pwd",
+    "userproc",
     "quit",
     "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "rtl", "shutdown",
     "sc", "sched", "se", "section", "services", "smbios", "stack", "suspend", "sysinfo",
@@ -1034,6 +1035,8 @@ impl Shell {
             commands::cmd_time();
         } else if eq_ignore_case(cmd, "ps") || eq_ignore_case(cmd, "tasks") {
             commands::cmd_ps(&args[1..argc]);
+        } else if eq_ignore_case(cmd, "userproc") {
+            commands::cmd_userproc(&args[1..argc]);
         } else if eq_ignore_case(cmd, "history") {
             self.print_history();
         } else if eq_ignore_case(cmd, "reboot") {
