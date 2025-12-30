@@ -116,6 +116,9 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    sc <cmd>       Service control (Windows sc.exe)");
         outln!("    net start/stop Service management (Windows net.exe)");
         outln!("");
+        outln!("  Network:");
+        outln!("    netinfo <cmd>  Network diagnostics (status, devices, stats, arp, ping)");
+        outln!("");
         outln!("  Debugging:");
         outln!("    debug <cmd>    Kernel debug (bugcheck, break, regs)");
         outln!("    int <type>     Trigger interrupts (div0, break, gpf)");
@@ -15207,5 +15210,204 @@ pub fn cmd_userproc(args: &[&str]) {
     } else {
         outln!("Unknown command: {}", args[0]);
         outln!("Use 'userproc' for help");
+    }
+}
+
+/// NETINFO command - Network diagnostics and information
+pub fn cmd_netinfo(args: &[&str]) {
+    use crate::net;
+
+    if args.is_empty() {
+        outln!("Usage: netinfo <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  status     Show network subsystem status");
+        outln!("  devices    List registered network devices");
+        outln!("  stats      Show global network statistics");
+        outln!("  arp        Show ARP cache");
+        outln!("  ping <ip>  Send ICMP echo request");
+        outln!("  loopback   Process loopback queue");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "status") {
+        outln!("Network Subsystem Status:");
+        outln!("");
+        if net::is_initialized() {
+            outln!("  Status: Initialized");
+        } else {
+            outln!("  Status: Not Initialized");
+        }
+        outln!("  Devices: {}", net::get_device_count());
+
+        // Show loopback info
+        if let Some(idx) = net::loopback::get_device_index() {
+            let (queued, _) = net::loopback::get_queue_stats();
+            outln!("  Loopback: Device {} ({} packets queued)", idx, queued);
+        }
+        outln!("");
+
+        // Show global stats summary
+        let stats = net::get_stats();
+        outln!("Statistics Summary:");
+        outln!("  RX Packets: {}", stats.packets_received);
+        outln!("  TX Packets: {}", stats.packets_transmitted);
+        outln!("  RX Errors:  {}", stats.receive_errors);
+        outln!("  TX Errors:  {}", stats.transmit_errors);
+    } else if eq_ignore_case(args[0], "devices") {
+        outln!("Network Devices:");
+        outln!("");
+
+        let count = net::get_device_count();
+        if count == 0 {
+            outln!("  No devices registered");
+            return;
+        }
+
+        for i in 0..count {
+            if let Some(device) = net::get_device(i) {
+                outln!("Device {}:", i);
+                outln!("  Name:       {}", device.info.name);
+                outln!("  MAC:        {:?}", device.info.mac_address);
+                outln!("  State:      {:?}", device.state());
+                if let Some(ip) = device.ip_address {
+                    outln!("  IP:         {:?}", ip);
+                }
+                if let Some(mask) = device.subnet_mask {
+                    outln!("  Mask:       {:?}", mask);
+                }
+                if let Some(gw) = device.gateway {
+                    outln!("  Gateway:    {:?}", gw);
+                }
+                outln!("  Link Speed: {} Mbps", device.info.capabilities.link_speed);
+                outln!("  MTU:        {}", device.info.capabilities.mtu);
+                outln!("  RX Packets: {}", device.stats.rx_packets);
+                outln!("  TX Packets: {}", device.stats.tx_packets);
+                outln!("  RX Bytes:   {}", device.stats.rx_bytes);
+                outln!("  TX Bytes:   {}", device.stats.tx_bytes);
+                outln!("");
+            }
+        }
+    } else if eq_ignore_case(args[0], "stats") {
+        outln!("Global Network Statistics:");
+        outln!("");
+
+        let stats = net::get_stats();
+        outln!("  Packets Received:     {}", stats.packets_received);
+        outln!("  Packets Transmitted:  {}", stats.packets_transmitted);
+        outln!("  Bytes Received:       {}", stats.bytes_received);
+        outln!("  Bytes Transmitted:    {}", stats.bytes_transmitted);
+        outln!("  Receive Errors:       {}", stats.receive_errors);
+        outln!("  Transmit Errors:      {}", stats.transmit_errors);
+        outln!("");
+        outln!("Protocol Statistics:");
+        outln!("  ARP Requests Sent:    {}", stats.arp_requests);
+        outln!("  ARP Replies Received: {}", stats.arp_replies);
+        outln!("  ICMP Echo Requests:   {}", stats.icmp_echo_requests);
+        outln!("  ICMP Echo Replies:    {}", stats.icmp_echo_replies);
+    } else if eq_ignore_case(args[0], "arp") {
+        outln!("ARP Cache ({} entries):", net::arp::get_cache_count());
+        outln!("");
+
+        let entries = net::arp::get_cache_entries();
+        if entries.is_empty() {
+            outln!("  (empty)");
+            return;
+        }
+
+        outln!("  IP Address         MAC Address        Static  Age(ticks)");
+        outln!("  ---------------    -----------------  ------  ----------");
+
+        let current_time = crate::hal::apic::TICK_COUNT.load(core::sync::atomic::Ordering::Relaxed);
+        for entry in entries.iter() {
+            let age = current_time.saturating_sub(entry.timestamp);
+            let static_str = if entry.is_static { "Yes" } else { "No" };
+            outln!("  {:?}    {:?}  {}     {}",
+                entry.ip_address,
+                entry.mac_address,
+                static_str,
+                age
+            );
+        }
+    } else if eq_ignore_case(args[0], "ping") {
+        if args.len() < 2 {
+            outln!("Usage: netinfo ping <ip_address>");
+            outln!("  Example: netinfo ping 192.168.1.1");
+            return;
+        }
+
+        // Parse IP address (format: a.b.c.d)
+        let ip_str = args[1];
+        let mut octets = [0u8; 4];
+        let mut octet_idx = 0;
+        let mut current = 0u32;
+
+        for c in ip_str.chars() {
+            if c == '.' {
+                if octet_idx >= 3 || current > 255 {
+                    outln!("Invalid IP address format");
+                    return;
+                }
+                octets[octet_idx] = current as u8;
+                octet_idx += 1;
+                current = 0;
+            } else if let Some(d) = c.to_digit(10) {
+                current = current * 10 + d;
+            } else {
+                outln!("Invalid IP address format");
+                return;
+            }
+        }
+
+        if octet_idx != 3 || current > 255 {
+            outln!("Invalid IP address format");
+            return;
+        }
+        octets[3] = current as u8;
+
+        let target_ip = net::Ipv4Address::new(octets);
+        outln!("Pinging {:?}...", target_ip);
+
+        // Try to send ping (requires a device)
+        if net::get_device_count() == 0 {
+            outln!("  No network device available");
+            return;
+        }
+
+        // Use first device
+        let result = net::send_icmp_echo_request(
+            0,          // device index
+            target_ip,
+            0x1234,     // identifier
+            1,          // sequence
+            b"PING",    // data
+        );
+
+        match result {
+            Ok(()) => outln!("  Echo request sent"),
+            Err(e) => outln!("  Failed: {}", e),
+        }
+    } else if eq_ignore_case(args[0], "loopback") {
+        outln!("Loopback Device Status:");
+        outln!("");
+
+        if let Some(idx) = net::loopback::get_device_index() {
+            outln!("  Device Index: {}", idx);
+
+            let (queued, max) = net::loopback::get_queue_stats();
+            outln!("  Queue:        {}/{} packets", queued, max);
+
+            if queued > 0 {
+                outln!("");
+                outln!("Processing queued packets...");
+                let processed = net::loopback::process_queue();
+                outln!("  Processed {} packets", processed);
+            }
+        } else {
+            outln!("  Loopback device not initialized");
+        }
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'netinfo' for help");
     }
 }

@@ -14,6 +14,7 @@ pub mod ethernet;
 pub mod arp;
 pub mod ip;
 pub mod icmp;
+pub mod loopback;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::vec::Vec;
@@ -95,6 +96,12 @@ pub fn init() {
     icmp::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
+
+    // Initialize loopback device
+    if let Err(e) = loopback::init() {
+        crate::serial_println!("[NET] Warning: Failed to initialize loopback: {}", e);
+    }
+
     crate::serial_println!("[NET] Network subsystem initialized");
 }
 

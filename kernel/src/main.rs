@@ -416,6 +416,11 @@ fn phase1_init(boot_info: &BootInfo) {
     // Initialize Loader
     ldr::init();
 
+    // Initialize Network subsystem
+    kprintln!("  Initializing network subsystem...");
+    net::init();
+    kprintln!("  Network subsystem initialized");
+
     // Test file system by reading C:\TEST.TXT
     test_file_read();
 

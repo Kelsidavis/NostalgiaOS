@@ -156,7 +156,7 @@ const COMMANDS: &[&str] = &[
     "job", "ke", "keyedev",
     "ldr", "lookaside", "ls", "luid",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
-    "net", "ntfs",
+    "net", "netinfo", "ntfs",
     "ob", "obdir",
     "pagetable", "partition", "pci", "pe", "peb", "pfn", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "ps", "pwd",
     "userproc",
@@ -1063,6 +1063,9 @@ impl Shell {
             commands::cmd_sc(&args[1..argc]);
         } else if eq_ignore_case(cmd, "net") {
             commands::cmd_net(&args[1..argc]);
+        // Network diagnostics
+        } else if eq_ignore_case(cmd, "netinfo") {
+            commands::cmd_netinfo(&args[1..argc]);
         // PE loader commands
         } else if eq_ignore_case(cmd, "pe") {
             commands::cmd_pe(&args[1..argc]);
