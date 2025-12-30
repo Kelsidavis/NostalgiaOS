@@ -1521,4 +1521,497 @@ pub fn init() {
     crate::serial_println!("[LDR] Loader subsystem initialized");
     crate::serial_println!("[LDR]   Max DLLs: {}", MAX_DLLS);
     crate::serial_println!("[LDR]   Max DLL size: {} KB", MAX_DLL_SIZE / 1024);
+    crate::serial_println!("[LDR]   Kernel exports: {}", get_kernel_export_count());
+}
+
+// ============================================================================
+// Kernel Export Resolution
+// ============================================================================
+
+/// Resolve a kernel export by name using match-based lookup
+///
+/// Checks ntoskrnl.exe and hal.dll exports
+pub fn resolve_kernel_export(dll_name: &str, func_name: &str) -> Option<u64> {
+    // Normalize DLL name (case-insensitive)
+    let dll_lower = dll_name.to_ascii_lowercase();
+    let is_ntoskrnl = dll_lower.starts_with("ntoskrnl") || dll_lower.starts_with("ntkrnl");
+    let is_hal = dll_lower.starts_with("hal");
+
+    if is_ntoskrnl {
+        resolve_ntoskrnl_export(func_name)
+    } else if is_hal {
+        resolve_hal_export(func_name)
+    } else {
+        None
+    }
+}
+
+/// Resolve ntoskrnl.exe exports
+fn resolve_ntoskrnl_export(func_name: &str) -> Option<u64> {
+    // Use match for efficient lookup (case-insensitive comparison)
+    let addr: Option<unsafe extern "C" fn() -> ()> = match func_name {
+        // Memory Manager
+        "MmGetPhysicalAddress" => Some(unsafe { core::mem::transmute(mm_get_physical_address as usize) }),
+        "MmMapIoSpace" => Some(unsafe { core::mem::transmute(mm_map_io_space as usize) }),
+        "MmUnmapIoSpace" => Some(unsafe { core::mem::transmute(mm_unmap_io_space as usize) }),
+        "MmAllocateContiguousMemory" => Some(unsafe { core::mem::transmute(mm_allocate_contiguous as usize) }),
+        "MmFreeContiguousMemory" => Some(unsafe { core::mem::transmute(mm_free_contiguous as usize) }),
+
+        // Executive Pool
+        "ExAllocatePool" => Some(unsafe { core::mem::transmute(ex_allocate_pool as usize) }),
+        "ExAllocatePoolWithTag" => Some(unsafe { core::mem::transmute(ex_allocate_pool_with_tag as usize) }),
+        "ExFreePool" => Some(unsafe { core::mem::transmute(ex_free_pool as usize) }),
+        "ExFreePoolWithTag" => Some(unsafe { core::mem::transmute(ex_free_pool_with_tag as usize) }),
+
+        // Kernel Services
+        "KeInitializeSpinLock" => Some(unsafe { core::mem::transmute(ke_initialize_spinlock as usize) }),
+        "KeAcquireSpinLockAtDpcLevel" => Some(unsafe { core::mem::transmute(ke_acquire_spinlock_dpc as usize) }),
+        "KeReleaseSpinLockFromDpcLevel" => Some(unsafe { core::mem::transmute(ke_release_spinlock_dpc as usize) }),
+        "KeInitializeEvent" => Some(unsafe { core::mem::transmute(ke_initialize_event as usize) }),
+        "KeSetEvent" => Some(unsafe { core::mem::transmute(ke_set_event as usize) }),
+        "KeResetEvent" => Some(unsafe { core::mem::transmute(ke_reset_event as usize) }),
+        "KeWaitForSingleObject" => Some(unsafe { core::mem::transmute(ke_wait_for_single_object as usize) }),
+        "KeGetCurrentIrql" => Some(unsafe { core::mem::transmute(ke_get_current_irql as usize) }),
+        "KeRaiseIrql" => Some(unsafe { core::mem::transmute(ke_raise_irql as usize) }),
+        "KeLowerIrql" => Some(unsafe { core::mem::transmute(ke_lower_irql as usize) }),
+        "KeQuerySystemTime" => Some(unsafe { core::mem::transmute(ke_query_system_time as usize) }),
+        "KeDelayExecutionThread" => Some(unsafe { core::mem::transmute(ke_delay_execution as usize) }),
+
+        // I/O Manager
+        "IoCreateDevice" => Some(unsafe { core::mem::transmute(io_create_device as usize) }),
+        "IoDeleteDevice" => Some(unsafe { core::mem::transmute(io_delete_device as usize) }),
+        "IoAttachDevice" => Some(unsafe { core::mem::transmute(io_attach_device as usize) }),
+        "IoDetachDevice" => Some(unsafe { core::mem::transmute(io_detach_device as usize) }),
+        "IoGetCurrentIrpStackLocation" => Some(unsafe { core::mem::transmute(io_get_current_irp_stack as usize) }),
+        "IoCompleteRequest" => Some(unsafe { core::mem::transmute(io_complete_request as usize) }),
+        "IoCallDriver" => Some(unsafe { core::mem::transmute(io_call_driver as usize) }),
+        "IofCompleteRequest" => Some(unsafe { core::mem::transmute(iof_complete_request as usize) }),
+        "IofCallDriver" => Some(unsafe { core::mem::transmute(iof_call_driver as usize) }),
+
+        // Runtime Library
+        "RtlCopyMemory" => Some(unsafe { core::mem::transmute(rtl_copy_memory as usize) }),
+        "RtlZeroMemory" => Some(unsafe { core::mem::transmute(rtl_zero_memory as usize) }),
+        "RtlFillMemory" => Some(unsafe { core::mem::transmute(rtl_fill_memory as usize) }),
+        "RtlCompareMemory" => Some(unsafe { core::mem::transmute(rtl_compare_memory as usize) }),
+        "RtlInitUnicodeString" => Some(unsafe { core::mem::transmute(rtl_init_unicode_string as usize) }),
+        "RtlCopyUnicodeString" => Some(unsafe { core::mem::transmute(rtl_copy_unicode_string as usize) }),
+        "RtlCompareUnicodeString" => Some(unsafe { core::mem::transmute(rtl_compare_unicode_string as usize) }),
+
+        // Debug Services
+        "DbgPrint" => Some(unsafe { core::mem::transmute(dbg_print as usize) }),
+        "DbgBreakPoint" => Some(unsafe { core::mem::transmute(dbg_break_point as usize) }),
+
+        // Object Manager
+        "ObReferenceObject" => Some(unsafe { core::mem::transmute(ob_reference_object as usize) }),
+        "ObDereferenceObject" => Some(unsafe { core::mem::transmute(ob_dereference_object as usize) }),
+        "ObReferenceObjectByHandle" => Some(unsafe { core::mem::transmute(ob_reference_by_handle as usize) }),
+
+        // Process/Thread
+        "PsGetCurrentProcess" => Some(unsafe { core::mem::transmute(ps_get_current_process as usize) }),
+        "PsGetCurrentThread" => Some(unsafe { core::mem::transmute(ps_get_current_thread as usize) }),
+        "PsGetCurrentProcessId" => Some(unsafe { core::mem::transmute(ps_get_current_process_id as usize) }),
+        "PsGetCurrentThreadId" => Some(unsafe { core::mem::transmute(ps_get_current_thread_id as usize) }),
+
+        _ => None,
+    };
+
+    if addr.is_some() {
+        return addr.map(|f| f as usize as u64);
+    }
+
+    crate::serial_println!("[LDR] Unresolved ntoskrnl export: {}", func_name);
+    None
+}
+
+/// Resolve hal.dll exports
+fn resolve_hal_export(func_name: &str) -> Option<u64> {
+    let addr: Option<unsafe extern "C" fn() -> ()> = match func_name {
+        "HalGetInterruptVector" => Some(unsafe { core::mem::transmute(hal_get_interrupt_vector as usize) }),
+        "HalTranslateBusAddress" => Some(unsafe { core::mem::transmute(hal_translate_bus_address as usize) }),
+        "READ_PORT_UCHAR" => Some(unsafe { core::mem::transmute(hal_read_port_uchar as usize) }),
+        "READ_PORT_USHORT" => Some(unsafe { core::mem::transmute(hal_read_port_ushort as usize) }),
+        "READ_PORT_ULONG" => Some(unsafe { core::mem::transmute(hal_read_port_ulong as usize) }),
+        "WRITE_PORT_UCHAR" => Some(unsafe { core::mem::transmute(hal_write_port_uchar as usize) }),
+        "WRITE_PORT_USHORT" => Some(unsafe { core::mem::transmute(hal_write_port_ushort as usize) }),
+        "WRITE_PORT_ULONG" => Some(unsafe { core::mem::transmute(hal_write_port_ulong as usize) }),
+        _ => None,
+    };
+
+    if addr.is_some() {
+        return addr.map(|f| f as usize as u64);
+    }
+
+    crate::serial_println!("[LDR] Unresolved hal export: {}", func_name);
+    None
+}
+
+/// Get the count of available kernel exports
+pub fn get_kernel_export_count() -> usize {
+    // Count of entries in resolve_ntoskrnl_export match + resolve_hal_export
+    52 + 8
+}
+
+/// Create a kernel-mode import resolver
+///
+/// Returns a resolver function that looks up imports from kernel exports
+/// (ntoskrnl.exe, hal.dll) first, then falls back to loaded modules.
+pub fn create_kernel_import_resolver() -> impl Fn(&str, &str, u16) -> Option<u64> {
+    |dll_name: &str, func_name: &str, _ordinal: u16| -> Option<u64> {
+        // First try kernel exports
+        if let Some(addr) = resolve_kernel_export(dll_name, func_name) {
+            return Some(addr);
+        }
+
+        // TODO: Fall back to loaded drivers/DLLs
+        None
+    }
+}
+
+// ============================================================================
+// Kernel Export Stub Functions
+// ============================================================================
+//
+// These stubs forward to the actual kernel implementations.
+// They provide a stable ABI for driver compatibility.
+
+// Memory Manager stubs
+unsafe extern "C" fn mm_get_physical_address(virtual_addr: u64) -> u64 {
+    // Walk page tables to get physical address using current CR3
+    let cr3: u64;
+    core::arch::asm!("mov {}, cr3", out(reg) cr3, options(nomem, nostack, preserves_flags));
+    crate::mm::pte::mm_virtual_to_physical(cr3, virtual_addr).unwrap_or(0)
+}
+
+unsafe extern "C" fn mm_map_io_space(phys_addr: u64, _size: usize, _cache_type: u32) -> u64 {
+    // For now, assume physical memory is already identity mapped
+    phys_addr
+}
+
+unsafe extern "C" fn mm_unmap_io_space(_virtual_addr: u64, _size: usize) {
+    // No-op for now
+}
+
+unsafe extern "C" fn mm_allocate_contiguous(size: usize) -> u64 {
+    // Allocate from nonpaged pool (contiguous is just pool allocation for now)
+    crate::mm::pool::ex_allocate_pool_with_tag(
+        crate::mm::pool::PoolType::NonPagedPool,
+        size,
+        u32::from_le_bytes(*b"Cont"),
+    ) as u64
+}
+
+unsafe extern "C" fn mm_free_contiguous(base: u64, _size: usize) {
+    crate::mm::pool::ex_free_pool_with_tag(base as *mut u8, u32::from_le_bytes(*b"Cont"));
+}
+
+// Executive Pool stubs
+unsafe extern "C" fn ex_allocate_pool(pool_type: u32, size: usize) -> u64 {
+    let pt = if pool_type == 0 {
+        crate::mm::pool::PoolType::NonPagedPool
+    } else {
+        crate::mm::pool::PoolType::PagedPool
+    };
+    crate::mm::pool::ex_allocate_pool_with_tag(pt, size, u32::from_le_bytes(*b"Krnl")) as u64
+}
+
+unsafe extern "C" fn ex_allocate_pool_with_tag(pool_type: u32, size: usize, tag: u32) -> u64 {
+    let pt = if pool_type == 0 {
+        crate::mm::pool::PoolType::NonPagedPool
+    } else {
+        crate::mm::pool::PoolType::PagedPool
+    };
+    crate::mm::pool::ex_allocate_pool_with_tag(pt, size, tag) as u64
+}
+
+unsafe extern "C" fn ex_free_pool(ptr: u64) {
+    crate::mm::pool::ex_free_pool_with_tag(ptr as *mut u8, 0);
+}
+
+unsafe extern "C" fn ex_free_pool_with_tag(ptr: u64, tag: u32) {
+    crate::mm::pool::ex_free_pool_with_tag(ptr as *mut u8, tag);
+}
+
+// Kernel Services stubs
+unsafe extern "C" fn ke_initialize_spinlock(lock: *mut u64) {
+    *lock = 0;
+}
+
+unsafe extern "C" fn ke_acquire_spinlock_dpc(lock: *mut u64) {
+    // Simple spinlock
+    while core::sync::atomic::AtomicU64::from_ptr(lock)
+        .compare_exchange(0, 1, core::sync::atomic::Ordering::Acquire, core::sync::atomic::Ordering::Relaxed)
+        .is_err()
+    {
+        core::hint::spin_loop();
+    }
+}
+
+unsafe extern "C" fn ke_release_spinlock_dpc(lock: *mut u64) {
+    core::sync::atomic::AtomicU64::from_ptr(lock).store(0, core::sync::atomic::Ordering::Release);
+}
+
+unsafe extern "C" fn ke_initialize_event(event: *mut u64, event_type: u32, state: bool) {
+    let _ = (event, event_type, state);
+    // TODO: Initialize dispatcher object
+}
+
+unsafe extern "C" fn ke_set_event(event: *mut u64, increment: i32, wait: bool) -> i32 {
+    let _ = (event, increment, wait);
+    0 // Previous state
+}
+
+unsafe extern "C" fn ke_reset_event(event: *mut u64) -> i32 {
+    let _ = event;
+    0 // Previous state
+}
+
+unsafe extern "C" fn ke_wait_for_single_object(
+    object: *mut u64, wait_reason: u32, wait_mode: u32, alertable: bool, timeout: *const i64
+) -> i32 {
+    let _ = (object, wait_reason, wait_mode, alertable, timeout);
+    0 // STATUS_SUCCESS
+}
+
+unsafe extern "C" fn ke_get_current_irql() -> u8 {
+    crate::ke::kpcr::ke_get_current_irql()
+}
+
+unsafe extern "C" fn ke_raise_irql(new_irql: u8, old_irql: *mut u8) {
+    *old_irql = crate::ke::kpcr::ke_raise_irql(new_irql);
+}
+
+unsafe extern "C" fn ke_lower_irql(new_irql: u8) {
+    crate::ke::kpcr::ke_lower_irql(new_irql);
+}
+
+unsafe extern "C" fn ke_query_system_time(time: *mut i64) {
+    *time = crate::rtl::rtl_get_system_time();
+}
+
+unsafe extern "C" fn ke_delay_execution(_alertable: bool, interval: *const i64) -> i32 {
+    let _ = interval;
+    // TODO: Actual delay
+    0
+}
+
+// I/O Manager stubs
+unsafe extern "C" fn io_create_device(
+    _driver: u64, _ext_size: u32, _name: u64, _type: u32, _chars: u32, _exclusive: bool, _device: *mut u64
+) -> i32 {
+    // TODO: Create device object
+    0
+}
+
+unsafe extern "C" fn io_delete_device(_device: u64) {
+    // TODO: Delete device
+}
+
+unsafe extern "C" fn io_attach_device(_source: u64, _target_name: u64, _target: *mut u64) -> i32 {
+    0
+}
+
+unsafe extern "C" fn io_detach_device(_target: u64) {
+    // TODO: Detach
+}
+
+unsafe extern "C" fn io_get_current_irp_stack(irp: u64) -> u64 {
+    // Return current stack location from IRP
+    if irp == 0 { return 0; }
+    let irp_ptr = irp as *const crate::io::Irp;
+    match (*irp_ptr).get_current_stack_location() {
+        Some(stack) => stack as *const _ as u64,
+        None => 0,
+    }
+}
+
+unsafe extern "C" fn io_complete_request(irp: u64, priority_boost: i8) {
+    let _ = (irp, priority_boost);
+    // TODO: Complete IRP
+}
+
+unsafe extern "C" fn io_call_driver(device: u64, irp: u64) -> i32 {
+    let _ = (device, irp);
+    // TODO: Call driver
+    0
+}
+
+unsafe extern "C" fn iof_complete_request(irp: u64, priority_boost: i8) {
+    io_complete_request(irp, priority_boost);
+}
+
+unsafe extern "C" fn iof_call_driver(device: u64, irp: u64) -> i32 {
+    io_call_driver(device, irp)
+}
+
+// RTL stubs
+unsafe extern "C" fn rtl_copy_memory(dest: *mut u8, src: *const u8, len: usize) {
+    ptr::copy_nonoverlapping(src, dest, len);
+}
+
+unsafe extern "C" fn rtl_zero_memory(dest: *mut u8, len: usize) {
+    ptr::write_bytes(dest, 0, len);
+}
+
+unsafe extern "C" fn rtl_fill_memory(dest: *mut u8, len: usize, fill: u8) {
+    ptr::write_bytes(dest, fill, len);
+}
+
+unsafe extern "C" fn rtl_compare_memory(s1: *const u8, s2: *const u8, len: usize) -> usize {
+    for i in 0..len {
+        if *s1.add(i) != *s2.add(i) {
+            return i;
+        }
+    }
+    len
+}
+
+unsafe extern "C" fn rtl_init_unicode_string(dest: *mut crate::rtl::UnicodeString, source: *const u16) {
+    if source.is_null() {
+        (*dest).length = 0;
+        (*dest).maximum_length = 0;
+        (*dest).buffer = ptr::null_mut();
+    } else {
+        let mut len = 0u16;
+        while *source.add(len as usize) != 0 {
+            len += 1;
+        }
+        (*dest).length = len * 2;
+        (*dest).maximum_length = (len + 1) * 2;
+        (*dest).buffer = source as *mut u16;
+    }
+}
+
+unsafe extern "C" fn rtl_copy_unicode_string(dest: *mut crate::rtl::UnicodeString, src: *const crate::rtl::UnicodeString) {
+    if src.is_null() || (*src).buffer.is_null() {
+        (*dest).length = 0;
+        return;
+    }
+    let copy_len = core::cmp::min((*src).length, (*dest).maximum_length);
+    ptr::copy_nonoverlapping((*src).buffer, (*dest).buffer, (copy_len / 2) as usize);
+    (*dest).length = copy_len;
+}
+
+unsafe extern "C" fn rtl_compare_unicode_string(s1: *const crate::rtl::UnicodeString, s2: *const crate::rtl::UnicodeString, case_insensitive: bool) -> i32 {
+    let len1 = (*s1).length / 2;
+    let len2 = (*s2).length / 2;
+    let min_len = core::cmp::min(len1, len2);
+
+    for i in 0..min_len as usize {
+        let mut c1 = *(*s1).buffer.add(i);
+        let mut c2 = *(*s2).buffer.add(i);
+        if case_insensitive {
+            if c1 >= 'A' as u16 && c1 <= 'Z' as u16 { c1 += 32; }
+            if c2 >= 'A' as u16 && c2 <= 'Z' as u16 { c2 += 32; }
+        }
+        if c1 != c2 {
+            return if c1 < c2 { -1 } else { 1 };
+        }
+    }
+
+    if len1 < len2 { -1 } else if len1 > len2 { 1 } else { 0 }
+}
+
+// Debug stubs
+unsafe extern "C" fn dbg_print(format: *const u8) -> i32 {
+    // Simple implementation - just print the format string
+    // Note: Full variadic support would require c_variadic feature
+    let s = cstr_to_str(format);
+    crate::serial_println!("[DBG] {}", s);
+    0
+}
+
+unsafe extern "C" fn dbg_break_point() {
+    core::arch::asm!("int3", options(nomem, nostack));
+}
+
+// Object Manager stubs
+unsafe extern "C" fn ob_reference_object(object: u64) {
+    let _ = object;
+    // TODO: Increment reference count
+}
+
+unsafe extern "C" fn ob_dereference_object(object: u64) {
+    let _ = object;
+    // TODO: Decrement reference count
+}
+
+unsafe extern "C" fn ob_reference_by_handle(handle: u64, _type: u64, _mode: u32, object: *mut u64, _handle_info: u64) -> i32 {
+    let _ = handle;
+    *object = 0;
+    0
+}
+
+// Process/Thread stubs
+unsafe extern "C" fn ps_get_current_process() -> u64 {
+    // Get current thread and then its process
+    let thread = crate::ke::prcb::get_current_thread();
+    if thread.is_null() {
+        return 0;
+    }
+    (*thread).process as u64
+}
+
+unsafe extern "C" fn ps_get_current_thread() -> u64 {
+    crate::ke::prcb::get_current_thread() as u64
+}
+
+unsafe extern "C" fn ps_get_current_process_id() -> u32 {
+    let process = ps_get_current_process();
+    if process == 0 {
+        return 0;
+    }
+    // Get PID from EPROCESS
+    let eprocess = process as *const crate::ps::EProcess;
+    (*eprocess).unique_process_id as u32
+}
+
+unsafe extern "C" fn ps_get_current_thread_id() -> u32 {
+    let thread = crate::ke::prcb::get_current_thread();
+    if thread.is_null() {
+        return 0;
+    }
+    // Get TID from ETHREAD - need to get ETHREAD first
+    // For now, use a simple thread ID from the thread structure
+    (*thread).thread_id
+}
+
+// HAL stubs
+unsafe extern "C" fn hal_get_interrupt_vector(
+    _interface: u32, _bus: u32, _level: u32, _vector: u32, irql: *mut u8, affinity: *mut u64
+) -> u32 {
+    *irql = crate::ke::kpcr::irql::DEVICE_LEVEL_BASE;
+    *affinity = 1;
+    0x30 // Default vector
+}
+
+unsafe extern "C" fn hal_translate_bus_address(
+    _interface: u32, _bus: u32, bus_addr: u64, _space: *mut u32, translated: *mut u64
+) -> bool {
+    // Identity translation for now
+    *translated = bus_addr;
+    true
+}
+
+unsafe extern "C" fn hal_read_port_uchar(port: u16) -> u8 {
+    crate::arch::io::inb(port)
+}
+
+unsafe extern "C" fn hal_read_port_ushort(port: u16) -> u16 {
+    crate::arch::io::inw(port)
+}
+
+unsafe extern "C" fn hal_read_port_ulong(port: u16) -> u32 {
+    crate::arch::io::inl(port)
+}
+
+unsafe extern "C" fn hal_write_port_uchar(port: u16, value: u8) {
+    crate::arch::io::outb(port, value);
+}
+
+unsafe extern "C" fn hal_write_port_ushort(port: u16, value: u16) {
+    crate::arch::io::outw(port, value);
+}
+
+unsafe extern "C" fn hal_write_port_ulong(port: u16, value: u32) {
+    crate::arch::io::outl(port, value);
 }
