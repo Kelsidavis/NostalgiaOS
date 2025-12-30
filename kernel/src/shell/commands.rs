@@ -15266,6 +15266,8 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  ntp        Sync time with NTP server");
         outln!("  wol        Send Wake-on-LAN packet");
         outln!("  tftp       Download file via TFTP");
+        outln!("  ftp        FTP file transfer");
+        outln!("  syslog     Configure syslog client");
         return;
     }
 
@@ -16438,6 +16440,183 @@ pub fn cmd_netinfo(args: &[&str]) {
                 }
             }
             Err(e) => outln!("TFTP download failed: {}", e),
+        }
+    } else if eq_ignore_case(args[0], "ftp") {
+        // FTP client
+        if args.len() < 2 {
+            outln!("Usage: netinfo ftp <command> [args]");
+            outln!("");
+            outln!("Commands:");
+            outln!("  connect <ip> [port]  Connect to FTP server");
+            outln!("  login <user> <pass>  Login to server");
+            outln!("  pwd                  Show current directory");
+            outln!("  cd <dir>             Change directory");
+            outln!("  ls                   List directory");
+            outln!("  get <file>           Download file");
+            outln!("  quit                 Disconnect from server");
+            outln!("  stats                Show FTP statistics");
+            return;
+        }
+
+        if eq_ignore_case(args[1], "stats") {
+            let (sessions, downloads, uploads, bytes) = net::ftp::get_stats();
+            outln!("FTP Statistics:");
+            outln!("  Sessions opened: {}", sessions);
+            outln!("  Files downloaded: {}", downloads);
+            outln!("  Files uploaded: {}", uploads);
+            outln!("  Bytes transferred: {}", bytes);
+        } else if eq_ignore_case(args[1], "connect") {
+            if args.len() < 3 {
+                outln!("Usage: netinfo ftp connect <ip> [port]");
+                return;
+            }
+
+            // Find a device with IP
+            let device_idx = (0..net::get_device_count())
+                .find(|&i| net::get_device(i).map(|d| d.ip_address.is_some()).unwrap_or(false))
+                .unwrap_or(0);
+
+            // Parse IP address
+            let ip_str = args[2];
+            let mut octets = [0u8; 4];
+            let mut octet_idx = 0;
+            let mut current: u16 = 0;
+            let mut valid = true;
+
+            for c in ip_str.chars() {
+                if c == '.' {
+                    if current > 255 || octet_idx >= 3 {
+                        valid = false;
+                        break;
+                    }
+                    octets[octet_idx] = current as u8;
+                    octet_idx += 1;
+                    current = 0;
+                } else if let Some(digit) = c.to_digit(10) {
+                    current = current * 10 + digit as u16;
+                } else {
+                    valid = false;
+                    break;
+                }
+            }
+
+            if valid && octet_idx == 3 && current <= 255 {
+                octets[3] = current as u8;
+            } else {
+                outln!("Invalid IP address: {}", args[2]);
+                return;
+            }
+
+            let server_ip = net::ip::Ipv4Address::new(octets);
+
+            outln!("Connecting to {:?}:21...", server_ip);
+
+            let mut session = net::ftp::FtpSession::new(device_idx, server_ip);
+            match session.connect() {
+                Ok(_) => {
+                    outln!("Connected to FTP server");
+                    outln!("Use 'netinfo ftp login <user> <pass>' to login");
+                }
+                Err(e) => outln!("Connection failed: {}", e),
+            }
+        } else {
+            outln!("Unknown FTP command: {}", args[1]);
+            outln!("Use 'netinfo ftp' for help");
+        }
+    } else if eq_ignore_case(args[0], "syslog") {
+        // Syslog client
+        if args.len() < 2 {
+            outln!("Usage: netinfo syslog <command> [args]");
+            outln!("");
+            outln!("Commands:");
+            outln!("  server <ip> [port]   Set syslog server");
+            outln!("  send <msg>           Send test message");
+            outln!("  facility <name>      Set default facility");
+            outln!("  stats                Show syslog statistics");
+            return;
+        }
+
+        if eq_ignore_case(args[1], "stats") {
+            let stats = net::syslog::get_stats();
+            outln!("Syslog Statistics:");
+            outln!("  Messages sent: {}", stats.messages_sent);
+            outln!("  Bytes sent: {}", stats.bytes_sent);
+            outln!("  Errors: {}", stats.errors);
+            if let Some(server) = net::syslog::get_server() {
+                outln!("  Server: {:?}:{}", server.0, server.1);
+            } else {
+                outln!("  Server: not configured");
+            }
+        } else if eq_ignore_case(args[1], "server") {
+            if args.len() < 3 {
+                outln!("Usage: netinfo syslog server <ip> [port]");
+                return;
+            }
+
+            // Parse IP address
+            let ip_str = args[2];
+            let mut octets = [0u8; 4];
+            let mut octet_idx = 0;
+            let mut current: u16 = 0;
+            let mut valid = true;
+
+            for c in ip_str.chars() {
+                if c == '.' {
+                    if current > 255 || octet_idx >= 3 {
+                        valid = false;
+                        break;
+                    }
+                    octets[octet_idx] = current as u8;
+                    octet_idx += 1;
+                    current = 0;
+                } else if let Some(digit) = c.to_digit(10) {
+                    current = current * 10 + digit as u16;
+                } else {
+                    valid = false;
+                    break;
+                }
+            }
+
+            if valid && octet_idx == 3 && current <= 255 {
+                octets[3] = current as u8;
+            } else {
+                outln!("Invalid IP address: {}", args[2]);
+                return;
+            }
+
+            let server_ip = net::ip::Ipv4Address::new(octets);
+            let port = if args.len() > 3 {
+                args[3].parse().unwrap_or(514)
+            } else {
+                514
+            };
+
+            // Find a device with IP
+            let device_idx = (0..net::get_device_count())
+                .find(|&i| net::get_device(i).map(|d| d.ip_address.is_some()).unwrap_or(false))
+                .unwrap_or(0);
+
+            net::syslog::set_server(device_idx, server_ip, port);
+            outln!("Syslog server set to {:?}:{}", server_ip, port);
+        } else if eq_ignore_case(args[1], "send") {
+            if args.len() < 3 {
+                outln!("Usage: netinfo syslog send <message>");
+                return;
+            }
+
+            let message = args[2..].join(" ");
+
+            match net::syslog::send_with_facility(
+                net::syslog::Facility::User,
+                net::syslog::Severity::Info,
+                &message,
+            ) {
+                Ok(_) => outln!("Syslog message sent"),
+                Err(e) => outln!("Failed to send syslog: {}", e),
+            }
+        } else {
+            outln!("Unknown syslog command: {}", args[1]);
+            outln!("Use 'netinfo syslog' for help");
         }
     } else {
         outln!("Unknown command: {}", args[0]);

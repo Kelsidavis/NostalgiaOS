@@ -167,6 +167,15 @@ static SYSLOG_LOCK: SpinLock<()> = SpinLock::new(());
 /// Statistics
 static MESSAGES_SENT: AtomicU32 = AtomicU32::new(0);
 static MESSAGES_DROPPED: AtomicU32 = AtomicU32::new(0);
+static BYTES_SENT: AtomicU32 = AtomicU32::new(0);
+
+/// Syslog statistics
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SyslogStats {
+    pub messages_sent: u32,
+    pub bytes_sent: u32,
+    pub errors: u32,
+}
 
 /// Calculate syslog priority value
 fn calculate_priority(facility: Facility, severity: Severity) -> u8 {
@@ -350,6 +359,7 @@ pub fn send_with_facility(
 
     if result.is_ok() {
         MESSAGES_SENT.fetch_add(1, Ordering::Relaxed);
+        BYTES_SENT.fetch_add(packet.len() as u32, Ordering::Relaxed);
         Ok(())
     } else {
         MESSAGES_DROPPED.fetch_add(1, Ordering::Relaxed);
@@ -391,11 +401,40 @@ pub fn debug(message: &str) -> Result<(), &'static str> {
 }
 
 /// Get syslog statistics
-pub fn get_stats() -> (u32, u32) {
-    (
-        MESSAGES_SENT.load(Ordering::Relaxed),
-        MESSAGES_DROPPED.load(Ordering::Relaxed),
-    )
+pub fn get_stats() -> SyslogStats {
+    SyslogStats {
+        messages_sent: MESSAGES_SENT.load(Ordering::Relaxed),
+        bytes_sent: BYTES_SENT.load(Ordering::Relaxed),
+        errors: MESSAGES_DROPPED.load(Ordering::Relaxed),
+    }
+}
+
+/// Get configured syslog server
+pub fn get_server() -> Option<(Ipv4Address, u16)> {
+    let _guard = SYSLOG_LOCK.lock();
+    unsafe {
+        SYSLOG_CONFIG.as_ref().map(|c| (c.server_ip, c.server_port))
+    }
+}
+
+/// Set syslog server
+pub fn set_server(device_index: usize, server_ip: Ipv4Address, port: u16) {
+    let _guard = SYSLOG_LOCK.lock();
+    unsafe {
+        if let Some(ref mut config) = SYSLOG_CONFIG {
+            config.device_index = device_index;
+            config.server_ip = server_ip;
+            config.server_port = port;
+        } else {
+            let mut config = SyslogConfig::default();
+            config.device_index = device_index;
+            config.server_ip = server_ip;
+            config.server_port = port;
+            SYSLOG_CONFIG = Some(config);
+        }
+    }
+    SYSLOG_ENABLED.store(true, Ordering::SeqCst);
+    crate::serial_println!("[SYSLOG] Server configured: {:?}:{}", server_ip, port);
 }
 
 /// Initialize syslog module

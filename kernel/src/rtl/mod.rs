@@ -39,11 +39,13 @@ pub mod compress;
 pub mod gen8dot3;
 pub mod hash;
 pub mod heap;
+pub mod hex;
 pub mod image;
 pub mod memory;
 pub mod random;
 pub mod string;
 pub mod time;
+pub mod uuid;
 // pub mod splay;  // TODO: Splay trees
 
 // Re-exports for convenience
@@ -56,8 +58,10 @@ pub use compress::*;
 pub use gen8dot3::*;
 pub use hash::*;
 pub use heap::*;
+pub use hex::{encode as hex_encode, decode as hex_decode};
 pub use image::*;
 pub use memory::*;
 pub use random::*;
 pub use string::*;
 pub use time::*;
+pub use uuid::{Uuid, create_uuid, create_sequential_uuid};
