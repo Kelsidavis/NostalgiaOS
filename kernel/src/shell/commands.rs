@@ -17301,3 +17301,104 @@ pub fn cmd_timeserv(args: &[&str]) {
         outln!("Use 'timeserv' for help");
     }
 }
+
+/// Discard server command
+pub fn cmd_discard(args: &[&str]) {
+    use crate::net::discard;
+
+    if args.is_empty() {
+        outln!("Usage: discard <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  start       Start UDP discard server");
+        outln!("  stop        Stop UDP discard server");
+        outln!("  stats       Show discard service statistics");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "stats") {
+        let stats = discard::get_stats();
+        outln!("Discard Service Statistics:");
+        outln!("  UDP Server:  {}", if stats.udp_running { "Running" } else { "Stopped" });
+        outln!("  Packets:     {}", stats.packets);
+        outln!("  Bytes:       {}", stats.bytes);
+    } else if eq_ignore_case(args[0], "start") {
+        match discard::start_discard_udp() {
+            Ok(_) => outln!("UDP discard server started on port 9"),
+            Err(e) => outln!("Failed to start discard server: {}", e),
+        }
+    } else if eq_ignore_case(args[0], "stop") {
+        discard::stop_discard_udp();
+        outln!("UDP discard server stopped");
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'discard' for help");
+    }
+}
+
+/// Daytime server command
+pub fn cmd_daytime(args: &[&str]) {
+    use crate::net::daytime;
+
+    if args.is_empty() {
+        outln!("Usage: daytime <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  start       Start UDP daytime server");
+        outln!("  stop        Stop UDP daytime server");
+        outln!("  stats       Show daytime service statistics");
+        outln!("  now         Display current daytime string");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "stats") {
+        let stats = daytime::get_stats();
+        outln!("Daytime Service Statistics:");
+        outln!("  UDP Server:  {}", if stats.udp_running { "Running" } else { "Stopped" });
+        outln!("  Requests:    {}", stats.requests);
+    } else if eq_ignore_case(args[0], "start") {
+        match daytime::start_daytime_udp() {
+            Ok(_) => outln!("UDP daytime server started on port 13"),
+            Err(e) => outln!("Failed to start daytime server: {}", e),
+        }
+    } else if eq_ignore_case(args[0], "stop") {
+        daytime::stop_daytime_udp();
+        outln!("UDP daytime server stopped");
+    } else if eq_ignore_case(args[0], "now") {
+        let daytime_str = daytime::format_daytime();
+        out!("{}", daytime_str);
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'daytime' for help");
+    }
+}
+
+/// Finger protocol command
+pub fn cmd_finger(args: &[&str]) {
+    use crate::net::finger;
+
+    if args.is_empty() {
+        outln!("Usage: finger <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  stats       Show finger statistics");
+        outln!("  info [user] Show local user info");
+        outln!("");
+        outln!("Note: Finger client queries require external server.");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "stats") {
+        let stats = finger::get_stats();
+        outln!("Finger Statistics:");
+        outln!("  Queries:  {}", stats.queries);
+    } else if eq_ignore_case(args[0], "info") {
+        // Show local system info using finger format
+        let query = if args.len() > 1 { args[1] } else { "" };
+        let response = finger::generate_finger_response(query);
+        out!("{}", response);
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'finger' for help");
+    }
+}

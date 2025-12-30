@@ -149,8 +149,8 @@ const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq",
     "blocks", "bt",
     "cache", "callback", "cat", "cc", "cd", "cid", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
-    "debug", "del", "desc", "descriptor", "devdrv", "dir", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
-    "files",
+    "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
+    "files", "finger",
     "hal", "handles", "heap", "help", "history", "hpet",
     "int", "io", "iocp", "ioq", "irql", "irqstat",
     "job", "ke", "keyedev",
@@ -1285,6 +1285,15 @@ impl Shell {
         // TIME protocol server
         } else if eq_ignore_case(cmd, "timeserv") {
             commands::cmd_timeserv(&args[1..argc]);
+        // Discard server
+        } else if eq_ignore_case(cmd, "discard") {
+            commands::cmd_discard(&args[1..argc]);
+        // Daytime server
+        } else if eq_ignore_case(cmd, "daytime") {
+            commands::cmd_daytime(&args[1..argc]);
+        // Finger server
+        } else if eq_ignore_case(cmd, "finger") {
+            commands::cmd_finger(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

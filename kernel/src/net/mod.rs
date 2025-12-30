@@ -33,6 +33,9 @@ pub mod snmp;
 pub mod echo;
 pub mod qotd;
 pub mod time;
+pub mod discard;
+pub mod daytime;
+pub mod finger;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::vec::Vec;
@@ -130,6 +133,9 @@ pub fn init() {
     echo::init();
     qotd::init();
     time::init();
+    discard::init();
+    daytime::init();
+    finger::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 
