@@ -15238,6 +15238,7 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  listen     Listen on TCP port");
         outln!("  http       Make HTTP GET request");
         outln!("  telnet     Start/stop telnet server");
+        outln!("  httpd      Start/stop HTTP server");
         return;
     }
 
@@ -16105,6 +16106,82 @@ pub fn cmd_netinfo(args: &[&str]) {
                 outln!("  Status: Not running");
                 outln!("");
                 outln!("Use 'netinfo telnet start' to start the server");
+            }
+        }
+    } else if eq_ignore_case(args[0], "httpd") {
+        // Usage: netinfo httpd [start|stop|status]
+        let subcmd = if args.len() >= 2 { args[1] } else { "status" };
+
+        if eq_ignore_case(subcmd, "start") {
+            // Find first non-loopback device with IP
+            let device_idx = {
+                let mut found = None;
+                for i in 0..net::get_device_count() {
+                    if let Some(device) = net::get_device(i) {
+                        if device.info.name != "lo0" && device.ip_address.is_some() {
+                            found = Some(i);
+                            break;
+                        }
+                    }
+                }
+                match found {
+                    Some(i) => i,
+                    None => {
+                        outln!("No network device with IP configured");
+                        outln!("Use 'netinfo ipconfig' to configure an IP address first");
+                        return;
+                    }
+                }
+            };
+
+            let port = if args.len() >= 3 {
+                args[2].parse().unwrap_or(80)
+            } else {
+                80
+            };
+
+            outln!("Starting HTTP server on port {}...", port);
+
+            match net::httpd::start_server(device_idx, port) {
+                Ok(()) => {
+                    if let Some(device) = net::get_device(device_idx) {
+                        if let Some(ip) = device.ip_address {
+                            outln!("HTTP server started");
+                            outln!("");
+                            outln!("Access at: http://{:?}:{}/", ip, port);
+                        }
+                    }
+                }
+                Err(e) => outln!("Failed to start HTTP server: {}", e),
+            }
+        } else if eq_ignore_case(subcmd, "stop") {
+            match net::httpd::stop_server() {
+                Ok(()) => outln!("HTTP server stopped"),
+                Err(e) => outln!("Failed to stop HTTP server: {}", e),
+            }
+        } else if eq_ignore_case(subcmd, "poll") {
+            // Poll server (for debugging)
+            net::httpd::poll();
+            outln!("HTTP server polled");
+        } else {
+            // Show status
+            let (running, port, requests, bytes) = net::httpd::get_status();
+            let connections = net::httpd::get_connection_count();
+
+            outln!("HTTP Server Status:");
+            outln!("");
+
+            if running {
+                outln!("  Status: Running on port {}", port);
+                outln!("  Active connections: {}", connections);
+                outln!("  Total requests: {}", requests);
+                outln!("  Bytes sent: {}", bytes);
+                outln!("");
+                outln!("Use 'netinfo httpd stop' to stop the server");
+            } else {
+                outln!("  Status: Not running");
+                outln!("");
+                outln!("Use 'netinfo httpd start' to start the server");
             }
         }
     } else {
