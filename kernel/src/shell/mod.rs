@@ -151,17 +151,17 @@ const COMMANDS: &[&str] = &[
     "cache", "callback", "cat", "cc", "cd", "cid", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
     "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
     "files", "finger",
-    "hal", "handles", "heap", "help", "history", "hpet",
+    "hal", "handles", "heap", "help", "history", "hostname", "hpet",
     "ident", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
     "job", "ke", "keyedev",
     "ldr", "lookaside", "ls", "luid",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
-    "net", "netinfo", "netserv", "netstat", "ntfs",
+    "net", "netinfo", "netserv", "netstat", "nslookup", "ntfs",
     "ob", "obdir",
-    "pagetable", "partition", "pci", "pe", "peb", "pfn", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "ps", "pwd",
+    "pagetable", "partition", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "ps", "pwd",
     "qotd", "quit",
     "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "route", "rtl", "shutdown",
-    "sc", "sched", "se", "section", "services", "smbios", "stack", "suspend", "sysinfo",
+    "sc", "sched", "se", "section", "services", "smbios", "stack", "suspend", "sysinfo", "systeminfo",
     "tasks", "teb", "time", "timer", "timerq", "timeserv", "touch", "tracert", "type",
     "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "version", "volumes",
@@ -1318,6 +1318,18 @@ impl Shell {
         // ARP cache
         } else if eq_ignore_case(cmd, "arp") {
             commands::cmd_arp(&args[1..argc]);
+        // Hostname
+        } else if eq_ignore_case(cmd, "hostname") {
+            commands::cmd_hostname(&args[1..argc]);
+        // Ping
+        } else if eq_ignore_case(cmd, "ping") {
+            commands::cmd_ping(&args[1..argc]);
+        // DNS lookup
+        } else if eq_ignore_case(cmd, "nslookup") {
+            commands::cmd_nslookup(&args[1..argc]);
+        // System information
+        } else if eq_ignore_case(cmd, "systeminfo") {
+            commands::cmd_systeminfo(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
