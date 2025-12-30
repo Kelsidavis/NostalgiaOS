@@ -19649,3 +19649,402 @@ pub fn cmd_find(args: &[&str]) {
         outln!("{}", match_count);
     }
 }
+
+/// HEAD command - display first N lines of a file
+pub fn cmd_head(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Displays the first lines of a file.");
+        outln!("");
+        outln!("HEAD [-n N] filename");
+        outln!("");
+        outln!("  -n N     Number of lines to display (default: 10)");
+        return;
+    }
+
+    let mut num_lines = 10usize;
+    let mut filename = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i];
+        if arg == "-n" || arg == "/n" {
+            if i + 1 < args.len() {
+                if let Ok(n) = args[i + 1].parse::<usize>() {
+                    num_lines = n;
+                }
+                i += 2;
+                continue;
+            }
+        } else if arg.starts_with("-n") {
+            if let Ok(n) = arg[2..].parse::<usize>() {
+                num_lines = n;
+            }
+        } else if !arg.starts_with('-') && !arg.starts_with('/') {
+            filename = Some(arg);
+        }
+        i += 1;
+    }
+
+    let Some(file) = filename else {
+        outln!("HEAD: No file specified");
+        return;
+    };
+
+    let path = resolve_path(file);
+    let handle = match fs::open(&path, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            outln!("HEAD: Cannot open file: {:?}", e);
+            return;
+        }
+    };
+
+    let mut buf = [0u8; 4096];
+    let mut line_buf = alloc::vec::Vec::new();
+    let mut lines_shown = 0usize;
+
+    'outer: loop {
+        match fs::read(handle, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                for &b in &buf[..n] {
+                    if b == b'\n' {
+                        if let Ok(line) = core::str::from_utf8(&line_buf) {
+                            outln!("{}", line);
+                            lines_shown += 1;
+                            if lines_shown >= num_lines {
+                                break 'outer;
+                            }
+                        }
+                        line_buf.clear();
+                    } else if b != b'\r' {
+                        line_buf.push(b);
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    // Print remaining partial line if we haven't shown enough
+    if lines_shown < num_lines && !line_buf.is_empty() {
+        if let Ok(line) = core::str::from_utf8(&line_buf) {
+            outln!("{}", line);
+        }
+    }
+
+    let _ = fs::close(handle);
+}
+
+/// TAIL command - display last N lines of a file
+pub fn cmd_tail(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Displays the last lines of a file.");
+        outln!("");
+        outln!("TAIL [-n N] filename");
+        outln!("");
+        outln!("  -n N     Number of lines to display (default: 10)");
+        return;
+    }
+
+    let mut num_lines = 10usize;
+    let mut filename = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i];
+        if arg == "-n" || arg == "/n" {
+            if i + 1 < args.len() {
+                if let Ok(n) = args[i + 1].parse::<usize>() {
+                    num_lines = n;
+                }
+                i += 2;
+                continue;
+            }
+        } else if arg.starts_with("-n") {
+            if let Ok(n) = arg[2..].parse::<usize>() {
+                num_lines = n;
+            }
+        } else if !arg.starts_with('-') && !arg.starts_with('/') {
+            filename = Some(arg);
+        }
+        i += 1;
+    }
+
+    let Some(file) = filename else {
+        outln!("TAIL: No file specified");
+        return;
+    };
+
+    let path = resolve_path(file);
+    let handle = match fs::open(&path, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            outln!("TAIL: Cannot open file: {:?}", e);
+            return;
+        }
+    };
+
+    // Read entire file to get last N lines
+    let mut all_lines: alloc::vec::Vec<alloc::string::String> = alloc::vec::Vec::new();
+    let mut buf = [0u8; 4096];
+    let mut line_buf = alloc::vec::Vec::new();
+
+    loop {
+        match fs::read(handle, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                for &b in &buf[..n] {
+                    if b == b'\n' {
+                        if let Ok(line) = core::str::from_utf8(&line_buf) {
+                            all_lines.push(alloc::string::String::from(line));
+                        }
+                        line_buf.clear();
+                    } else if b != b'\r' {
+                        line_buf.push(b);
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    // Add last line if no trailing newline
+    if !line_buf.is_empty() {
+        if let Ok(line) = core::str::from_utf8(&line_buf) {
+            all_lines.push(alloc::string::String::from(line));
+        }
+    }
+
+    let _ = fs::close(handle);
+
+    // Display last N lines
+    let start = if all_lines.len() > num_lines {
+        all_lines.len() - num_lines
+    } else {
+        0
+    };
+
+    for line in &all_lines[start..] {
+        outln!("{}", line);
+    }
+}
+
+/// WC command - count lines, words, and characters
+pub fn cmd_wc(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Counts lines, words, and characters in a file.");
+        outln!("");
+        outln!("WC [-l] [-w] [-c] filename");
+        outln!("");
+        outln!("  -l   Count lines only");
+        outln!("  -w   Count words only");
+        outln!("  -c   Count characters only");
+        return;
+    }
+
+    let mut count_lines_only = false;
+    let mut count_words_only = false;
+    let mut count_chars_only = false;
+    let mut filename = None;
+
+    for arg in args {
+        if *arg == "-l" || *arg == "/l" {
+            count_lines_only = true;
+        } else if *arg == "-w" || *arg == "/w" {
+            count_words_only = true;
+        } else if *arg == "-c" || *arg == "/c" {
+            count_chars_only = true;
+        } else if !arg.starts_with('-') && !arg.starts_with('/') {
+            filename = Some(*arg);
+        }
+    }
+
+    let Some(file) = filename else {
+        outln!("WC: No file specified");
+        return;
+    };
+
+    let path = resolve_path(file);
+    let handle = match fs::open(&path, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            outln!("WC: Cannot open file: {:?}", e);
+            return;
+        }
+    };
+
+    let mut line_count = 0usize;
+    let mut word_count = 0usize;
+    let mut char_count = 0usize;
+    let mut in_word = false;
+
+    let mut buf = [0u8; 4096];
+
+    loop {
+        match fs::read(handle, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                for &b in &buf[..n] {
+                    char_count += 1;
+
+                    if b == b'\n' {
+                        line_count += 1;
+                        if in_word {
+                            word_count += 1;
+                            in_word = false;
+                        }
+                    } else if b == b' ' || b == b'\t' || b == b'\r' {
+                        if in_word {
+                            word_count += 1;
+                            in_word = false;
+                        }
+                    } else {
+                        in_word = true;
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    // Count last word if file doesn't end with whitespace
+    if in_word {
+        word_count += 1;
+    }
+
+    let _ = fs::close(handle);
+
+    if count_lines_only {
+        outln!("{}", line_count);
+    } else if count_words_only {
+        outln!("{}", word_count);
+    } else if count_chars_only {
+        outln!("{}", char_count);
+    } else {
+        outln!("{:>8} {:>8} {:>8} {}", line_count, word_count, char_count, file);
+    }
+}
+
+/// PATH command - display or modify system PATH
+pub fn cmd_path(args: &[&str]) {
+    if args.is_empty() {
+        // Display current PATH
+        if let Some(path_val) = get_env_var("PATH") {
+            outln!("PATH={}", path_val);
+        } else {
+            outln!("PATH=");
+        }
+        return;
+    }
+
+    // Set PATH
+    let new_path = args.join(" ");
+
+    // Handle PATH= syntax
+    let path_value = if let Some(stripped) = new_path.strip_prefix("PATH=") {
+        alloc::string::String::from(stripped)
+    } else if let Some(stripped) = new_path.strip_prefix("path=") {
+        alloc::string::String::from(stripped)
+    } else {
+        new_path
+    };
+
+    set_env_var("PATH", &path_value);
+    outln!("PATH={}", path_value);
+}
+
+/// REPLACE command - replace file(s)
+pub fn cmd_replace(args: &[&str]) {
+    if args.len() < 2 {
+        outln!("Replaces files.");
+        outln!("");
+        outln!("REPLACE source destination");
+        outln!("");
+        outln!("  source       Source file");
+        outln!("  destination  Destination file or directory");
+        outln!("");
+        outln!("Note: This is a simple copy operation for now.");
+        return;
+    }
+
+    let src = args[0];
+    let dst = args[1];
+
+    let src_path = resolve_path(src);
+    let dst_path = resolve_path(dst);
+
+    // Read source file
+    let src_handle = match fs::open(&src_path, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            outln!("REPLACE: Cannot open source file: {:?}", e);
+            return;
+        }
+    };
+
+    let mut content = alloc::vec::Vec::new();
+    let mut buf = [0u8; 4096];
+
+    loop {
+        match fs::read(src_handle, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => content.extend_from_slice(&buf[..n]),
+            Err(e) => {
+                outln!("REPLACE: Error reading source: {:?}", e);
+                let _ = fs::close(src_handle);
+                return;
+            }
+        }
+    }
+    let _ = fs::close(src_handle);
+
+    // Create/overwrite destination
+    let dst_handle = match fs::create(&dst_path, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            outln!("REPLACE: Cannot create destination: {:?}", e);
+            return;
+        }
+    };
+
+    match fs::write(dst_handle, &content) {
+        Ok(_) => {
+            outln!("Replacing {} -> {}", src_path, dst_path);
+            outln!("1 file(s) replaced");
+        }
+        Err(e) => {
+            outln!("REPLACE: Error writing destination: {:?}", e);
+        }
+    }
+
+    let _ = fs::close(dst_handle);
+}
+
+/// CHCP command - display or set code page (stub)
+pub fn cmd_chcp(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Active code page: 437");
+        return;
+    }
+
+    if let Ok(cp) = args[0].parse::<u32>() {
+        outln!("Active code page: {}", cp);
+        outln!("(Note: Code page change not actually implemented)");
+    } else {
+        outln!("Invalid code page");
+    }
+}
+
+/// LABEL command - display or set volume label (stub)
+pub fn cmd_label(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Volume in drive C is NOSTALGOS");
+        outln!("Volume Serial Number is 1234-5678");
+        return;
+    }
+
+    let label = args.join(" ");
+    outln!("Volume label set to: {}", label);
+    outln!("(Note: Label change not actually implemented)");
+}

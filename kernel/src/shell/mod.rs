@@ -148,24 +148,24 @@ const HISTORY_SIZE: usize = 32;
 const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq", "arp", "attrib",
     "blocks", "bt",
-    "cache", "callback", "cat", "cc", "cd", "cid", "clear", "cls", "color", "comp", "copy", "cp", "cpufeatures", "cpuinfo",
+    "cache", "callback", "cat", "cc", "cd", "chcp", "cid", "clear", "cls", "color", "comp", "copy", "cp", "cpufeatures", "cpuinfo",
     "date", "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
     "fc", "files", "find", "findstr", "finger",
-    "hal", "handles", "heap", "help", "history", "hostname", "hpet",
+    "hal", "handles", "head", "heap", "help", "history", "hostname", "hpet",
     "ident", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
     "job", "ke", "keyedev",
-    "ldr", "lookaside", "ls", "luid",
+    "label", "ldr", "lookaside", "ls", "luid",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "more", "msr", "mv",
     "net", "netinfo", "netserv", "netstat", "nslookup", "ntfs",
     "ob", "obdir",
-    "pagetable", "partition", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "prompt", "ps", "pwd",
+    "pagetable", "partition", "path", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "prompt", "ps", "pwd",
     "qotd", "quit",
-    "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "route", "rtl", "shutdown",
+    "ramdisk", "rd", "reboot", "reg", "ren", "rename", "replace", "resume", "rm", "rmdir", "route", "rtl", "shutdown",
     "sc", "sched", "se", "section", "services", "set", "smbios", "sort", "stack", "suspend", "sysinfo", "systeminfo",
-    "tasklist", "tasks", "teb", "time", "timer", "timerq", "timeserv", "title", "touch", "tracert", "tree", "type",
+    "tail", "tasklist", "tasks", "teb", "time", "timer", "timerq", "timeserv", "title", "touch", "tracert", "tree", "type",
     "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "version", "volumes",
-    "waitq", "whois", "whoami", "worker", "wset",
+    "waitq", "wc", "whois", "whoami", "worker", "wset",
 ];
 
 /// Current working directory
@@ -1375,6 +1375,27 @@ impl Shell {
         // FIND - search for text in files
         } else if eq_ignore_case(cmd, "find") {
             commands::cmd_find(&args[1..argc]);
+        // HEAD - display first lines of file
+        } else if eq_ignore_case(cmd, "head") {
+            commands::cmd_head(&args[1..argc]);
+        // TAIL - display last lines of file
+        } else if eq_ignore_case(cmd, "tail") {
+            commands::cmd_tail(&args[1..argc]);
+        // WC - word/line/char count
+        } else if eq_ignore_case(cmd, "wc") {
+            commands::cmd_wc(&args[1..argc]);
+        // PATH - display/set PATH
+        } else if eq_ignore_case(cmd, "path") {
+            commands::cmd_path(&args[1..argc]);
+        // REPLACE - replace files
+        } else if eq_ignore_case(cmd, "replace") {
+            commands::cmd_replace(&args[1..argc]);
+        // CHCP - code page
+        } else if eq_ignore_case(cmd, "chcp") {
+            commands::cmd_chcp(&args[1..argc]);
+        // LABEL - volume label
+        } else if eq_ignore_case(cmd, "label") {
+            commands::cmd_label(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
