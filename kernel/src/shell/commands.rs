@@ -15236,6 +15236,7 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  tcp        Show TCP socket status");
         outln!("  connect    Connect to TCP server");
         outln!("  listen     Listen on TCP port");
+        outln!("  http       Make HTTP GET request");
         return;
     }
 
@@ -15899,6 +15900,129 @@ pub fn cmd_netinfo(args: &[&str]) {
             Err(e) => {
                 outln!("Listen failed: {}", e);
                 let _ = net::tcp::socket_close(socket);
+            }
+        }
+    } else if eq_ignore_case(args[0], "http") {
+        // Usage: netinfo http <ip> [port] [path]
+        // Or: netinfo http <hostname> [port] [path]
+        if args.len() < 2 {
+            outln!("Make an HTTP GET request");
+            outln!("");
+            outln!("Usage: netinfo http <ip> [port] [path]");
+            outln!("");
+            outln!("Examples:");
+            outln!("  netinfo http 93.184.216.34          - GET / from example.com");
+            outln!("  netinfo http 10.0.2.2 8080 /api     - GET /api on port 8080");
+            outln!("");
+            outln!("Note: Use 'netinfo resolve' to get IP from hostname first");
+            return;
+        }
+
+        // Parse IP address
+        let parse_ip = |s: &str| -> Option<net::Ipv4Address> {
+            let mut octets = [0u8; 4];
+            let mut octet_idx = 0;
+            let mut current = 0u32;
+
+            for c in s.chars() {
+                if c == '.' {
+                    if octet_idx >= 3 || current > 255 {
+                        return None;
+                    }
+                    octets[octet_idx] = current as u8;
+                    octet_idx += 1;
+                    current = 0;
+                } else if let Some(d) = c.to_digit(10) {
+                    current = current * 10 + d;
+                } else {
+                    return None;
+                }
+            }
+            if octet_idx != 3 || current > 255 {
+                return None;
+            }
+            octets[3] = current as u8;
+            Some(net::Ipv4Address::new(octets))
+        };
+
+        let ip = match parse_ip(args[1]) {
+            Some(ip) => ip,
+            None => {
+                outln!("Invalid IP address format");
+                outln!("Use 'netinfo resolve <hostname>' to get IP first");
+                return;
+            }
+        };
+
+        let port: u16 = if args.len() >= 3 {
+            match args[2].parse() {
+                Ok(p) => p,
+                Err(_) => {
+                    outln!("Invalid port number, using 80");
+                    80
+                }
+            }
+        } else {
+            80
+        };
+
+        let path = if args.len() >= 4 {
+            args[3]
+        } else {
+            "/"
+        };
+
+        // Find first non-loopback device with IP
+        let device_idx = {
+            let mut found = None;
+            for i in 0..net::get_device_count() {
+                if let Some(device) = net::get_device(i) {
+                    if device.info.name != "lo0" && device.ip_address.is_some() {
+                        found = Some(i);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(i) => i,
+                None => {
+                    outln!("No network device with IP configured");
+                    return;
+                }
+            }
+        };
+
+        outln!("GET http://{:?}:{}{}", ip, port, path);
+        outln!("");
+
+        match net::http::http_get(device_idx, args[1], ip, port, path) {
+            Ok(response) => {
+                outln!("HTTP/{} {}", "1.0", response.status_code);
+                outln!("Status: {} {}", response.status_code, response.status_text);
+                outln!("");
+
+                // Show headers
+                outln!("Headers:");
+                for (name, value) in &response.headers {
+                    outln!("  {}: {}", name, value);
+                }
+                outln!("");
+
+                // Show body preview
+                outln!("Body ({} bytes):", response.body.len());
+                if let Some(body_str) = response.body_as_string() {
+                    // Show first 500 bytes
+                    let preview_len = body_str.len().min(500);
+                    outln!("{}", &body_str[..preview_len]);
+                    if body_str.len() > 500 {
+                        outln!("... ({} more bytes)", body_str.len() - 500);
+                    }
+                } else {
+                    outln!("  (binary data, {} bytes)", response.body.len());
+                }
+            }
+            Err(e) => {
+                outln!("HTTP request failed: {}", e);
             }
         }
     } else {
