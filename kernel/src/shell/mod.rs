@@ -149,7 +149,7 @@ const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq",
     "blocks", "bt",
     "cache", "callback", "cat", "cc", "cd", "cid", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
-    "debug", "del", "desc", "descriptor", "devdrv", "dir", "disk", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
+    "debug", "del", "desc", "descriptor", "devdrv", "dir", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
     "files",
     "hal", "handles", "heap", "help", "history", "hpet",
     "int", "io", "iocp", "ioq", "irql", "irqstat",
@@ -159,12 +159,11 @@ const COMMANDS: &[&str] = &[
     "net", "netinfo", "ntfs",
     "ob", "obdir",
     "pagetable", "partition", "pci", "pe", "peb", "pfn", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "ps", "pwd",
-    "userproc",
-    "quit",
+    "qotd", "quit",
     "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "rtl", "shutdown",
     "sc", "sched", "se", "section", "services", "smbios", "stack", "suspend", "sysinfo",
-    "tasks", "teb", "time", "timer", "timerq", "touch", "type",
-    "usertest",
+    "tasks", "teb", "time", "timer", "timerq", "timeserv", "touch", "type",
+    "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "version", "volumes",
     "waitq", "worker", "wset",
 ];
@@ -1274,6 +1273,18 @@ impl Shell {
         // NTFS file system
         } else if eq_ignore_case(cmd, "ntfs") {
             commands::cmd_ntfs(&args[1..argc]);
+        // Event log viewer
+        } else if eq_ignore_case(cmd, "eventlog") {
+            commands::cmd_eventlog(&args[1..argc]);
+        // Echo/chargen server
+        } else if eq_ignore_case(cmd, "echoserv") {
+            commands::cmd_echoserv(&args[1..argc]);
+        // QOTD (Quote of the Day) server
+        } else if eq_ignore_case(cmd, "qotd") {
+            commands::cmd_qotd(&args[1..argc]);
+        // TIME protocol server
+        } else if eq_ignore_case(cmd, "timeserv") {
+            commands::cmd_timeserv(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

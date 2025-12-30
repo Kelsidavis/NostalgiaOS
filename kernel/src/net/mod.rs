@@ -31,6 +31,8 @@ pub mod smtp;
 pub mod pop3;
 pub mod snmp;
 pub mod echo;
+pub mod qotd;
+pub mod time;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::vec::Vec;
@@ -126,6 +128,8 @@ pub fn init() {
     pop3::init();
     snmp::init();
     echo::init();
+    qotd::init();
+    time::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 

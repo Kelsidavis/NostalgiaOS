@@ -17206,3 +17206,98 @@ pub fn cmd_echoserv(args: &[&str]) {
         outln!("Use 'echoserv' for help");
     }
 }
+
+/// QOTD (Quote of the Day) server command
+pub fn cmd_qotd(args: &[&str]) {
+    use crate::net::qotd;
+
+    if args.is_empty() {
+        outln!("Usage: qotd <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  start       Start UDP QOTD server");
+        outln!("  stop        Stop UDP QOTD server");
+        outln!("  stats       Show QOTD service statistics");
+        outln!("  quote       Display a random quote");
+        outln!("  list        List all available quotes");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "stats") {
+        let stats = qotd::get_stats();
+        outln!("QOTD Service Statistics:");
+        outln!("  UDP Server:    {}", if stats.udp_running { "Running" } else { "Stopped" });
+        outln!("  UDP Requests:  {}", stats.udp_requests);
+        outln!("  TCP Requests:  {}", stats.tcp_requests);
+        outln!("  Total Quotes:  {}", stats.total_quotes);
+    } else if eq_ignore_case(args[0], "start") {
+        match qotd::start_qotd_udp() {
+            Ok(_) => outln!("UDP QOTD server started on port 17"),
+            Err(e) => outln!("Failed to start QOTD server: {}", e),
+        }
+    } else if eq_ignore_case(args[0], "stop") {
+        qotd::stop_qotd_udp();
+        outln!("UDP QOTD server stopped");
+    } else if eq_ignore_case(args[0], "quote") {
+        if let Some(quote) = qotd::get_quote_by_index(
+            crate::hal::apic::get_tick_count() as usize
+        ) {
+            outln!("{}", quote.trim());
+        }
+    } else if eq_ignore_case(args[0], "list") {
+        outln!("Available Quotes ({} total):", qotd::quote_count());
+        for i in 0..qotd::quote_count() {
+            if let Some(quote) = qotd::get_quote_by_index(i) {
+                outln!("  {}. {}", i + 1, quote.trim());
+            }
+        }
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'qotd' for help");
+    }
+}
+
+/// TIME protocol server command
+pub fn cmd_timeserv(args: &[&str]) {
+    use crate::net::time;
+
+    if args.is_empty() {
+        outln!("Usage: timeserv <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  start       Start UDP TIME server");
+        outln!("  stop        Stop UDP TIME server");
+        outln!("  stats       Show TIME service statistics");
+        outln!("  now         Display current time values");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "stats") {
+        let stats = time::get_stats();
+        outln!("TIME Service Statistics:");
+        outln!("  UDP Server:    {}", if stats.udp_running { "Running" } else { "Stopped" });
+        outln!("  Requests:      {}", stats.requests);
+    } else if eq_ignore_case(args[0], "start") {
+        match time::start_time_udp() {
+            Ok(_) => outln!("UDP TIME server started on port 37"),
+            Err(e) => outln!("Failed to start TIME server: {}", e),
+        }
+    } else if eq_ignore_case(args[0], "stop") {
+        time::stop_time_udp();
+        outln!("UDP TIME server stopped");
+    } else if eq_ignore_case(args[0], "now") {
+        let ntp_time = time::get_ntp_time();
+        let unix_time = time::get_unix_time();
+        outln!("Current Time Values:");
+        outln!("  NTP Time (since 1900):  {} seconds", ntp_time);
+        outln!("  Unix Time (since 1970): {} seconds", unix_time);
+
+        // Format as date/time from RTC
+        let dt = crate::hal::rtc::get_datetime();
+        outln!("  Date/Time:              {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+            dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second);
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'timeserv' for help");
+    }
+}
