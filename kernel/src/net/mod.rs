@@ -22,6 +22,8 @@ pub mod http;
 pub mod telnet;
 pub mod httpd;
 pub mod ntp;
+pub mod wol;
+pub mod tftp;
 pub mod loopback;
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -110,6 +112,8 @@ pub fn init() {
     telnet::init();
     httpd::init();
     ntp::init();
+    wol::init();
+    tftp::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 

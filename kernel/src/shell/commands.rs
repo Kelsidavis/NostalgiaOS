@@ -15240,6 +15240,8 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  telnet     Start/stop telnet server");
         outln!("  httpd      Start/stop HTTP server");
         outln!("  ntp        Sync time with NTP server");
+        outln!("  wol        Send Wake-on-LAN packet");
+        outln!("  tftp       Download file via TFTP");
         return;
     }
 
@@ -16263,6 +16265,155 @@ pub fn cmd_netinfo(args: &[&str]) {
                 outln!("  Round-trip: {}ms", result.delay_ms);
             }
             Err(e) => outln!("NTP sync failed: {}", e),
+        }
+    } else if eq_ignore_case(args[0], "wol") {
+        // Usage: netinfo wol <mac_address>
+        if args.len() < 2 {
+            outln!("Usage: netinfo wol <mac_address>");
+            outln!("");
+            outln!("Format: AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF");
+            outln!("");
+            outln!("Sends a Wake-on-LAN magic packet to wake a remote machine.");
+            return;
+        }
+
+        // Find first non-loopback device with IP
+        let device_idx = {
+            let mut found = None;
+            for i in 0..net::get_device_count() {
+                if let Some(device) = net::get_device(i) {
+                    if device.info.name != "lo0" && device.ip_address.is_some() {
+                        found = Some(i);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(i) => i,
+                None => {
+                    outln!("No network device with IP configured");
+                    return;
+                }
+            }
+        };
+
+        // Parse MAC address
+        match net::wol::parse_mac(args[1]) {
+            Some(mac) => {
+                outln!("Sending Wake-on-LAN to {:?}...", mac);
+                match net::wol::wake_udp(device_idx, mac) {
+                    Ok(()) => {
+                        outln!("Magic packet sent successfully");
+                        outln!("Total WoL packets sent: {}", net::wol::get_stats());
+                    }
+                    Err(e) => outln!("Failed to send: {}", e),
+                }
+            }
+            None => {
+                outln!("Invalid MAC address format: {}", args[1]);
+                outln!("Use format: AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF");
+            }
+        }
+    } else if eq_ignore_case(args[0], "tftp") {
+        // Usage: netinfo tftp <server_ip> <filename>
+        if args.len() < 3 {
+            outln!("Usage: netinfo tftp <server_ip> <filename>");
+            outln!("");
+            outln!("Downloads a file from a TFTP server.");
+            let (complete, failed, bytes) = net::tftp::get_stats();
+            outln!("");
+            outln!("TFTP Statistics:");
+            outln!("  Completed: {}", complete);
+            outln!("  Failed: {}", failed);
+            outln!("  Bytes received: {}", bytes);
+            return;
+        }
+
+        // Find first non-loopback device with IP
+        let device_idx = {
+            let mut found = None;
+            for i in 0..net::get_device_count() {
+                if let Some(device) = net::get_device(i) {
+                    if device.info.name != "lo0" && device.ip_address.is_some() {
+                        found = Some(i);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(i) => i,
+                None => {
+                    outln!("No network device with IP configured");
+                    return;
+                }
+            }
+        };
+
+        // Parse server IP
+        let ip_str = args[1];
+        let mut octets = [0u8; 4];
+        let mut octet_idx = 0;
+        let mut current: u16 = 0;
+        let mut valid = true;
+
+        for c in ip_str.chars() {
+            if c == '.' {
+                if current > 255 || octet_idx >= 3 {
+                    valid = false;
+                    break;
+                }
+                octets[octet_idx] = current as u8;
+                octet_idx += 1;
+                current = 0;
+            } else if let Some(digit) = c.to_digit(10) {
+                current = current * 10 + digit as u16;
+            } else {
+                valid = false;
+                break;
+            }
+        }
+
+        if valid && octet_idx == 3 && current <= 255 {
+            octets[3] = current as u8;
+        } else {
+            outln!("Invalid IP address: {}", args[1]);
+            return;
+        }
+
+        let server_ip = net::ip::Ipv4Address::new(octets);
+        let filename = args[2];
+
+        outln!("Downloading '{}' from {:?}...", filename, server_ip);
+
+        match net::tftp::get(device_idx, server_ip, filename, net::tftp::TransferMode::Binary) {
+            Ok(result) => {
+                outln!("");
+                outln!("Download complete:");
+                outln!("  Blocks: {}", result.blocks);
+                outln!("  Bytes: {}", result.bytes);
+                outln!("");
+                // Show first 256 bytes as hex/text
+                let show_len = result.data.len().min(256);
+                if show_len > 0 {
+                    outln!("First {} bytes:", show_len);
+                    if result.data.iter().take(show_len).all(|&b| b >= 0x20 && b < 0x7F || b == b'\n' || b == b'\r' || b == b'\t') {
+                        // Looks like text
+                        if let Ok(s) = core::str::from_utf8(&result.data[..show_len]) {
+                            outln!("{}", s);
+                        }
+                    } else {
+                        // Show as hex
+                        for (i, chunk) in result.data[..show_len].chunks(16).enumerate() {
+                            out!("{:04X}: ", i * 16);
+                            for byte in chunk {
+                                out!("{:02X} ", byte);
+                            }
+                            outln!("");
+                        }
+                    }
+                }
+            }
+            Err(e) => outln!("TFTP download failed: {}", e),
         }
     } else {
         outln!("Unknown command: {}", args[0]);

@@ -1,6 +1,6 @@
 //! Cryptographic Hash Functions
 //!
-//! MD5 (RFC 1321) and SHA-1 (RFC 3174) implementations.
+//! MD5 (RFC 1321), SHA-1 (RFC 3174), and SHA-256 (FIPS 180-4) implementations.
 //! These match the Windows CryptoAPI hash functions.
 
 /// MD5 hash output size in bytes
@@ -9,11 +9,17 @@ pub const MD5_DIGEST_SIZE: usize = 16;
 /// SHA-1 hash output size in bytes
 pub const SHA1_DIGEST_SIZE: usize = 20;
 
+/// SHA-256 hash output size in bytes
+pub const SHA256_DIGEST_SIZE: usize = 32;
+
 /// MD5 block size in bytes
 const MD5_BLOCK_SIZE: usize = 64;
 
 /// SHA-1 block size in bytes
 const SHA1_BLOCK_SIZE: usize = 64;
+
+/// SHA-256 block size in bytes
+const SHA256_BLOCK_SIZE: usize = 64;
 
 /// MD5 hash context
 #[derive(Clone)]
@@ -402,6 +408,226 @@ pub fn sha1(data: &[u8]) -> [u8; SHA1_DIGEST_SIZE] {
     ctx.finalize()
 }
 
+/// SHA-256 hash context (FIPS 180-4)
+#[derive(Clone)]
+pub struct Sha256Context {
+    state: [u32; 8],
+    count: u64,
+    buffer: [u8; SHA256_BLOCK_SIZE],
+    buffer_len: usize,
+}
+
+impl Sha256Context {
+    /// Initial hash values (first 32 bits of fractional parts of square roots of first 8 primes)
+    const INIT_STATE: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ];
+
+    /// Round constants (first 32 bits of fractional parts of cube roots of first 64 primes)
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+        0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+        0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+
+    /// Create a new SHA-256 context
+    pub fn new() -> Self {
+        Self {
+            state: Self::INIT_STATE,
+            count: 0,
+            buffer: [0u8; SHA256_BLOCK_SIZE],
+            buffer_len: 0,
+        }
+    }
+
+    /// Reset the context
+    pub fn reset(&mut self) {
+        self.state = Self::INIT_STATE;
+        self.count = 0;
+        self.buffer = [0u8; SHA256_BLOCK_SIZE];
+        self.buffer_len = 0;
+    }
+
+    /// Update hash with data
+    pub fn update(&mut self, data: &[u8]) {
+        let mut offset = 0;
+
+        // Process buffered data first
+        if self.buffer_len > 0 {
+            let space = SHA256_BLOCK_SIZE - self.buffer_len;
+            let to_copy = data.len().min(space);
+            self.buffer[self.buffer_len..self.buffer_len + to_copy]
+                .copy_from_slice(&data[..to_copy]);
+            self.buffer_len += to_copy;
+            offset = to_copy;
+
+            if self.buffer_len == SHA256_BLOCK_SIZE {
+                self.transform(&self.buffer.clone());
+                self.buffer_len = 0;
+            }
+        }
+
+        // Process full blocks
+        while offset + SHA256_BLOCK_SIZE <= data.len() {
+            let block: [u8; SHA256_BLOCK_SIZE] = data[offset..offset + SHA256_BLOCK_SIZE]
+                .try_into()
+                .unwrap();
+            self.transform(&block);
+            offset += SHA256_BLOCK_SIZE;
+        }
+
+        // Buffer remaining data
+        if offset < data.len() {
+            let remaining = data.len() - offset;
+            self.buffer[..remaining].copy_from_slice(&data[offset..]);
+            self.buffer_len = remaining;
+        }
+
+        self.count += data.len() as u64;
+    }
+
+    /// Finalize and get digest
+    pub fn finalize(&mut self) -> [u8; SHA256_DIGEST_SIZE] {
+        let bits = self.count * 8;
+
+        // Padding
+        let pad_len = if self.buffer_len < 56 {
+            56 - self.buffer_len
+        } else {
+            120 - self.buffer_len
+        };
+
+        let mut padding = [0u8; 72];
+        padding[0] = 0x80;
+
+        // Length in big-endian
+        padding[pad_len..pad_len + 8].copy_from_slice(&bits.to_be_bytes());
+
+        self.update(&padding[..pad_len + 8]);
+
+        // Output digest in big-endian
+        let mut digest = [0u8; SHA256_DIGEST_SIZE];
+        for (i, &word) in self.state.iter().enumerate() {
+            digest[i * 4..(i + 1) * 4].copy_from_slice(&word.to_be_bytes());
+        }
+
+        digest
+    }
+
+    /// SHA-256 helper functions
+    #[inline]
+    fn ch(x: u32, y: u32, z: u32) -> u32 {
+        (x & y) ^ (!x & z)
+    }
+
+    #[inline]
+    fn maj(x: u32, y: u32, z: u32) -> u32 {
+        (x & y) ^ (x & z) ^ (y & z)
+    }
+
+    #[inline]
+    fn sigma0(x: u32) -> u32 {
+        x.rotate_right(2) ^ x.rotate_right(13) ^ x.rotate_right(22)
+    }
+
+    #[inline]
+    fn sigma1(x: u32) -> u32 {
+        x.rotate_right(6) ^ x.rotate_right(11) ^ x.rotate_right(25)
+    }
+
+    #[inline]
+    fn gamma0(x: u32) -> u32 {
+        x.rotate_right(7) ^ x.rotate_right(18) ^ (x >> 3)
+    }
+
+    #[inline]
+    fn gamma1(x: u32) -> u32 {
+        x.rotate_right(17) ^ x.rotate_right(19) ^ (x >> 10)
+    }
+
+    /// Transform a 64-byte block
+    fn transform(&mut self, block: &[u8; SHA256_BLOCK_SIZE]) {
+        // Message schedule
+        let mut w = [0u32; 64];
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes([
+                block[i * 4],
+                block[i * 4 + 1],
+                block[i * 4 + 2],
+                block[i * 4 + 3],
+            ]);
+        }
+        for i in 16..64 {
+            w[i] = Self::gamma1(w[i - 2])
+                .wrapping_add(w[i - 7])
+                .wrapping_add(Self::gamma0(w[i - 15]))
+                .wrapping_add(w[i - 16]);
+        }
+
+        let mut a = self.state[0];
+        let mut b = self.state[1];
+        let mut c = self.state[2];
+        let mut d = self.state[3];
+        let mut e = self.state[4];
+        let mut f = self.state[5];
+        let mut g = self.state[6];
+        let mut h = self.state[7];
+
+        for i in 0..64 {
+            let t1 = h
+                .wrapping_add(Self::sigma1(e))
+                .wrapping_add(Self::ch(e, f, g))
+                .wrapping_add(Self::K[i])
+                .wrapping_add(w[i]);
+            let t2 = Self::sigma0(a).wrapping_add(Self::maj(a, b, c));
+            h = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(t1);
+            d = c;
+            c = b;
+            b = a;
+            a = t1.wrapping_add(t2);
+        }
+
+        self.state[0] = self.state[0].wrapping_add(a);
+        self.state[1] = self.state[1].wrapping_add(b);
+        self.state[2] = self.state[2].wrapping_add(c);
+        self.state[3] = self.state[3].wrapping_add(d);
+        self.state[4] = self.state[4].wrapping_add(e);
+        self.state[5] = self.state[5].wrapping_add(f);
+        self.state[6] = self.state[6].wrapping_add(g);
+        self.state[7] = self.state[7].wrapping_add(h);
+    }
+}
+
+impl Default for Sha256Context {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Compute SHA-256 hash of data
+pub fn sha256(data: &[u8]) -> [u8; SHA256_DIGEST_SIZE] {
+    let mut ctx = Sha256Context::new();
+    ctx.update(data);
+    ctx.finalize()
+}
+
 /// Format hash as hexadecimal string
 pub fn hash_to_hex(hash: &[u8], buf: &mut [u8]) -> usize {
     const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -452,6 +678,28 @@ mod tests {
         assert_eq!(hash, [
             0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e,
             0x25, 0x71, 0x78, 0x50, 0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d,
+        ]);
+    }
+
+    #[test]
+    fn test_sha256_empty() {
+        let hash = sha256(b"");
+        assert_eq!(hash, [
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
+            0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
+            0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
+            0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+        ]);
+    }
+
+    #[test]
+    fn test_sha256_abc() {
+        let hash = sha256(b"abc");
+        assert_eq!(hash, [
+            0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+            0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+            0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+            0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
         ]);
     }
 }
