@@ -19086,3 +19086,566 @@ fn split_path_pattern(path: &str) -> (alloc::string::String, &str) {
         (String::from(get_current_dir()), path)
     }
 }
+
+/// FC command - compare two files
+pub fn cmd_fc(args: &[&str]) {
+    if args.len() < 2 {
+        outln!("Compares two files and displays the differences.");
+        outln!("");
+        outln!("FC [/B] [/L] [/N] file1 file2");
+        outln!("");
+        outln!("  /B   Binary comparison");
+        outln!("  /L   Line-by-line ASCII comparison (default)");
+        outln!("  /N   Display line numbers");
+        return;
+    }
+
+    // Parse options
+    let mut binary_mode = false;
+    let mut show_line_numbers = false;
+    let mut arg_start = 0;
+
+    for (i, arg) in args.iter().enumerate() {
+        if arg.starts_with('/') || arg.starts_with('-') {
+            let opt = arg.to_ascii_uppercase();
+            if opt == "/B" || opt == "-B" {
+                binary_mode = true;
+            } else if opt == "/N" || opt == "-N" {
+                show_line_numbers = true;
+            }
+            arg_start = i + 1;
+        } else {
+            break;
+        }
+    }
+
+    if args.len() - arg_start < 2 {
+        outln!("FC: Missing file names");
+        return;
+    }
+
+    let file1 = args[arg_start];
+    let file2 = args[arg_start + 1];
+    let path1 = resolve_path(file1);
+    let path2 = resolve_path(file2);
+
+    // Open files
+    let handle1 = match fs::open(&path1, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            outln!("FC: Cannot open {}: {:?}", path1, e);
+            return;
+        }
+    };
+
+    let handle2 = match fs::open(&path2, 0) {
+        Ok(h) => h,
+        Err(_) => {
+            let _ = fs::close(handle1);
+            outln!("FC: Cannot open {}: file not found", path2);
+            return;
+        }
+    };
+
+    outln!("Comparing files {} and {}", path1, path2);
+
+    if binary_mode {
+        // Binary comparison
+        let mut buf1 = [0u8; 512];
+        let mut buf2 = [0u8; 512];
+        let mut offset = 0usize;
+        let mut diff_count = 0u32;
+
+        loop {
+            let n1 = fs::read(handle1, &mut buf1).unwrap_or(0);
+            let n2 = fs::read(handle2, &mut buf2).unwrap_or(0);
+
+            if n1 == 0 && n2 == 0 {
+                break;
+            }
+
+            let compare_len = n1.min(n2);
+            for i in 0..compare_len {
+                if buf1[i] != buf2[i] {
+                    outln!("{:08X}: {:02X} {:02X}", offset + i, buf1[i], buf2[i]);
+                    diff_count += 1;
+                    if diff_count >= 100 {
+                        outln!("... (more than 100 differences)");
+                        break;
+                    }
+                }
+            }
+
+            if n1 != n2 {
+                outln!("Files are different sizes");
+                break;
+            }
+
+            offset += n1;
+            if diff_count >= 100 {
+                break;
+            }
+        }
+
+        if diff_count == 0 {
+            outln!("FC: no differences encountered");
+        } else {
+            outln!("{} differences found", diff_count);
+        }
+    } else {
+        // Line-by-line comparison
+        let mut lines1 = alloc::vec::Vec::new();
+        let mut lines2 = alloc::vec::Vec::new();
+
+        // Read file 1
+        let mut buf = [0u8; 4096];
+        let mut line_buf = alloc::vec::Vec::new();
+        loop {
+            match fs::read(handle1, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    for &b in &buf[..n] {
+                        if b == b'\n' {
+                            if let Ok(line) = core::str::from_utf8(&line_buf) {
+                                lines1.push(alloc::string::String::from(line));
+                            }
+                            line_buf.clear();
+                        } else if b != b'\r' {
+                            line_buf.push(b);
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        if !line_buf.is_empty() {
+            if let Ok(line) = core::str::from_utf8(&line_buf) {
+                lines1.push(alloc::string::String::from(line));
+            }
+        }
+
+        // Read file 2
+        line_buf.clear();
+        loop {
+            match fs::read(handle2, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    for &b in &buf[..n] {
+                        if b == b'\n' {
+                            if let Ok(line) = core::str::from_utf8(&line_buf) {
+                                lines2.push(alloc::string::String::from(line));
+                            }
+                            line_buf.clear();
+                        } else if b != b'\r' {
+                            line_buf.push(b);
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        if !line_buf.is_empty() {
+            if let Ok(line) = core::str::from_utf8(&line_buf) {
+                lines2.push(alloc::string::String::from(line));
+            }
+        }
+
+        // Compare lines
+        let max_lines = lines1.len().max(lines2.len());
+        let mut diff_count = 0u32;
+        let mut in_diff = false;
+
+        for i in 0..max_lines {
+            let line1 = lines1.get(i);
+            let line2 = lines2.get(i);
+
+            match (line1, line2) {
+                (Some(l1), Some(l2)) if l1 == l2 => {
+                    in_diff = false;
+                }
+                (Some(l1), Some(l2)) => {
+                    if !in_diff {
+                        outln!("***** {}", file1);
+                        in_diff = true;
+                    }
+                    if show_line_numbers {
+                        outln!("{}: {}", i + 1, l1);
+                    } else {
+                        outln!("{}", l1);
+                    }
+                    outln!("*****");
+                    if show_line_numbers {
+                        outln!("{}: {}", i + 1, l2);
+                    } else {
+                        outln!("{}", l2);
+                    }
+                    outln!("*****");
+                    diff_count += 1;
+                }
+                (Some(l1), None) => {
+                    outln!("***** {} has extra line(s) at end", file1);
+                    if show_line_numbers {
+                        outln!("{}: {}", i + 1, l1);
+                    } else {
+                        outln!("{}", l1);
+                    }
+                    diff_count += 1;
+                }
+                (None, Some(l2)) => {
+                    outln!("***** {} has extra line(s) at end", file2);
+                    if show_line_numbers {
+                        outln!("{}: {}", i + 1, l2);
+                    } else {
+                        outln!("{}", l2);
+                    }
+                    diff_count += 1;
+                }
+                (None, None) => break,
+            }
+
+            if diff_count >= 50 {
+                outln!("... (more than 50 differences)");
+                break;
+            }
+        }
+
+        if diff_count == 0 {
+            outln!("FC: no differences encountered");
+        }
+    }
+
+    let _ = fs::close(handle1);
+    let _ = fs::close(handle2);
+}
+
+/// COMP command - compare two files (binary by default)
+pub fn cmd_comp(args: &[&str]) {
+    if args.len() < 2 {
+        outln!("Compares the contents of two files byte-by-byte.");
+        outln!("");
+        outln!("COMP file1 file2");
+        outln!("");
+        outln!("Use FC for line-by-line text comparison.");
+        return;
+    }
+
+    let file1 = args[0];
+    let file2 = args[1];
+    let path1 = resolve_path(file1);
+    let path2 = resolve_path(file2);
+
+    // Open files
+    let handle1 = match fs::open(&path1, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            outln!("COMP: Cannot open {}: {:?}", path1, e);
+            return;
+        }
+    };
+
+    let handle2 = match fs::open(&path2, 0) {
+        Ok(h) => h,
+        Err(_) => {
+            let _ = fs::close(handle1);
+            outln!("COMP: Cannot open {}", path2);
+            return;
+        }
+    };
+
+    outln!("Comparing {} and {}...", path1, path2);
+
+    let mut buf1 = [0u8; 512];
+    let mut buf2 = [0u8; 512];
+    let mut offset = 0usize;
+    let mut diff_count = 0u32;
+
+    loop {
+        let n1 = fs::read(handle1, &mut buf1).unwrap_or(0);
+        let n2 = fs::read(handle2, &mut buf2).unwrap_or(0);
+
+        if n1 == 0 && n2 == 0 {
+            break;
+        }
+
+        let compare_len = n1.min(n2);
+        for i in 0..compare_len {
+            if buf1[i] != buf2[i] {
+                outln!("Compare error at OFFSET {:X}", offset + i);
+                outln!("file1 = {:02X}", buf1[i]);
+                outln!("file2 = {:02X}", buf2[i]);
+                diff_count += 1;
+                if diff_count >= 10 {
+                    outln!("10 mismatches - ending compare");
+                    break;
+                }
+            }
+        }
+
+        if n1 != n2 {
+            outln!("Files are different sizes.");
+            let _ = fs::close(handle1);
+            let _ = fs::close(handle2);
+            return;
+        }
+
+        offset += n1;
+        if diff_count >= 10 {
+            break;
+        }
+    }
+
+    let _ = fs::close(handle1);
+    let _ = fs::close(handle2);
+
+    if diff_count == 0 {
+        outln!("Files compare OK");
+    }
+}
+
+/// SORT command - sort lines from a file or input
+pub fn cmd_sort(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Sorts input.");
+        outln!("");
+        outln!("SORT [/R] [/+n] [filename]");
+        outln!("");
+        outln!("  /R      Reverse sort order");
+        outln!("  /+n     Start sorting at column n");
+        outln!("  filename  File to sort");
+        return;
+    }
+
+    // Parse options
+    let mut reverse = false;
+    let mut start_col = 0usize;
+    let mut filename = None;
+
+    for arg in args {
+        if arg.starts_with('/') || arg.starts_with('-') {
+            let opt = arg.to_ascii_uppercase();
+            if opt == "/R" || opt == "-R" {
+                reverse = true;
+            } else if opt.starts_with("/+") || opt.starts_with("-+") {
+                if let Ok(n) = opt[2..].parse::<usize>() {
+                    start_col = n.saturating_sub(1); // 1-based to 0-based
+                }
+            }
+        } else {
+            filename = Some(*arg);
+        }
+    }
+
+    let Some(file) = filename else {
+        outln!("SORT: No input file specified");
+        return;
+    };
+
+    let path = resolve_path(file);
+    let handle = match fs::open(&path, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            outln!("SORT: Cannot open file: {:?}", e);
+            return;
+        }
+    };
+
+    // Read all lines
+    let mut lines: alloc::vec::Vec<alloc::string::String> = alloc::vec::Vec::new();
+    let mut buf = [0u8; 4096];
+    let mut line_buf = alloc::vec::Vec::new();
+
+    loop {
+        match fs::read(handle, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                for &b in &buf[..n] {
+                    if b == b'\n' {
+                        if let Ok(line) = core::str::from_utf8(&line_buf) {
+                            lines.push(alloc::string::String::from(line));
+                        }
+                        line_buf.clear();
+                    } else if b != b'\r' {
+                        line_buf.push(b);
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    if !line_buf.is_empty() {
+        if let Ok(line) = core::str::from_utf8(&line_buf) {
+            lines.push(alloc::string::String::from(line));
+        }
+    }
+
+    let _ = fs::close(handle);
+
+    // Sort lines
+    if start_col > 0 {
+        lines.sort_by(|a, b| {
+            let a_key = if a.len() > start_col { &a[start_col..] } else { "" };
+            let b_key = if b.len() > start_col { &b[start_col..] } else { "" };
+            if reverse {
+                b_key.cmp(a_key)
+            } else {
+                a_key.cmp(b_key)
+            }
+        });
+    } else if reverse {
+        lines.sort_by(|a, b| b.cmp(a));
+    } else {
+        lines.sort();
+    }
+
+    // Output sorted lines
+    for line in &lines {
+        outln!("{}", line);
+    }
+}
+
+/// FIND command - search for text string in file(s)
+pub fn cmd_find(args: &[&str]) {
+    if args.len() < 2 {
+        outln!("Searches for a text string in a file.");
+        outln!("");
+        outln!("FIND [/I] [/V] [/C] [/N] \"string\" filename");
+        outln!("");
+        outln!("  /V   Displays lines NOT containing the string");
+        outln!("  /C   Displays only the count of matching lines");
+        outln!("  /I   Ignores case");
+        outln!("  /N   Displays line numbers");
+        outln!("  string   Text string to find (in quotes)");
+        return;
+    }
+
+    // Parse options
+    let mut invert = false;
+    let mut count_only = false;
+    let mut ignore_case = false;
+    let mut show_numbers = false;
+    let mut arg_start = 0;
+
+    for (i, arg) in args.iter().enumerate() {
+        if arg.starts_with('/') || arg.starts_with('-') {
+            let opt = arg.to_ascii_uppercase();
+            if opt == "/V" || opt == "-V" {
+                invert = true;
+            } else if opt == "/C" || opt == "-C" {
+                count_only = true;
+            } else if opt == "/I" || opt == "-I" {
+                ignore_case = true;
+            } else if opt == "/N" || opt == "-N" {
+                show_numbers = true;
+            }
+            arg_start = i + 1;
+        } else {
+            break;
+        }
+    }
+
+    if args.len() - arg_start < 2 {
+        outln!("FIND: Missing string or filename");
+        return;
+    }
+
+    // Get search string (strip quotes if present)
+    let mut search_str = args[arg_start];
+    if search_str.starts_with('"') && search_str.ends_with('"') && search_str.len() >= 2 {
+        search_str = &search_str[1..search_str.len() - 1];
+    }
+
+    let filename = args[arg_start + 1];
+    let path = resolve_path(filename);
+
+    let handle = match fs::open(&path, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            outln!("FIND: Cannot open {}: {:?}", path, e);
+            return;
+        }
+    };
+
+    outln!("");
+    outln!("---------- {}", filename.to_ascii_uppercase());
+
+    let search_pattern = if ignore_case {
+        search_str.to_ascii_lowercase()
+    } else {
+        alloc::string::String::from(search_str)
+    };
+
+    let mut buf = [0u8; 4096];
+    let mut line_buf = alloc::vec::Vec::new();
+    let mut line_num = 1u32;
+    let mut match_count = 0u32;
+
+    loop {
+        match fs::read(handle, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                for &b in &buf[..n] {
+                    if b == b'\n' {
+                        if let Ok(line) = core::str::from_utf8(&line_buf) {
+                            let search_line = if ignore_case {
+                                line.to_ascii_lowercase()
+                            } else {
+                                alloc::string::String::from(line)
+                            };
+
+                            let contains = search_line.contains(&search_pattern);
+                            let matches = if invert { !contains } else { contains };
+
+                            if matches {
+                                match_count += 1;
+                                if !count_only {
+                                    if show_numbers {
+                                        outln!("[{}]{}", line_num, line);
+                                    } else {
+                                        outln!("{}", line);
+                                    }
+                                }
+                            }
+                        }
+                        line_buf.clear();
+                        line_num += 1;
+                    } else if b != b'\r' {
+                        line_buf.push(b);
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    // Process last line
+    if !line_buf.is_empty() {
+        if let Ok(line) = core::str::from_utf8(&line_buf) {
+            let search_line = if ignore_case {
+                line.to_ascii_lowercase()
+            } else {
+                alloc::string::String::from(line)
+            };
+
+            let contains = search_line.contains(&search_pattern);
+            let matches = if invert { !contains } else { contains };
+
+            if matches {
+                match_count += 1;
+                if !count_only {
+                    if show_numbers {
+                        outln!("[{}]{}", line_num, line);
+                    } else {
+                        outln!("{}", line);
+                    }
+                }
+            }
+        }
+    }
+
+    let _ = fs::close(handle);
+
+    if count_only {
+        outln!("{}", match_count);
+    }
+}

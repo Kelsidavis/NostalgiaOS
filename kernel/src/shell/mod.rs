@@ -148,9 +148,9 @@ const HISTORY_SIZE: usize = 32;
 const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq", "arp", "attrib",
     "blocks", "bt",
-    "cache", "callback", "cat", "cc", "cd", "cid", "clear", "cls", "color", "copy", "cp", "cpufeatures", "cpuinfo",
+    "cache", "callback", "cat", "cc", "cd", "cid", "clear", "cls", "color", "comp", "copy", "cp", "cpufeatures", "cpuinfo",
     "date", "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
-    "files", "findstr", "finger",
+    "fc", "files", "find", "findstr", "finger",
     "hal", "handles", "heap", "help", "history", "hostname", "hpet",
     "ident", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
     "job", "ke", "keyedev",
@@ -161,7 +161,7 @@ const COMMANDS: &[&str] = &[
     "pagetable", "partition", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "prompt", "ps", "pwd",
     "qotd", "quit",
     "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "route", "rtl", "shutdown",
-    "sc", "sched", "se", "section", "services", "set", "smbios", "stack", "suspend", "sysinfo", "systeminfo",
+    "sc", "sched", "se", "section", "services", "set", "smbios", "sort", "stack", "suspend", "sysinfo", "systeminfo",
     "tasklist", "tasks", "teb", "time", "timer", "timerq", "timeserv", "title", "touch", "tracert", "tree", "type",
     "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "version", "volumes",
@@ -1363,6 +1363,18 @@ impl Shell {
         // Attrib - display or change file attributes
         } else if eq_ignore_case(cmd, "attrib") {
             commands::cmd_attrib(&args[1..argc]);
+        // FC - file compare
+        } else if eq_ignore_case(cmd, "fc") {
+            commands::cmd_fc(&args[1..argc]);
+        // COMP - binary file compare
+        } else if eq_ignore_case(cmd, "comp") {
+            commands::cmd_comp(&args[1..argc]);
+        // SORT - sort file lines
+        } else if eq_ignore_case(cmd, "sort") {
+            commands::cmd_sort(&args[1..argc]);
+        // FIND - search for text in files
+        } else if eq_ignore_case(cmd, "find") {
+            commands::cmd_find(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
