@@ -15239,6 +15239,7 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  http       Make HTTP GET request");
         outln!("  telnet     Start/stop telnet server");
         outln!("  httpd      Start/stop HTTP server");
+        outln!("  ntp        Sync time with NTP server");
         return;
     }
 
@@ -16184,8 +16185,196 @@ pub fn cmd_netinfo(args: &[&str]) {
                 outln!("Use 'netinfo httpd start' to start the server");
             }
         }
+    } else if eq_ignore_case(args[0], "ntp") {
+        // Usage: netinfo ntp [server_ip]
+        // Find first non-loopback device with IP
+        let device_idx = {
+            let mut found = None;
+            for i in 0..net::get_device_count() {
+                if let Some(device) = net::get_device(i) {
+                    if device.info.name != "lo0" && device.ip_address.is_some() {
+                        found = Some(i);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(i) => i,
+                None => {
+                    outln!("No network device with IP configured");
+                    outln!("Use 'netinfo ipconfig' to configure an IP address first");
+                    return;
+                }
+            }
+        };
+
+        // Parse server IP or use default
+        let server_ip = if args.len() >= 2 {
+            // Parse IP address manually without allocation
+            let ip_str = args[1];
+            let mut octets = [0u8; 4];
+            let mut octet_idx = 0;
+            let mut current: u16 = 0;
+            let mut valid = true;
+
+            for c in ip_str.chars() {
+                if c == '.' {
+                    if current > 255 || octet_idx >= 3 {
+                        valid = false;
+                        break;
+                    }
+                    octets[octet_idx] = current as u8;
+                    octet_idx += 1;
+                    current = 0;
+                } else if let Some(digit) = c.to_digit(10) {
+                    current = current * 10 + digit as u16;
+                } else {
+                    valid = false;
+                    break;
+                }
+            }
+
+            if valid && octet_idx == 3 && current <= 255 {
+                octets[3] = current as u8;
+                net::ip::Ipv4Address::new(octets)
+            } else {
+                outln!("Invalid IP address: {}", args[1]);
+                return;
+            }
+        } else {
+            // Use default NTP server (time.google.com)
+            net::ntp::servers::TIME_GOOGLE
+        };
+
+        outln!("Syncing time with {:?}...", server_ip);
+
+        match net::ntp::sync_time(device_idx, server_ip) {
+            Ok(result) => {
+                let (year, month, day, hour, minute, second) =
+                    net::ntp::unix_to_datetime(result.unix_timestamp);
+
+                outln!("");
+                outln!("NTP Sync Successful:");
+                outln!("  Server: {:?}", result.server_ip);
+                outln!("  Stratum: {:?}", result.stratum);
+                outln!("  Time: {:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC",
+                    year, month, day, hour, minute, second);
+                outln!("  Unix: {} seconds", result.unix_timestamp);
+                outln!("  Round-trip: {}ms", result.delay_ms);
+            }
+            Err(e) => outln!("NTP sync failed: {}", e),
+        }
     } else {
         outln!("Unknown command: {}", args[0]);
         outln!("Use 'netinfo' for help");
+    }
+}
+
+/// Serial port management command
+pub fn cmd_serial(args: &[&str]) {
+    use crate::drivers::serial;
+
+    if args.is_empty() {
+        outln!("Usage: serial <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  status       Show serial port status");
+        outln!("  send <n> <text>  Send text to COM port n");
+        outln!("  recv <n>     Read from COM port n");
+        outln!("  init <n>     Initialize COM port n");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "status") {
+        outln!("Serial Port Status:");
+        outln!("");
+
+        let count = serial::port_count();
+        outln!("  Initialized ports: {}", count);
+        outln!("");
+
+        for port_num in 1..=4u8 {
+            if let Some(stats) = serial::get_stats(port_num) {
+                outln!("  COM{}:", port_num);
+                outln!("    TX bytes: {}", stats.bytes_transmitted);
+                outln!("    RX bytes: {}", stats.bytes_received);
+                outln!("    RX overruns: {}", stats.rx_overruns);
+                outln!("    RX errors: {}", stats.rx_errors);
+                outln!("    TX errors: {}", stats.tx_errors);
+            }
+        }
+    } else if eq_ignore_case(args[0], "send") {
+        if args.len() < 3 {
+            outln!("Usage: serial send <port> <text>");
+            return;
+        }
+
+        let port_num: u8 = match args[1].parse() {
+            Ok(n) if n >= 1 && n <= 4 => n,
+            _ => {
+                outln!("Invalid port number (use 1-4)");
+                return;
+            }
+        };
+
+        // Collect remaining args as the message
+        let mut message = args[2..].join(" ");
+        message.push_str("\r\n");
+
+        match serial::write(port_num, message.as_bytes()) {
+            Ok(n) => outln!("Sent {} bytes to COM{}", n, port_num),
+            Err(e) => outln!("Send failed: {}", e),
+        }
+    } else if eq_ignore_case(args[0], "recv") {
+        if args.len() < 2 {
+            outln!("Usage: serial recv <port>");
+            return;
+        }
+
+        let port_num: u8 = match args[1].parse() {
+            Ok(n) if n >= 1 && n <= 4 => n,
+            _ => {
+                outln!("Invalid port number (use 1-4)");
+                return;
+            }
+        };
+
+        let mut buf = [0u8; 256];
+        let n = serial::read(port_num, &mut buf);
+
+        if n > 0 {
+            outln!("Received {} bytes from COM{}:", n, port_num);
+            // Try to display as text
+            if let Ok(s) = core::str::from_utf8(&buf[..n]) {
+                outln!("{}", s);
+            } else {
+                // Display as hex
+                for byte in &buf[..n] {
+                    out!("{:02X} ", byte);
+                }
+                outln!("");
+            }
+        } else {
+            outln!("No data available on COM{}", port_num);
+        }
+    } else if eq_ignore_case(args[0], "init") {
+        if args.len() < 2 {
+            outln!("Usage: serial init <port>");
+            return;
+        }
+
+        let port_num: u8 = match args[1].parse() {
+            Ok(n) if n >= 1 && n <= 4 => n,
+            _ => {
+                outln!("Invalid port number (use 1-4)");
+                return;
+            }
+        };
+
+        outln!("Serial ports are initialized at boot.");
+        outln!("Use 'serial status' to see port status.");
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'serial' for help");
     }
 }

@@ -1066,6 +1066,9 @@ impl Shell {
         // Network diagnostics
         } else if eq_ignore_case(cmd, "netinfo") {
             commands::cmd_netinfo(&args[1..argc]);
+        // Serial port
+        } else if eq_ignore_case(cmd, "serial") {
+            commands::cmd_serial(&args[1..argc]);
         // PE loader commands
         } else if eq_ignore_case(cmd, "pe") {
             commands::cmd_pe(&args[1..argc]);

@@ -31,6 +31,7 @@ pub mod acpi;
 pub mod apic;
 pub mod ata;
 pub mod keyboard;
+pub mod mouse;
 pub mod pci;
 pub mod pic;
 pub mod rtc;
