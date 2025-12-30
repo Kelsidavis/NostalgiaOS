@@ -15233,6 +15233,9 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  resolve    Resolve hostname to IP");
         outln!("  ipconfig   Configure static IP address");
         outln!("  dhcp       Run DHCP discovery");
+        outln!("  tcp        Show TCP socket status");
+        outln!("  connect    Connect to TCP server");
+        outln!("  listen     Listen on TCP port");
         return;
     }
 
@@ -15731,6 +15734,171 @@ pub fn cmd_netinfo(args: &[&str]) {
                 outln!("  DHCP failed: {}", e);
                 outln!("");
                 outln!("Note: Use 'netinfo ipconfig' for manual IP configuration");
+            }
+        }
+    } else if eq_ignore_case(args[0], "tcp") {
+        outln!("TCP Socket Status:");
+        outln!("");
+
+        let (active, max) = net::tcp::get_socket_stats();
+        outln!("  Active Sockets: {}/{}", active, max);
+        outln!("");
+
+        if active > 0 {
+            outln!("  ID  State          Local    Remote             RX   TX");
+            outln!("  --  -------------  -----    ----------------   ---  ---");
+            for i in 0..max {
+                if let Some((state, local_port, remote_port, remote_ip, rx_len, tx_len)) = net::tcp::get_socket_info(i) {
+                    if state != net::tcp::TcpState::Closed {
+                        outln!("  {:2}  {:13?}  {:5}    {:?}:{}  {}  {}",
+                            i, state, local_port, remote_ip, remote_port, rx_len, tx_len);
+                    }
+                }
+            }
+        }
+    } else if eq_ignore_case(args[0], "connect") {
+        // Usage: netinfo connect <ip> <port>
+        if args.len() < 3 {
+            outln!("Connect to a TCP server");
+            outln!("");
+            outln!("Usage: netinfo connect <ip> <port>");
+            outln!("");
+            outln!("Examples:");
+            outln!("  netinfo connect 192.168.1.1 80");
+            outln!("  netinfo connect 10.0.2.2 22");
+            return;
+        }
+
+        // Parse IP address
+        let parse_ip = |s: &str| -> Option<net::Ipv4Address> {
+            let mut octets = [0u8; 4];
+            let mut octet_idx = 0;
+            let mut current = 0u32;
+
+            for c in s.chars() {
+                if c == '.' {
+                    if octet_idx >= 3 || current > 255 {
+                        return None;
+                    }
+                    octets[octet_idx] = current as u8;
+                    octet_idx += 1;
+                    current = 0;
+                } else if let Some(d) = c.to_digit(10) {
+                    current = current * 10 + d;
+                } else {
+                    return None;
+                }
+            }
+            if octet_idx != 3 || current > 255 {
+                return None;
+            }
+            octets[3] = current as u8;
+            Some(net::Ipv4Address::new(octets))
+        };
+
+        let ip = match parse_ip(args[1]) {
+            Some(ip) => ip,
+            None => {
+                outln!("Invalid IP address format");
+                return;
+            }
+        };
+
+        let port: u16 = match args[2].parse() {
+            Ok(p) => p,
+            Err(_) => {
+                outln!("Invalid port number");
+                return;
+            }
+        };
+
+        outln!("Connecting to {:?}:{}...", ip, port);
+
+        // Create socket
+        let socket = match net::tcp::socket_create() {
+            Some(s) => s,
+            None => {
+                outln!("  Failed to create socket");
+                return;
+            }
+        };
+
+        // Find first non-loopback device
+        let device_idx = {
+            let mut found = None;
+            for i in 0..net::get_device_count() {
+                if let Some(device) = net::get_device(i) {
+                    if device.info.name != "lo0" && device.ip_address.is_some() {
+                        found = Some(i);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(i) => i,
+                None => {
+                    outln!("  No network device with IP configured");
+                    return;
+                }
+            }
+        };
+
+        match net::tcp::socket_connect(socket, device_idx, ip, port) {
+            Ok(()) => {
+                outln!("  SYN sent, socket {} waiting for SYN-ACK", socket);
+                outln!("  (Use 'netinfo tcp' to check connection state)");
+            }
+            Err(e) => {
+                outln!("  Connect failed: {}", e);
+                let _ = net::tcp::socket_close(socket);
+            }
+        }
+    } else if eq_ignore_case(args[0], "listen") {
+        // Usage: netinfo listen <port>
+        if args.len() < 2 {
+            outln!("Listen on a TCP port");
+            outln!("");
+            outln!("Usage: netinfo listen <port>");
+            outln!("");
+            outln!("Examples:");
+            outln!("  netinfo listen 8080");
+            outln!("  netinfo listen 23");
+            return;
+        }
+
+        let port: u16 = match args[1].parse() {
+            Ok(p) => p,
+            Err(_) => {
+                outln!("Invalid port number");
+                return;
+            }
+        };
+
+        // Create socket
+        let socket = match net::tcp::socket_create() {
+            Some(s) => s,
+            None => {
+                outln!("Failed to create socket");
+                return;
+            }
+        };
+
+        // Bind to port
+        if let Err(e) = net::tcp::socket_bind(socket, port) {
+            outln!("Failed to bind: {}", e);
+            let _ = net::tcp::socket_close(socket);
+            return;
+        }
+
+        // Start listening
+        match net::tcp::socket_listen(socket, 8) {
+            Ok(()) => {
+                outln!("Listening on port {} (socket {})", port, socket);
+                outln!("(Use 'netinfo tcp' to check for connections)");
+            }
+            Err(e) => {
+                outln!("Listen failed: {}", e);
+                let _ = net::tcp::socket_close(socket);
             }
         }
     } else {

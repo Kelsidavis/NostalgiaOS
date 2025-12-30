@@ -17,6 +17,7 @@ pub mod icmp;
 pub mod udp;
 pub mod dns;
 pub mod dhcp;
+pub mod tcp;
 pub mod loopback;
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -98,6 +99,7 @@ pub fn init() {
     arp::init();
     icmp::init();
     udp::init();
+    tcp::init();
     dns::init();
     dhcp::init();
 
@@ -273,10 +275,9 @@ fn handle_ip_packet(
             }
         }
         IpProtocol::Tcp => {
-            crate::serial_println!(
-                "[NET] TCP packet from {:?} (not yet handled)",
-                ip_header.source_addr
-            );
+            if let Some(tcp_header) = tcp::parse_tcp_header(ip_payload) {
+                tcp::handle_tcp_packet(device_index, ip_header, &tcp_header, ip_payload);
+            }
         }
         IpProtocol::Udp => {
             if let Some(udp_header) = udp::parse_udp_packet(ip_payload) {
