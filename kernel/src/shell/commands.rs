@@ -15237,6 +15237,7 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  connect    Connect to TCP server");
         outln!("  listen     Listen on TCP port");
         outln!("  http       Make HTTP GET request");
+        outln!("  telnet     Start/stop telnet server");
         return;
     }
 
@@ -16023,6 +16024,87 @@ pub fn cmd_netinfo(args: &[&str]) {
             }
             Err(e) => {
                 outln!("HTTP request failed: {}", e);
+            }
+        }
+    } else if eq_ignore_case(args[0], "telnet") {
+        // Usage: netinfo telnet [start|stop|status]
+        let subcmd = if args.len() >= 2 { args[1] } else { "status" };
+
+        if eq_ignore_case(subcmd, "start") {
+            // Find first non-loopback device with IP
+            let device_idx = {
+                let mut found = None;
+                for i in 0..net::get_device_count() {
+                    if let Some(device) = net::get_device(i) {
+                        if device.info.name != "lo0" && device.ip_address.is_some() {
+                            found = Some(i);
+                            break;
+                        }
+                    }
+                }
+                match found {
+                    Some(i) => i,
+                    None => {
+                        outln!("No network device with IP configured");
+                        outln!("Use 'netinfo ipconfig' to configure an IP address first");
+                        return;
+                    }
+                }
+            };
+
+            let port = if args.len() >= 3 {
+                args[2].parse().unwrap_or(23)
+            } else {
+                23
+            };
+
+            outln!("Starting telnet server on port {}...", port);
+            match net::telnet::start_server(device_idx, port) {
+                Ok(()) => {
+                    outln!("Telnet server started");
+                    outln!("");
+                    outln!("Connect with: telnet <ip> {}", port);
+                    if let Some(device) = net::get_device(device_idx) {
+                        if let Some(ip) = device.ip_address {
+                            outln!("Example: telnet {:?} {}", ip, port);
+                        }
+                    }
+                }
+                Err(e) => outln!("Failed to start: {}", e),
+            }
+        } else if eq_ignore_case(subcmd, "stop") {
+            outln!("Stopping telnet server...");
+            match net::telnet::stop_server() {
+                Ok(()) => outln!("Telnet server stopped"),
+                Err(e) => outln!("Failed to stop: {}", e),
+            }
+        } else if eq_ignore_case(subcmd, "poll") {
+            // Manual poll for testing
+            net::telnet::poll();
+            outln!("Telnet polled");
+        } else {
+            // Show status
+            let (listening, active, port) = net::telnet::get_status();
+
+            outln!("Telnet Server Status:");
+            outln!("");
+            if listening {
+                outln!("  Status:   Running on port {}", port);
+                outln!("  Sessions: {}/{}", active, net::telnet::MAX_TELNET_SESSIONS);
+                outln!("");
+
+                if active > 0 {
+                    outln!("Active Sessions:");
+                    for i in 0..net::telnet::MAX_TELNET_SESSIONS {
+                        if let Some((state, ip, rport)) = net::telnet::get_session_info(i) {
+                            outln!("  {}: {:?}:{} ({:?})", i, ip, rport, state);
+                        }
+                    }
+                }
+            } else {
+                outln!("  Status: Not running");
+                outln!("");
+                outln!("Use 'netinfo telnet start' to start the server");
             }
         }
     } else {

@@ -19,6 +19,7 @@ pub mod dns;
 pub mod dhcp;
 pub mod tcp;
 pub mod http;
+pub mod telnet;
 pub mod loopback;
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -104,6 +105,7 @@ pub fn init() {
     dns::init();
     dhcp::init();
     http::init();
+    telnet::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 
