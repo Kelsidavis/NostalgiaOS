@@ -15269,6 +15269,8 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  ftp        FTP file transfer");
         outln!("  syslog     Configure syslog client");
         outln!("  smtp       SMTP email notifications");
+        outln!("  pop3       POP3 email retrieval");
+        outln!("  snmp       SNMP network monitoring");
         return;
     }
 
@@ -16719,6 +16721,215 @@ pub fn cmd_netinfo(args: &[&str]) {
         } else {
             outln!("Unknown SMTP command: {}", args[1]);
             outln!("Use 'netinfo smtp' for help");
+        }
+    } else if eq_ignore_case(args[0], "pop3") {
+        // POP3 email retrieval
+        if args.len() < 2 {
+            outln!("Usage: netinfo pop3 <command> [args]");
+            outln!("");
+            outln!("Commands:");
+            outln!("  stats                Show POP3 statistics");
+            outln!("  check <ip> <user> <pass>  Check mailbox");
+            return;
+        }
+
+        if eq_ignore_case(args[1], "stats") {
+            let stats = net::pop3::get_stats();
+            outln!("POP3 Statistics:");
+            outln!("  Connections: {}", stats.connections);
+            outln!("  Successful logins: {}", stats.successful_logins);
+            outln!("  Failed logins: {}", stats.failed_logins);
+            outln!("  Messages retrieved: {}", stats.messages_retrieved);
+            outln!("  Messages deleted: {}", stats.messages_deleted);
+        } else if eq_ignore_case(args[1], "check") {
+            if args.len() < 5 {
+                outln!("Usage: netinfo pop3 check <server_ip> <username> <password>");
+                return;
+            }
+
+            // Find a device with IP
+            let device_idx = (0..net::get_device_count())
+                .find(|&i| net::get_device(i).map(|d| d.ip_address.is_some()).unwrap_or(false))
+                .unwrap_or(0);
+
+            // Parse IP address
+            let ip_str = args[2];
+            let mut octets = [0u8; 4];
+            let mut octet_idx = 0;
+            let mut current: u16 = 0;
+            let mut valid = true;
+
+            for c in ip_str.chars() {
+                if c == '.' {
+                    if current > 255 || octet_idx >= 3 {
+                        valid = false;
+                        break;
+                    }
+                    octets[octet_idx] = current as u8;
+                    octet_idx += 1;
+                    current = 0;
+                } else if let Some(digit) = c.to_digit(10) {
+                    current = current * 10 + digit as u16;
+                } else {
+                    valid = false;
+                    break;
+                }
+            }
+
+            if valid && octet_idx == 3 && current <= 255 {
+                octets[3] = current as u8;
+            } else {
+                outln!("Invalid IP address: {}", args[2]);
+                return;
+            }
+
+            let server_ip = net::ip::Ipv4Address::new(octets);
+            let username = args[3];
+            let password = args[4];
+
+            outln!("Connecting to {:?}:110...", server_ip);
+
+            let mut session = net::pop3::Pop3Session::new(device_idx, server_ip);
+            match session.connect() {
+                Ok(_) => outln!("  Connected to POP3 server"),
+                Err(e) => {
+                    outln!("  Connection failed: {}", e);
+                    return;
+                }
+            }
+
+            match session.login(username, password) {
+                Ok(_) => outln!("  Login successful"),
+                Err(e) => {
+                    outln!("  Login failed: {}", e);
+                    return;
+                }
+            }
+
+            match session.stat() {
+                Ok((count, size)) => {
+                    outln!("  Messages: {}", count);
+                    outln!("  Total size: {} bytes", size);
+                }
+                Err(e) => outln!("  STAT failed: {}", e),
+            }
+        } else {
+            outln!("Unknown POP3 command: {}", args[1]);
+            outln!("Use 'netinfo pop3' for help");
+        }
+    } else if eq_ignore_case(args[0], "snmp") {
+        // SNMP network monitoring
+        if args.len() < 2 {
+            outln!("Usage: netinfo snmp <command> [args]");
+            outln!("");
+            outln!("Commands:");
+            outln!("  stats                Show SNMP statistics");
+            outln!("  get <ip> <oid>       Get SNMP value");
+            outln!("  sysinfo <ip>         Get system info");
+            return;
+        }
+
+        if eq_ignore_case(args[1], "stats") {
+            let stats = net::snmp::get_stats();
+            outln!("SNMP Statistics:");
+            outln!("  Requests sent: {}", stats.requests_sent);
+            outln!("  Responses received: {}", stats.responses_received);
+            outln!("  Timeouts: {}", stats.timeouts);
+        } else if eq_ignore_case(args[1], "get") || eq_ignore_case(args[1], "sysinfo") {
+            if args.len() < 3 {
+                outln!("Usage: netinfo snmp {} <ip> [community]", args[1]);
+                return;
+            }
+
+            // Find a device with IP
+            let device_idx = (0..net::get_device_count())
+                .find(|&i| net::get_device(i).map(|d| d.ip_address.is_some()).unwrap_or(false))
+                .unwrap_or(0);
+
+            // Parse IP address
+            let ip_str = args[2];
+            let mut octets = [0u8; 4];
+            let mut octet_idx = 0;
+            let mut current: u16 = 0;
+            let mut valid = true;
+
+            for c in ip_str.chars() {
+                if c == '.' {
+                    if current > 255 || octet_idx >= 3 {
+                        valid = false;
+                        break;
+                    }
+                    octets[octet_idx] = current as u8;
+                    octet_idx += 1;
+                    current = 0;
+                } else if let Some(digit) = c.to_digit(10) {
+                    current = current * 10 + digit as u16;
+                } else {
+                    valid = false;
+                    break;
+                }
+            }
+
+            if valid && octet_idx == 3 && current <= 255 {
+                octets[3] = current as u8;
+            } else {
+                outln!("Invalid IP address: {}", args[2]);
+                return;
+            }
+
+            let target_ip = net::ip::Ipv4Address::new(octets);
+            let community = if args.len() > 3 { args[3] } else { "public" };
+
+            if eq_ignore_case(args[1], "sysinfo") {
+                outln!("Querying {:?} (community: {})...", target_ip, community);
+
+                // Query system name
+                match net::snmp::get_single(device_idx, target_ip, community, net::snmp::oid::SYS_NAME, 3000) {
+                    Ok(v) => outln!("  System Name: {}", v.to_string()),
+                    Err(e) => outln!("  System Name: {}", e),
+                }
+
+                // Query system description
+                match net::snmp::get_single(device_idx, target_ip, community, net::snmp::oid::SYS_DESCR, 3000) {
+                    Ok(v) => outln!("  Description: {}", v.to_string()),
+                    Err(e) => outln!("  Description: {}", e),
+                }
+
+                // Query uptime
+                match net::snmp::get_single(device_idx, target_ip, community, net::snmp::oid::SYS_UP_TIME, 3000) {
+                    Ok(v) => outln!("  Uptime: {}", v.to_string()),
+                    Err(e) => outln!("  Uptime: {}", e),
+                }
+
+                // Query location
+                match net::snmp::get_single(device_idx, target_ip, community, net::snmp::oid::SYS_LOCATION, 3000) {
+                    Ok(v) => outln!("  Location: {}", v.to_string()),
+                    Err(e) => outln!("  Location: {}", e),
+                }
+            } else {
+                // Get specific OID
+                if args.len() < 4 {
+                    outln!("Usage: netinfo snmp get <ip> <oid> [community]");
+                    return;
+                }
+
+                let oid_str = args[3];
+                let community = if args.len() > 4 { args[4] } else { "public" };
+
+                match net::snmp::parse_oid(oid_str) {
+                    Some(oid) => {
+                        outln!("Querying {} on {:?}...", oid_str, target_ip);
+                        match net::snmp::get_single(device_idx, target_ip, community, &oid, 3000) {
+                            Ok(v) => outln!("  Value: {}", v.to_string()),
+                            Err(e) => outln!("  Error: {}", e),
+                        }
+                    }
+                    None => outln!("Invalid OID format: {}", oid_str),
+                }
+            }
+        } else {
+            outln!("Unknown SNMP command: {}", args[1]);
+            outln!("Use 'netinfo snmp' for help");
         }
     } else {
         outln!("Unknown command: {}", args[0]);

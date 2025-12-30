@@ -28,6 +28,8 @@ pub mod loopback;
 pub mod ftp;
 pub mod syslog;
 pub mod smtp;
+pub mod pop3;
+pub mod snmp;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::vec::Vec;
@@ -120,6 +122,8 @@ pub fn init() {
     ftp::init();
     syslog::init();
     smtp::init();
+    pop3::init();
+    snmp::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 
