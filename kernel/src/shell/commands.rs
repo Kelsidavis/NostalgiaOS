@@ -20048,3 +20048,573 @@ pub fn cmd_label(args: &[&str]) {
     outln!("Volume label set to: {}", label);
     outln!("(Note: Label change not actually implemented)");
 }
+
+/// XCOPY command - extended copy with options
+pub fn cmd_xcopy(args: &[&str]) {
+    if args.len() < 2 {
+        outln!("Copies files and directory trees.");
+        outln!("");
+        outln!("XCOPY source destination [/S] [/E] [/V] [/Y]");
+        outln!("");
+        outln!("  source       Source file(s) or directory");
+        outln!("  destination  Destination");
+        outln!("  /S           Copy directories and subdirectories (non-empty)");
+        outln!("  /E           Copy directories and subdirectories (including empty)");
+        outln!("  /V           Verify each new file");
+        outln!("  /Y           Suppress prompting");
+        return;
+    }
+
+    // Parse options
+    let mut copy_subdirs = false;
+    let mut include_empty = false;
+    let mut verify = false;
+    let mut files: alloc::vec::Vec<&str> = alloc::vec::Vec::new();
+
+    for arg in args {
+        let upper = arg.to_ascii_uppercase();
+        if upper == "/S" || upper == "-S" {
+            copy_subdirs = true;
+        } else if upper == "/E" || upper == "-E" {
+            include_empty = true;
+            copy_subdirs = true;
+        } else if upper == "/V" || upper == "-V" {
+            verify = true;
+        } else if upper == "/Y" || upper == "-Y" {
+            // Suppress prompting - we don't prompt anyway
+        } else if !arg.starts_with('/') && !arg.starts_with('-') {
+            files.push(arg);
+        }
+    }
+
+    if files.len() < 2 {
+        outln!("XCOPY: Source and destination required");
+        return;
+    }
+
+    let src = files[0];
+    let dst = files[1];
+    let src_path = resolve_path(src);
+    let dst_path = resolve_path(dst);
+
+    let mut copied = 0u32;
+
+    if copy_subdirs {
+        // Recursive copy
+        copied = xcopy_recursive(&src_path, &dst_path, include_empty, verify);
+    } else {
+        // Single file or directory contents
+        copied = xcopy_files(&src_path, &dst_path, verify);
+    }
+
+    outln!("{} File(s) copied", copied);
+}
+
+/// Helper: copy files from source to destination (non-recursive)
+fn xcopy_files(src_path: &str, dst_path: &str, verify: bool) -> u32 {
+    let mut copied = 0u32;
+
+    // Check if source is a file
+    let handle = fs::open(src_path, 0);
+    if handle.is_ok() {
+        // Source is a file - copy it
+        let h = handle.unwrap();
+        let mut content = alloc::vec::Vec::new();
+        let mut buf = [0u8; 4096];
+
+        loop {
+            match fs::read(h, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => content.extend_from_slice(&buf[..n]),
+                Err(_) => break,
+            }
+        }
+        let _ = fs::close(h);
+
+        // Create destination
+        if let Ok(dh) = fs::create(dst_path, 0) {
+            if fs::write(dh, &content).is_ok() {
+                outln!("{}", src_path);
+                copied = 1;
+
+                if verify {
+                    // Verify by reading back
+                    let _ = fs::close(dh);
+                    if let Ok(vh) = fs::open(dst_path, 0) {
+                        let mut verify_buf = alloc::vec::Vec::new();
+                        let mut vbuf = [0u8; 4096];
+                        loop {
+                            match fs::read(vh, &mut vbuf) {
+                                Ok(0) => break,
+                                Ok(n) => verify_buf.extend_from_slice(&vbuf[..n]),
+                                Err(_) => break,
+                            }
+                        }
+                        let _ = fs::close(vh);
+                        if verify_buf != content {
+                            outln!("XCOPY: Verification failed for {}", dst_path);
+                        }
+                    }
+                } else {
+                    let _ = fs::close(dh);
+                }
+            } else {
+                let _ = fs::close(dh);
+            }
+        }
+        return copied;
+    }
+
+    // Source is a directory - copy contents
+    let mut offset = 0u32;
+    loop {
+        match fs::readdir(src_path, offset) {
+            Ok(entry) => {
+                let name = entry.name_str();
+                if name != "." && name != ".." {
+                    if entry.file_type == fs::FileType::Regular {
+                        let src_file = alloc::format!("{}\\{}", src_path.trim_end_matches('\\'), name);
+                        let dst_file = alloc::format!("{}\\{}", dst_path.trim_end_matches('\\'), name);
+                        copied += xcopy_files(&src_file, &dst_file, verify);
+                    }
+                }
+                offset = entry.next_offset;
+            }
+            Err(fs::FsStatus::NoMoreEntries) => break,
+            Err(_) => break,
+        }
+    }
+
+    copied
+}
+
+/// Helper: recursive xcopy
+fn xcopy_recursive(src_path: &str, dst_path: &str, include_empty: bool, verify: bool) -> u32 {
+    let mut copied = 0u32;
+
+    // Create destination directory if needed
+    let _ = fs::mkdir(dst_path);
+
+    let mut offset = 0u32;
+    loop {
+        match fs::readdir(src_path, offset) {
+            Ok(entry) => {
+                let name = entry.name_str();
+                if name != "." && name != ".." {
+                    let src_item = alloc::format!("{}\\{}", src_path.trim_end_matches('\\'), name);
+                    let dst_item = alloc::format!("{}\\{}", dst_path.trim_end_matches('\\'), name);
+
+                    if entry.file_type == fs::FileType::Directory {
+                        // Check if directory has contents
+                        let has_contents = dir_has_contents(&src_item);
+
+                        if has_contents || include_empty {
+                            copied += xcopy_recursive(&src_item, &dst_item, include_empty, verify);
+                        }
+                    } else if entry.file_type == fs::FileType::Regular {
+                        copied += xcopy_files(&src_item, &dst_item, verify);
+                    }
+                }
+                offset = entry.next_offset;
+            }
+            Err(fs::FsStatus::NoMoreEntries) => break,
+            Err(_) => break,
+        }
+    }
+
+    copied
+}
+
+/// Check if directory has any contents
+fn dir_has_contents(path: &str) -> bool {
+    let mut offset = 0u32;
+    loop {
+        match fs::readdir(path, offset) {
+            Ok(entry) => {
+                let name = entry.name_str();
+                if name != "." && name != ".." {
+                    return true;
+                }
+                offset = entry.next_offset;
+            }
+            Err(_) => break,
+        }
+    }
+    false
+}
+
+/// Directory stack for pushd/popd
+static mut DIR_STACK: [[u8; 64]; 16] = [[0u8; 64]; 16];
+static mut DIR_STACK_LEN: [usize; 16] = [0; 16];
+static mut DIR_STACK_TOP: usize = 0;
+
+/// PUSHD command - save current directory and change to new one
+pub fn cmd_pushd(args: &[&str]) {
+    if args.is_empty() {
+        // Display stack
+        outln!("Directory stack:");
+        unsafe {
+            for i in (0..DIR_STACK_TOP).rev() {
+                if let Ok(path) = core::str::from_utf8(&DIR_STACK[i][..DIR_STACK_LEN[i]]) {
+                    outln!("  {}", path);
+                }
+            }
+        }
+        if unsafe { DIR_STACK_TOP } == 0 {
+            outln!("  (empty)");
+        }
+        return;
+    }
+
+    let new_dir = args[0];
+    let current = get_current_dir();
+
+    // Push current directory onto stack
+    unsafe {
+        if DIR_STACK_TOP >= 16 {
+            outln!("PUSHD: Directory stack full");
+            return;
+        }
+
+        let len = current.len().min(63);
+        DIR_STACK[DIR_STACK_TOP][..len].copy_from_slice(&current.as_bytes()[..len]);
+        DIR_STACK_LEN[DIR_STACK_TOP] = len;
+        DIR_STACK_TOP += 1;
+    }
+
+    // Change to new directory
+    let full_path = resolve_path(new_dir);
+
+    // Verify directory exists
+    let mut offset = 0u32;
+    match fs::readdir(&full_path, offset) {
+        Ok(_) | Err(fs::FsStatus::NoMoreEntries) => {
+            // Directory exists
+            set_current_dir(&full_path);
+            outln!("{}", full_path);
+        }
+        Err(_) => {
+            // Pop the directory we just pushed
+            unsafe {
+                DIR_STACK_TOP -= 1;
+            }
+            outln!("PUSHD: The system cannot find the path specified.");
+        }
+    }
+}
+
+/// POPD command - restore previous directory from stack
+pub fn cmd_popd(_args: &[&str]) {
+    unsafe {
+        if DIR_STACK_TOP == 0 {
+            outln!("POPD: Directory stack empty");
+            return;
+        }
+
+        DIR_STACK_TOP -= 1;
+        let len = DIR_STACK_LEN[DIR_STACK_TOP];
+        if let Ok(path) = core::str::from_utf8(&DIR_STACK[DIR_STACK_TOP][..len]) {
+            set_current_dir(path);
+            outln!("{}", path);
+        }
+    }
+}
+
+/// Drive substitution table (simple simulation)
+static mut SUBST_TABLE: [([u8; 64], usize); 26] = [([0u8; 64], 0); 26];
+
+/// SUBST command - substitute a drive letter for a path
+pub fn cmd_subst(args: &[&str]) {
+    if args.is_empty() {
+        // Display current substitutions
+        outln!("Current drive substitutions:");
+        let mut count = 0;
+        unsafe {
+            for (i, (path, len)) in SUBST_TABLE.iter().enumerate() {
+                if *len > 0 {
+                    let letter = (b'A' + i as u8) as char;
+                    if let Ok(p) = core::str::from_utf8(&path[..*len]) {
+                        outln!("{}:\\  =>  {}", letter, p);
+                        count += 1;
+                    }
+                }
+            }
+        }
+        if count == 0 {
+            outln!("  (none)");
+        }
+        return;
+    }
+
+    // Parse: SUBST drive: path  or  SUBST drive: /D
+    if args.len() >= 2 {
+        let drive = args[0];
+        let second = args[1];
+
+        // Get drive letter
+        let letter = drive.chars().next().unwrap_or('?').to_ascii_uppercase();
+        if letter < 'A' || letter > 'Z' {
+            outln!("SUBST: Invalid drive letter");
+            return;
+        }
+        let idx = (letter as u8 - b'A') as usize;
+
+        if second == "/D" || second == "/d" || second == "-d" || second == "-D" {
+            // Delete substitution
+            unsafe {
+                SUBST_TABLE[idx].1 = 0;
+            }
+            outln!("Drive {}:\\ substitution deleted", letter);
+        } else {
+            // Add substitution
+            let path = resolve_path(second);
+            unsafe {
+                let len = path.len().min(63);
+                SUBST_TABLE[idx].0[..len].copy_from_slice(&path.as_bytes()[..len]);
+                SUBST_TABLE[idx].1 = len;
+            }
+            outln!("{}:\\ => {}", letter, path);
+        }
+    } else {
+        outln!("SUBST drive: path");
+        outln!("SUBST drive: /D");
+    }
+}
+
+/// Macro table for doskey
+static mut DOSKEY_MACROS: [([u8; 32], [u8; 128], usize, usize); 16] = [([0u8; 32], [0u8; 128], 0, 0); 16];
+static mut DOSKEY_COUNT: usize = 0;
+
+/// DOSKEY command - create command macros
+pub fn cmd_doskey(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Creates command-line macros.");
+        outln!("");
+        outln!("DOSKEY macroname=text");
+        outln!("DOSKEY /MACROS");
+        outln!("");
+        outln!("  macroname  Name for the macro");
+        outln!("  text       Command(s) to assign. Use $1-$9 for parameters");
+        outln!("  /MACROS    Display all macros");
+        return;
+    }
+
+    // Check for /MACROS
+    if args[0].to_ascii_uppercase() == "/MACROS" {
+        outln!("Defined macros:");
+        unsafe {
+            for i in 0..DOSKEY_COUNT {
+                let (name, cmd, nlen, clen) = &DOSKEY_MACROS[i];
+                if let (Ok(n), Ok(c)) = (
+                    core::str::from_utf8(&name[..*nlen]),
+                    core::str::from_utf8(&cmd[..*clen])
+                ) {
+                    outln!("  {}={}", n, c);
+                }
+            }
+        }
+        if unsafe { DOSKEY_COUNT } == 0 {
+            outln!("  (none)");
+        }
+        return;
+    }
+
+    // Parse macro=command
+    let input = args.join(" ");
+    if let Some(eq_pos) = input.find('=') {
+        let name = input[..eq_pos].trim();
+        let command = input[eq_pos + 1..].trim();
+
+        if name.is_empty() {
+            outln!("DOSKEY: Invalid macro name");
+            return;
+        }
+
+        // Check if macro already exists
+        unsafe {
+            let mut found_idx = None;
+            for i in 0..DOSKEY_COUNT {
+                if let Ok(existing) = core::str::from_utf8(&DOSKEY_MACROS[i].0[..DOSKEY_MACROS[i].2]) {
+                    if eq_ignore_case(existing, name) {
+                        found_idx = Some(i);
+                        break;
+                    }
+                }
+            }
+
+            if command.is_empty() {
+                // Delete macro
+                if let Some(idx) = found_idx {
+                    // Shift remaining macros
+                    for i in idx..DOSKEY_COUNT - 1 {
+                        DOSKEY_MACROS[i] = DOSKEY_MACROS[i + 1];
+                    }
+                    DOSKEY_COUNT -= 1;
+                    outln!("Macro '{}' deleted", name);
+                }
+            } else {
+                // Add/update macro
+                let idx = found_idx.unwrap_or_else(|| {
+                    let i = DOSKEY_COUNT;
+                    if DOSKEY_COUNT < 16 {
+                        DOSKEY_COUNT += 1;
+                    }
+                    i
+                });
+
+                if idx < 16 {
+                    let nlen = name.len().min(31);
+                    let clen = command.len().min(127);
+                    DOSKEY_MACROS[idx].0[..nlen].copy_from_slice(&name.as_bytes()[..nlen]);
+                    DOSKEY_MACROS[idx].1[..clen].copy_from_slice(&command.as_bytes()[..clen]);
+                    DOSKEY_MACROS[idx].2 = nlen;
+                    DOSKEY_MACROS[idx].3 = clen;
+                    outln!("Macro '{}' defined", name);
+                } else {
+                    outln!("DOSKEY: Macro table full");
+                }
+            }
+        }
+    } else {
+        outln!("DOSKEY: Expected macro=command");
+    }
+}
+
+/// ASSOC command - display or modify file associations
+pub fn cmd_assoc(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Displays or modifies file extension associations.");
+        outln!("");
+        outln!("ASSOC [.ext[=[fileType]]]");
+        outln!("");
+        outln!("Current associations:");
+        outln!("  .txt=txtfile");
+        outln!("  .exe=exefile");
+        outln!("  .bat=batfile");
+        outln!("  .cmd=cmdfile");
+        outln!("  .com=comfile");
+        outln!("");
+        outln!("(Note: Associations are simulated)");
+        return;
+    }
+
+    let input = args.join(" ");
+    if let Some(eq_pos) = input.find('=') {
+        let ext = &input[..eq_pos];
+        let ftype = &input[eq_pos + 1..];
+        outln!("{}={}", ext, ftype);
+        outln!("(Note: Association not actually changed)");
+    } else {
+        // Look up extension
+        let ext = args[0].to_ascii_lowercase();
+        match ext.as_str() {
+            ".txt" => outln!(".txt=txtfile"),
+            ".exe" => outln!(".exe=exefile"),
+            ".bat" => outln!(".bat=batfile"),
+            ".cmd" => outln!(".cmd=cmdfile"),
+            ".com" => outln!(".com=comfile"),
+            _ => outln!("File association not found for {}", ext),
+        }
+    }
+}
+
+/// FTYPE command - display or modify file type commands
+pub fn cmd_ftype(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Displays or modifies file types used in file extension associations.");
+        outln!("");
+        outln!("FTYPE [fileType[=[command]]]");
+        outln!("");
+        outln!("Current file types:");
+        outln!("  txtfile=\"%SystemRoot%\\system32\\notepad.exe\" \"%1\"");
+        outln!("  exefile=\"%1\" %*");
+        outln!("  batfile=\"%SystemRoot%\\system32\\cmd.exe\" /c \"%1\" %*");
+        outln!("");
+        outln!("(Note: File types are simulated)");
+        return;
+    }
+
+    let input = args.join(" ");
+    if let Some(eq_pos) = input.find('=') {
+        let ftype = &input[..eq_pos];
+        let cmd = &input[eq_pos + 1..];
+        outln!("{}={}", ftype, cmd);
+        outln!("(Note: File type not actually changed)");
+    } else {
+        outln!("File type '{}' not found", args[0]);
+    }
+}
+
+/// MODE command - configure system devices
+pub fn cmd_mode(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Configures system devices.");
+        outln!("");
+        outln!("MODE device [options]");
+        outln!("");
+        outln!("Devices:");
+        outln!("  CON    Console (screen)");
+        outln!("  COM1   Serial port 1");
+        outln!("  COM2   Serial port 2");
+        outln!("  LPT1   Printer port 1");
+        outln!("");
+        outln!("Example: MODE CON COLS=80 LINES=25");
+        return;
+    }
+
+    let device = args[0].to_ascii_uppercase();
+
+    if device == "CON" {
+        if args.len() > 1 {
+            outln!("Status for device CON:");
+            for arg in &args[1..] {
+                let upper = arg.to_ascii_uppercase();
+                if upper.starts_with("COLS=") || upper.starts_with("LINES=") {
+                    outln!("  {} (simulated)", upper);
+                }
+            }
+        } else {
+            outln!("Status for device CON:");
+            outln!("  Lines:         25");
+            outln!("  Columns:       80");
+            outln!("  Keyboard rate: 31");
+            outln!("  Keyboard delay: 1");
+            outln!("  Code page:     437");
+        }
+    } else if device.starts_with("COM") {
+        outln!("Status for device {}:", device);
+        outln!("  Baud:         115200");
+        outln!("  Parity:       None");
+        outln!("  Data Bits:    8");
+        outln!("  Stop Bits:    1");
+        outln!("  Timeout:      OFF");
+    } else if device.starts_with("LPT") {
+        outln!("Status for device {}:", device);
+        outln!("  Not available (no printer port)");
+    } else {
+        outln!("Illegal device name - {}", device);
+    }
+}
+
+/// START command - start a program (stub)
+pub fn cmd_start(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Starts a separate window to run a specified program or command.");
+        outln!("");
+        outln!("START [\"title\"] [/D path] [/I] [/MIN] [/MAX] command");
+        outln!("");
+        outln!("  \"title\"  Title for the command window");
+        outln!("  /D path  Starting directory");
+        outln!("  /I       Use original environment");
+        outln!("  /MIN     Start minimized");
+        outln!("  /MAX     Start maximized");
+        outln!("");
+        outln!("(Note: Multi-window not supported in serial console)");
+        return;
+    }
+
+    // Just echo what would be started
+    let program = args.join(" ");
+    outln!("Starting: {}", program);
+    outln!("(Note: Would start in new window if GUI available)");
+}

@@ -146,26 +146,26 @@ const HISTORY_SIZE: usize = 32;
 
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
-    "acpi", "apic", "apcq", "arp", "attrib",
+    "acpi", "apic", "apcq", "arp", "assoc", "attrib",
     "blocks", "bt",
     "cache", "callback", "cat", "cc", "cd", "chcp", "cid", "clear", "cls", "color", "comp", "copy", "cp", "cpufeatures", "cpuinfo",
-    "date", "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
-    "fc", "files", "find", "findstr", "finger",
+    "date", "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "doskey", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
+    "fc", "files", "find", "findstr", "finger", "ftype",
     "hal", "handles", "head", "heap", "help", "history", "hostname", "hpet",
     "ident", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
     "job", "ke", "keyedev",
     "label", "ldr", "lookaside", "ls", "luid",
-    "md", "mem", "memmap", "memory", "mkdir", "mm", "more", "msr", "mv",
+    "md", "mem", "memmap", "memory", "mkdir", "mm", "mode", "more", "msr", "mv",
     "net", "netinfo", "netserv", "netstat", "nslookup", "ntfs",
     "ob", "obdir",
-    "pagetable", "partition", "path", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "prompt", "ps", "pwd",
+    "pagetable", "partition", "path", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "popd", "port", "power", "prcb", "prefetch", "prompt", "ps", "pushd", "pwd",
     "qotd", "quit",
     "ramdisk", "rd", "reboot", "reg", "ren", "rename", "replace", "resume", "rm", "rmdir", "route", "rtl", "shutdown",
-    "sc", "sched", "se", "section", "services", "set", "smbios", "sort", "stack", "suspend", "sysinfo", "systeminfo",
+    "sc", "sched", "se", "section", "services", "set", "smbios", "sort", "stack", "start", "subst", "suspend", "sysinfo", "systeminfo",
     "tail", "tasklist", "tasks", "teb", "time", "timer", "timerq", "timeserv", "title", "touch", "tracert", "tree", "type",
     "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "version", "volumes",
-    "waitq", "wc", "whois", "whoami", "worker", "wset",
+    "waitq", "wc", "whois", "whoami", "worker", "wset", "xcopy",
 ];
 
 /// Current working directory
@@ -1396,6 +1396,33 @@ impl Shell {
         // LABEL - volume label
         } else if eq_ignore_case(cmd, "label") {
             commands::cmd_label(&args[1..argc]);
+        // XCOPY - extended copy
+        } else if eq_ignore_case(cmd, "xcopy") {
+            commands::cmd_xcopy(&args[1..argc]);
+        // PUSHD - push directory
+        } else if eq_ignore_case(cmd, "pushd") {
+            commands::cmd_pushd(&args[1..argc]);
+        // POPD - pop directory
+        } else if eq_ignore_case(cmd, "popd") {
+            commands::cmd_popd(&args[1..argc]);
+        // SUBST - drive substitution
+        } else if eq_ignore_case(cmd, "subst") {
+            commands::cmd_subst(&args[1..argc]);
+        // DOSKEY - command macros
+        } else if eq_ignore_case(cmd, "doskey") {
+            commands::cmd_doskey(&args[1..argc]);
+        // ASSOC - file associations
+        } else if eq_ignore_case(cmd, "assoc") {
+            commands::cmd_assoc(&args[1..argc]);
+        // FTYPE - file types
+        } else if eq_ignore_case(cmd, "ftype") {
+            commands::cmd_ftype(&args[1..argc]);
+        // MODE - device configuration
+        } else if eq_ignore_case(cmd, "mode") {
+            commands::cmd_mode(&args[1..argc]);
+        // START - start program
+        } else if eq_ignore_case(cmd, "start") {
+            commands::cmd_start(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
