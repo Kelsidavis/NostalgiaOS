@@ -18260,3 +18260,369 @@ pub fn cmd_systeminfo(_args: &[&str]) {
 
     outln!("");
 }
+
+/// Windows-style tasklist command
+pub fn cmd_tasklist(args: &[&str]) {
+    use crate::ps;
+
+    let show_verbose = args.iter().any(|a| eq_ignore_case(a, "/v") || eq_ignore_case(a, "-v"));
+
+    outln!("");
+    outln!("Image Name                     PID Session Name        Mem Usage");
+    outln!("========================= ======== ================ ============");
+
+    unsafe {
+        let list_head = ps::get_active_process_list();
+        if (*list_head).is_empty() {
+            outln!("(No processes)");
+        } else {
+            let mut count = 0;
+            let mut entry = (*list_head).flink;
+            while entry != list_head && count < 100 {
+                let process = crate::containing_record!(entry, ps::EProcess, active_process_links);
+
+                let pid = (*process).process_id();
+                let name = (*process).image_name();
+                let name_str = core::str::from_utf8(name).unwrap_or("Unknown");
+
+                // Estimate memory usage (placeholder)
+                let mem_kb = 1024 + (pid as u32 * 100) % 50000;
+
+                outln!("{:<25} {:>8} {:<16} {:>8} K",
+                    name_str, pid, "Console", mem_kb);
+
+                if show_verbose {
+                    let thread_count = (*process).thread_count();
+                    let ppid = (*process).parent_process_id();
+                    outln!("  Threads: {}  Parent PID: {}", thread_count, ppid);
+                }
+
+                entry = (*entry).flink;
+                count += 1;
+            }
+        }
+    }
+    outln!("");
+}
+
+/// Current username storage
+static mut USERNAME: [u8; 32] = *b"Administrator\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+static mut USERNAME_LEN: usize = 13;
+
+/// Get current username
+pub fn get_username() -> &'static str {
+    unsafe {
+        core::str::from_utf8(&USERNAME[..USERNAME_LEN]).unwrap_or("Administrator")
+    }
+}
+
+/// Set username
+pub fn set_username(name: &str) {
+    unsafe {
+        let len = name.len().min(31);
+        USERNAME[..len].copy_from_slice(&name.as_bytes()[..len]);
+        USERNAME_LEN = len;
+    }
+}
+
+/// Whoami command - display current user
+pub fn cmd_whoami(_args: &[&str]) {
+    outln!("{}\\{}", get_hostname(), get_username());
+}
+
+/// Calculate day of week (Zeller's formula, 0=Sun...6=Sat)
+fn day_of_week(year: u16, month: u8, day: u8) -> u8 {
+    let y = year as i32;
+    let m = month as i32;
+    let d = day as i32;
+
+    // Adjust for Zeller's formula (Jan/Feb are months 13/14 of previous year)
+    let (y, m) = if m < 3 {
+        (y - 1, m + 12)
+    } else {
+        (y, m)
+    };
+
+    let k = y % 100;
+    let j = y / 100;
+
+    let h = (d + (13 * (m + 1)) / 5 + k + k / 4 + j / 4 - 2 * j) % 7;
+    // Convert from Zeller (0=Sat) to 0=Sun
+    ((h + 6) % 7) as u8
+}
+
+/// Date command - display/set system date
+pub fn cmd_date(args: &[&str]) {
+    use crate::hal::rtc;
+
+    if args.is_empty() || eq_ignore_case(args[0], "/t") {
+        let dt = rtc::read_datetime();
+
+        let weekday = match day_of_week(dt.year, dt.month, dt.day) {
+            0 => "Sun",
+            1 => "Mon",
+            2 => "Tue",
+            3 => "Wed",
+            4 => "Thu",
+            5 => "Fri",
+            6 => "Sat",
+            _ => "???",
+        };
+
+        outln!("The current date is: {} {:02}/{:02}/{:04}",
+            weekday, dt.month, dt.day, dt.year);
+
+        if args.is_empty() {
+            outln!("Enter the new date: (mm-dd-yyyy) [not implemented]");
+        }
+    } else if eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
+        outln!("Displays or sets the date.");
+        outln!("");
+        outln!("DATE [/T | date]");
+        outln!("");
+        outln!("  /T            Displays the current date without prompting");
+    }
+}
+
+/// Time command (standalone) - display/set system time
+pub fn cmd_time_standalone(args: &[&str]) {
+    use crate::hal::rtc;
+
+    if args.is_empty() || eq_ignore_case(args[0], "/t") {
+        let dt = rtc::read_datetime();
+
+        outln!("The current time is: {:02}:{:02}:{:02}.00",
+            dt.hour, dt.minute, dt.second);
+
+        if args.is_empty() {
+            outln!("Enter the new time: [not implemented]");
+        }
+    } else if eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
+        outln!("Displays or sets the system time.");
+        outln!("");
+        outln!("TIME [/T | time]");
+        outln!("");
+        outln!("  /T            Displays the current time without prompting");
+    }
+}
+
+/// Environment variables storage
+const MAX_ENV_VARS: usize = 32;
+const MAX_VAR_NAME: usize = 32;
+const MAX_VAR_VALUE: usize = 128;
+
+struct EnvVar {
+    name: [u8; MAX_VAR_NAME],
+    name_len: usize,
+    value: [u8; MAX_VAR_VALUE],
+    value_len: usize,
+    in_use: bool,
+}
+
+impl EnvVar {
+    const fn empty() -> Self {
+        Self {
+            name: [0; MAX_VAR_NAME],
+            name_len: 0,
+            value: [0; MAX_VAR_VALUE],
+            value_len: 0,
+            in_use: false,
+        }
+    }
+}
+
+static mut ENV_VARS: [EnvVar; MAX_ENV_VARS] = {
+    const EMPTY: EnvVar = EnvVar::empty();
+    [EMPTY; MAX_ENV_VARS]
+};
+
+/// Initialize default environment variables
+fn init_env_vars() {
+    set_env_var("PATH", "C:\\Windows\\system32;C:\\Windows");
+    set_env_var("SYSTEMROOT", "C:\\Windows");
+    set_env_var("WINDIR", "C:\\Windows");
+    set_env_var("COMPUTERNAME", get_hostname());
+    set_env_var("USERNAME", get_username());
+    set_env_var("OS", "Nostalgia_OS");
+    set_env_var("PROCESSOR_ARCHITECTURE", "AMD64");
+}
+
+/// Set an environment variable
+pub fn set_env_var(name: &str, value: &str) {
+    unsafe {
+        // Try to find existing variable
+        for var in ENV_VARS.iter_mut() {
+            if var.in_use && var.name_len == name.len() {
+                let var_name = core::str::from_utf8(&var.name[..var.name_len]).unwrap_or("");
+                if eq_ignore_case(var_name, name) {
+                    // Update value
+                    let len = value.len().min(MAX_VAR_VALUE - 1);
+                    var.value[..len].copy_from_slice(&value.as_bytes()[..len]);
+                    var.value_len = len;
+                    return;
+                }
+            }
+        }
+
+        // Find empty slot
+        for var in ENV_VARS.iter_mut() {
+            if !var.in_use {
+                let name_len = name.len().min(MAX_VAR_NAME - 1);
+                var.name[..name_len].copy_from_slice(&name.as_bytes()[..name_len]);
+                var.name_len = name_len;
+
+                let value_len = value.len().min(MAX_VAR_VALUE - 1);
+                var.value[..value_len].copy_from_slice(&value.as_bytes()[..value_len]);
+                var.value_len = value_len;
+
+                var.in_use = true;
+                return;
+            }
+        }
+    }
+}
+
+/// Get an environment variable
+pub fn get_env_var(name: &str) -> Option<&'static str> {
+    unsafe {
+        for var in ENV_VARS.iter() {
+            if var.in_use && var.name_len == name.len() {
+                let var_name = core::str::from_utf8(&var.name[..var.name_len]).unwrap_or("");
+                if eq_ignore_case(var_name, name) {
+                    return core::str::from_utf8(&var.value[..var.value_len]).ok();
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Set command - display/set environment variables
+pub fn cmd_set(args: &[&str]) {
+    // Initialize on first use
+    static mut INITIALIZED: bool = false;
+    unsafe {
+        if !INITIALIZED {
+            init_env_vars();
+            INITIALIZED = true;
+        }
+    }
+
+    if args.is_empty() {
+        // Display all variables
+        outln!("");
+        unsafe {
+            for var in ENV_VARS.iter() {
+                if var.in_use {
+                    let name = core::str::from_utf8(&var.name[..var.name_len]).unwrap_or("");
+                    let value = core::str::from_utf8(&var.value[..var.value_len]).unwrap_or("");
+                    outln!("{}={}", name, value);
+                }
+            }
+        }
+        outln!("");
+        return;
+    }
+
+    // Check for assignment (VAR=VALUE)
+    let input = args.join(" ");
+    if let Some(eq_pos) = input.find('=') {
+        let name = &input[..eq_pos];
+        let value = &input[eq_pos + 1..];
+        set_env_var(name.trim(), value.trim());
+        outln!("{}={}", name.trim(), value.trim());
+    } else {
+        // Display specific variable
+        let name = args[0];
+        if let Some(value) = get_env_var(name) {
+            outln!("{}={}", name, value);
+        } else {
+            outln!("Environment variable {} not defined", name);
+        }
+    }
+}
+
+/// Title command - set console title (just stores it)
+static mut CONSOLE_TITLE: [u8; 64] = *b"Nostalgia OS\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+static mut CONSOLE_TITLE_LEN: usize = 12;
+
+pub fn cmd_title(args: &[&str]) {
+    if args.is_empty() {
+        let title = unsafe {
+            core::str::from_utf8(&CONSOLE_TITLE[..CONSOLE_TITLE_LEN]).unwrap_or("Nostalgia OS")
+        };
+        outln!("Current title: {}", title);
+    } else {
+        let title = args.join(" ");
+        unsafe {
+            let len = title.len().min(63);
+            CONSOLE_TITLE[..len].copy_from_slice(&title.as_bytes()[..len]);
+            CONSOLE_TITLE_LEN = len;
+        }
+        // Title would be displayed in window title bar if we had one
+    }
+}
+
+/// Ver command - display OS version (enhanced)
+pub fn cmd_ver_extended(_args: &[&str]) {
+    outln!("");
+    outln!("Microsoft Windows [Version 5.2.3790]");
+    outln!("(Nostalgic Build of Windows Server 2003)");
+    outln!("");
+}
+
+/// Color command - display current color settings
+pub fn cmd_color(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Sets the default console foreground and background colors.");
+        outln!("");
+        outln!("COLOR [attr]");
+        outln!("");
+        outln!("  attr    Two hex digits: background + foreground");
+        outln!("          0 = Black       8 = Gray");
+        outln!("          1 = Blue        9 = Light Blue");
+        outln!("          2 = Green       A = Light Green");
+        outln!("          3 = Aqua        B = Light Aqua");
+        outln!("          4 = Red         C = Light Red");
+        outln!("          5 = Purple      D = Light Purple");
+        outln!("          6 = Yellow      E = Light Yellow");
+        outln!("          7 = White       F = Bright White");
+        outln!("");
+        outln!("Note: Color changes not implemented in serial console");
+    } else {
+        outln!("Color set to: {} (display unchanged - serial console)", args[0]);
+    }
+}
+
+/// Prompt command - display/set command prompt
+static mut PROMPT_FORMAT: [u8; 32] = *b"$P$G\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+static mut PROMPT_FORMAT_LEN: usize = 4;
+
+pub fn get_prompt_format() -> &'static str {
+    unsafe {
+        core::str::from_utf8(&PROMPT_FORMAT[..PROMPT_FORMAT_LEN]).unwrap_or("$P$G")
+    }
+}
+
+pub fn cmd_prompt(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Current prompt: {}", get_prompt_format());
+        outln!("");
+        outln!("PROMPT [text]");
+        outln!("");
+        outln!("  $P   Current drive and path");
+        outln!("  $G   Greater-than sign (>)");
+        outln!("  $D   Current date");
+        outln!("  $T   Current time");
+        outln!("  $N   Current drive");
+        outln!("  $S   Space");
+    } else {
+        let fmt = args.join(" ");
+        unsafe {
+            let len = fmt.len().min(31);
+            PROMPT_FORMAT[..len].copy_from_slice(&fmt.as_bytes()[..len]);
+            PROMPT_FORMAT_LEN = len;
+        }
+        outln!("Prompt set to: {}", fmt);
+    }
+}

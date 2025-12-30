@@ -148,8 +148,8 @@ const HISTORY_SIZE: usize = 32;
 const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq", "arp",
     "blocks", "bt",
-    "cache", "callback", "cat", "cc", "cd", "cid", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
-    "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
+    "cache", "callback", "cat", "cc", "cd", "cid", "clear", "cls", "color", "copy", "cp", "cpufeatures", "cpuinfo",
+    "date", "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
     "files", "finger",
     "hal", "handles", "heap", "help", "history", "hostname", "hpet",
     "ident", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
@@ -158,14 +158,14 @@ const COMMANDS: &[&str] = &[
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net", "netinfo", "netserv", "netstat", "nslookup", "ntfs",
     "ob", "obdir",
-    "pagetable", "partition", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "ps", "pwd",
+    "pagetable", "partition", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "prompt", "ps", "pwd",
     "qotd", "quit",
     "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "route", "rtl", "shutdown",
-    "sc", "sched", "se", "section", "services", "smbios", "stack", "suspend", "sysinfo", "systeminfo",
-    "tasks", "teb", "time", "timer", "timerq", "timeserv", "touch", "tracert", "type",
+    "sc", "sched", "se", "section", "services", "set", "smbios", "stack", "suspend", "sysinfo", "systeminfo",
+    "tasklist", "tasks", "teb", "time", "timer", "timerq", "timeserv", "title", "touch", "tracert", "type",
     "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "version", "volumes",
-    "waitq", "whois", "worker", "wset",
+    "waitq", "whois", "whoami", "worker", "wset",
 ];
 
 /// Current working directory
@@ -1330,6 +1330,27 @@ impl Shell {
         // System information
         } else if eq_ignore_case(cmd, "systeminfo") {
             commands::cmd_systeminfo(&args[1..argc]);
+        // Tasklist - Windows process list
+        } else if eq_ignore_case(cmd, "tasklist") {
+            commands::cmd_tasklist(&args[1..argc]);
+        // Whoami - current user
+        } else if eq_ignore_case(cmd, "whoami") {
+            commands::cmd_whoami(&args[1..argc]);
+        // Date display
+        } else if eq_ignore_case(cmd, "date") {
+            commands::cmd_date(&args[1..argc]);
+        // Environment variables
+        } else if eq_ignore_case(cmd, "set") {
+            commands::cmd_set(&args[1..argc]);
+        // Console title
+        } else if eq_ignore_case(cmd, "title") {
+            commands::cmd_title(&args[1..argc]);
+        // Color settings
+        } else if eq_ignore_case(cmd, "color") {
+            commands::cmd_color(&args[1..argc]);
+        // Prompt format
+        } else if eq_ignore_case(cmd, "prompt") {
+            commands::cmd_prompt(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
