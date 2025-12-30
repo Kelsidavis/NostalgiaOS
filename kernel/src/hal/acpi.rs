@@ -654,6 +654,48 @@ unsafe fn parse_fadt(fadt_addr: u64, info: &mut AcpiInfo) {
         pm1a_control_block,
         pm_timer_block
     );
+
+    // Store PM control registers for power management
+    store_fadt_pm_info(fadt_addr);
+
+    // Update sleep state support from FADT flags
+    {
+        let mut sleep_info = SLEEP_STATES.lock();
+
+        // FADT flags bit definitions for sleep states
+        // Bit 10: S4_S5_LOW_POWER (S4BIOS_REQ supported)
+        // For simplicity, assume S5 is always supported
+        sleep_info.s5_supported = true;
+
+        // Check if hardware reduced ACPI (no legacy mode)
+        let hw_reduced = (flags & (1 << 20)) != 0;
+        if hw_reduced {
+            crate::serial_println!("[ACPI] Hardware-reduced ACPI mode");
+        }
+
+        // Check C-state latencies to estimate sleep state support
+        let c2_latency = ptr::read_unaligned(ptr::addr_of!(fadt.c2_latency));
+        let c3_latency = ptr::read_unaligned(ptr::addr_of!(fadt.c3_latency));
+
+        if c2_latency < 100 {
+            // C2 is reasonable, S1 might be supported
+            sleep_info.s1_supported = true;
+        }
+        if c3_latency < 1000 {
+            // C3 is reasonable, S3 might be supported
+            sleep_info.s3_supported = true;
+        }
+
+        // Check for S4BIOS support
+        if fadt.s4bios_req != 0 {
+            sleep_info.s4_supported = true;
+        }
+
+        crate::serial_println!("[ACPI] Sleep states: S1={}, S2={}, S3={}, S4={}, S5={}",
+            sleep_info.s1_supported, sleep_info.s2_supported,
+            sleep_info.s3_supported, sleep_info.s4_supported,
+            sleep_info.s5_supported);
+    }
 }
 
 /// Initialize ACPI subsystem
@@ -760,4 +802,658 @@ pub fn has_legacy_pics() -> bool {
 /// Get ACPI revision (0 = 1.0, 2 = 2.0+)
 pub fn get_revision() -> u8 {
     ACPI_INFO.lock().revision
+}
+
+// ============================================================================
+// ACPI Power Control
+// ============================================================================
+
+/// ACPI power control registers (from FADT)
+static PM_CONTROL: Mutex<AcpiPmControl> = Mutex::new(AcpiPmControl {
+    pm1a_event: 0,
+    pm1b_event: 0,
+    pm1a_control: 0,
+    pm1b_control: 0,
+    pm_timer: 0,
+    pm1_event_len: 0,
+    pm1_control_len: 0,
+    gpe0_block: 0,
+    gpe1_block: 0,
+    sci_interrupt: 0,
+    smi_command: 0,
+    acpi_enable: 0,
+    acpi_disable: 0,
+    slp_typa: [0; 6],
+    slp_typb: [0; 6],
+});
+
+/// ACPI PM control structure
+#[derive(Debug, Clone, Copy)]
+pub struct AcpiPmControl {
+    /// PM1a Event block address
+    pub pm1a_event: u32,
+    /// PM1b Event block address
+    pub pm1b_event: u32,
+    /// PM1a Control block address
+    pub pm1a_control: u32,
+    /// PM1b Control block address
+    pub pm1b_control: u32,
+    /// PM Timer address
+    pub pm_timer: u32,
+    /// PM1 event block length
+    pub pm1_event_len: u8,
+    /// PM1 control block length
+    pub pm1_control_len: u8,
+    /// GPE0 block address
+    pub gpe0_block: u32,
+    /// GPE1 block address
+    pub gpe1_block: u32,
+    /// SCI interrupt number
+    pub sci_interrupt: u16,
+    /// SMI command port
+    pub smi_command: u32,
+    /// ACPI enable command
+    pub acpi_enable: u8,
+    /// ACPI disable command
+    pub acpi_disable: u8,
+    /// SLP_TYPa values for S0-S5
+    pub slp_typa: [u8; 6],
+    /// SLP_TYPb values for S0-S5
+    pub slp_typb: [u8; 6],
+}
+
+/// Sleep state capabilities
+static SLEEP_STATES: Mutex<SleepStateInfo> = Mutex::new(SleepStateInfo {
+    s1_supported: false,
+    s2_supported: false,
+    s3_supported: false,
+    s4_supported: false,
+    s5_supported: true,
+    reset_supported: false,
+    reset_register: GenericAddress {
+        address_space: 0,
+        bit_width: 0,
+        bit_offset: 0,
+        access_size: 0,
+        address: 0,
+    },
+    reset_value: 0,
+});
+
+/// Sleep state information
+#[derive(Debug, Clone, Copy)]
+pub struct SleepStateInfo {
+    /// S1 (standby) supported
+    pub s1_supported: bool,
+    /// S2 supported
+    pub s2_supported: bool,
+    /// S3 (sleep) supported
+    pub s3_supported: bool,
+    /// S4 (hibernate) supported
+    pub s4_supported: bool,
+    /// S5 (soft off) supported
+    pub s5_supported: bool,
+    /// Reset via ACPI supported
+    pub reset_supported: bool,
+    /// Reset register (ACPI 2.0+)
+    pub reset_register: GenericAddress,
+    /// Reset value to write
+    pub reset_value: u8,
+}
+
+/// PM1 Status register bits
+pub mod pm1_status {
+    /// Timer carry status
+    pub const TMR_STS: u16 = 1 << 0;
+    /// Bus master status
+    pub const BM_STS: u16 = 1 << 4;
+    /// Global status
+    pub const GBL_STS: u16 = 1 << 5;
+    /// Power button status
+    pub const PWRBTN_STS: u16 = 1 << 8;
+    /// Sleep button status
+    pub const SLPBTN_STS: u16 = 1 << 9;
+    /// RTC alarm status
+    pub const RTC_STS: u16 = 1 << 10;
+    /// Wakeup status
+    pub const WAK_STS: u16 = 1 << 15;
+}
+
+/// PM1 Enable register bits
+pub mod pm1_enable {
+    /// Timer enable
+    pub const TMR_EN: u16 = 1 << 0;
+    /// Global enable
+    pub const GBL_EN: u16 = 1 << 5;
+    /// Power button enable
+    pub const PWRBTN_EN: u16 = 1 << 8;
+    /// Sleep button enable
+    pub const SLPBTN_EN: u16 = 1 << 9;
+    /// RTC alarm enable
+    pub const RTC_EN: u16 = 1 << 10;
+}
+
+/// PM1 Control register bits
+pub mod pm1_control {
+    /// SCI enable (enables ACPI mode)
+    pub const SCI_EN: u16 = 1 << 0;
+    /// Bus master reload
+    pub const BM_RLD: u16 = 1 << 1;
+    /// Global lock release
+    pub const GBL_RLS: u16 = 1 << 2;
+    /// Sleep type (bits 10-12)
+    pub const SLP_TYP_MASK: u16 = 0x1C00;
+    pub const SLP_TYP_SHIFT: u16 = 10;
+    /// Sleep enable
+    pub const SLP_EN: u16 = 1 << 13;
+}
+
+/// Read PM1 status register
+pub fn read_pm1_status() -> u16 {
+    let pm = PM_CONTROL.lock();
+    if pm.pm1a_event == 0 {
+        return 0;
+    }
+
+    let mut status: u16 = 0;
+    unsafe {
+        // Read from PM1a
+        core::arch::asm!(
+            "in ax, dx",
+            out("ax") status,
+            in("dx") pm.pm1a_event as u16,
+            options(nomem, nostack, preserves_flags)
+        );
+
+        // OR in PM1b if present
+        if pm.pm1b_event != 0 {
+            let mut status_b: u16;
+            core::arch::asm!(
+                "in ax, dx",
+                out("ax") status_b,
+                in("dx") pm.pm1b_event as u16,
+                options(nomem, nostack, preserves_flags)
+            );
+            status |= status_b;
+        }
+    }
+    status
+}
+
+/// Write PM1 status register (to clear bits)
+pub fn write_pm1_status(value: u16) {
+    let pm = PM_CONTROL.lock();
+    if pm.pm1a_event == 0 {
+        return;
+    }
+
+    unsafe {
+        // Write to PM1a
+        core::arch::asm!(
+            "out dx, ax",
+            in("dx") pm.pm1a_event as u16,
+            in("ax") value,
+            options(nomem, nostack, preserves_flags)
+        );
+
+        // Write to PM1b if present
+        if pm.pm1b_event != 0 {
+            core::arch::asm!(
+                "out dx, ax",
+                in("dx") pm.pm1b_event as u16,
+                in("ax") value,
+                options(nomem, nostack, preserves_flags)
+            );
+        }
+    }
+}
+
+/// Read PM1 enable register
+pub fn read_pm1_enable() -> u16 {
+    let pm = PM_CONTROL.lock();
+    if pm.pm1a_event == 0 {
+        return 0;
+    }
+
+    // Enable register is at offset pm1_event_len/2 from event block
+    let offset = (pm.pm1_event_len / 2) as u32;
+    let mut enable: u16 = 0;
+
+    unsafe {
+        core::arch::asm!(
+            "in ax, dx",
+            out("ax") enable,
+            in("dx") (pm.pm1a_event + offset) as u16,
+            options(nomem, nostack, preserves_flags)
+        );
+
+        if pm.pm1b_event != 0 {
+            let mut enable_b: u16;
+            core::arch::asm!(
+                "in ax, dx",
+                out("ax") enable_b,
+                in("dx") (pm.pm1b_event + offset) as u16,
+                options(nomem, nostack, preserves_flags)
+            );
+            enable |= enable_b;
+        }
+    }
+    enable
+}
+
+/// Write PM1 enable register
+pub fn write_pm1_enable(value: u16) {
+    let pm = PM_CONTROL.lock();
+    if pm.pm1a_event == 0 {
+        return;
+    }
+
+    let offset = (pm.pm1_event_len / 2) as u32;
+
+    unsafe {
+        core::arch::asm!(
+            "out dx, ax",
+            in("dx") (pm.pm1a_event + offset) as u16,
+            in("ax") value,
+            options(nomem, nostack, preserves_flags)
+        );
+
+        if pm.pm1b_event != 0 {
+            core::arch::asm!(
+                "out dx, ax",
+                in("dx") (pm.pm1b_event + offset) as u16,
+                in("ax") value,
+                options(nomem, nostack, preserves_flags)
+            );
+        }
+    }
+}
+
+/// Read PM1 control register
+pub fn read_pm1_control() -> u16 {
+    let pm = PM_CONTROL.lock();
+    if pm.pm1a_control == 0 {
+        return 0;
+    }
+
+    let mut control: u16 = 0;
+    unsafe {
+        core::arch::asm!(
+            "in ax, dx",
+            out("ax") control,
+            in("dx") pm.pm1a_control as u16,
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+    control
+}
+
+/// Write PM1 control register
+fn write_pm1_control(value: u16) {
+    let pm = PM_CONTROL.lock();
+    if pm.pm1a_control == 0 {
+        return;
+    }
+
+    unsafe {
+        // Write to PM1a control
+        core::arch::asm!(
+            "out dx, ax",
+            in("dx") pm.pm1a_control as u16,
+            in("ax") value,
+            options(nomem, nostack, preserves_flags)
+        );
+
+        // Write to PM1b control if present
+        if pm.pm1b_control != 0 {
+            core::arch::asm!(
+                "out dx, ax",
+                in("dx") pm.pm1b_control as u16,
+                in("ax") value,
+                options(nomem, nostack, preserves_flags)
+            );
+        }
+    }
+}
+
+/// Read ACPI PM timer (24 or 32 bit)
+pub fn read_pm_timer() -> u32 {
+    let pm = PM_CONTROL.lock();
+    if pm.pm_timer == 0 {
+        return 0;
+    }
+
+    let mut timer: u32 = 0;
+    unsafe {
+        core::arch::asm!(
+            "in eax, dx",
+            out("eax") timer,
+            in("dx") pm.pm_timer as u16,
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+    timer
+}
+
+/// Enable ACPI mode (switch from legacy APM)
+pub fn enable_acpi() -> bool {
+    let pm = PM_CONTROL.lock();
+
+    // Check if already in ACPI mode
+    if (read_pm1_control() & pm1_control::SCI_EN) != 0 {
+        crate::serial_println!("[ACPI] Already in ACPI mode");
+        return true;
+    }
+
+    // Write ACPI enable to SMI command port
+    if pm.smi_command != 0 && pm.acpi_enable != 0 {
+        unsafe {
+            core::arch::asm!(
+                "out dx, al",
+                in("dx") pm.smi_command as u16,
+                in("al") pm.acpi_enable,
+                options(nomem, nostack, preserves_flags)
+            );
+        }
+
+        // Wait for ACPI mode to be enabled (poll SCI_EN)
+        for _ in 0..1000 {
+            if (read_pm1_control() & pm1_control::SCI_EN) != 0 {
+                crate::serial_println!("[ACPI] ACPI mode enabled");
+                return true;
+            }
+            // Small delay
+            for _ in 0..1000 {
+                core::hint::spin_loop();
+            }
+        }
+
+        crate::serial_println!("[ACPI] Failed to enable ACPI mode");
+        return false;
+    }
+
+    crate::serial_println!("[ACPI] No SMI command port available");
+    false
+}
+
+/// Enter a sleep state (S1-S5)
+///
+/// # Safety
+/// This will put the system to sleep or power it off.
+/// Ensure all devices are properly quiesced before calling.
+pub unsafe fn enter_sleep_state(state: u8) -> Result<(), &'static str> {
+    if state > 5 {
+        return Err("Invalid sleep state");
+    }
+
+    let sleep_info = SLEEP_STATES.lock();
+
+    // Check if state is supported
+    let supported = match state {
+        0 => true, // S0 always supported
+        1 => sleep_info.s1_supported,
+        2 => sleep_info.s2_supported,
+        3 => sleep_info.s3_supported,
+        4 => sleep_info.s4_supported,
+        5 => sleep_info.s5_supported,
+        _ => false,
+    };
+
+    if !supported {
+        return Err("Sleep state not supported");
+    }
+
+    let pm = PM_CONTROL.lock();
+
+    if pm.pm1a_control == 0 {
+        return Err("PM1 control block not available");
+    }
+
+    crate::serial_println!("[ACPI] Entering sleep state S{}", state);
+
+    // Get SLP_TYP values
+    let slp_typa = pm.slp_typa[state as usize];
+    let slp_typb = pm.slp_typb[state as usize];
+
+    // Disable interrupts
+    core::arch::asm!("cli", options(nomem, nostack));
+
+    // Clear wake status
+    write_pm1_status(pm1_status::WAK_STS);
+
+    // Build PM1 control value with SLP_TYP
+    let pm1a_slp = ((slp_typa as u16) << pm1_control::SLP_TYP_SHIFT) | pm1_control::SLP_EN;
+    let pm1b_slp = ((slp_typb as u16) << pm1_control::SLP_TYP_SHIFT) | pm1_control::SLP_EN;
+
+    // Write to PM1a control
+    core::arch::asm!(
+        "out dx, ax",
+        in("dx") pm.pm1a_control as u16,
+        in("ax") pm1a_slp,
+        options(nomem, nostack, preserves_flags)
+    );
+
+    // Write to PM1b control if present
+    if pm.pm1b_control != 0 {
+        core::arch::asm!(
+            "out dx, ax",
+            in("dx") pm.pm1b_control as u16,
+            in("ax") pm1b_slp,
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+
+    // If we're still executing (S1 or failed sleep), wait for wake
+    if state == 1 {
+        // For S1, wait for WAK_STS
+        loop {
+            if (read_pm1_status() & pm1_status::WAK_STS) != 0 {
+                break;
+            }
+            core::arch::asm!("hlt", options(nomem, nostack));
+        }
+
+        // Clear wake status
+        write_pm1_status(pm1_status::WAK_STS);
+
+        // Re-enable interrupts
+        core::arch::asm!("sti", options(nomem, nostack));
+
+        crate::serial_println!("[ACPI] Resumed from S1");
+    } else {
+        // For deeper sleep states, we shouldn't reach here
+        // If we do, the sleep failed
+        core::arch::asm!("sti", options(nomem, nostack));
+        return Err("Failed to enter sleep state");
+    }
+
+    Ok(())
+}
+
+/// Perform ACPI shutdown (S5)
+///
+/// # Safety
+/// This will power off the system. Ensure all data is saved.
+pub unsafe fn shutdown() -> ! {
+    crate::serial_println!("[ACPI] Initiating system shutdown (S5)");
+
+    // Try ACPI S5
+    let _ = enter_sleep_state(5);
+
+    // If that fails, try keyboard controller reset
+    crate::serial_println!("[ACPI] ACPI S5 failed, trying keyboard controller");
+
+    // Pulse CPU reset line via keyboard controller
+    // 0x64 = keyboard controller command port
+    // 0xFE = reset command
+    for _ in 0..10 {
+        // Wait for keyboard controller to be ready
+        let mut status: u8;
+        loop {
+            core::arch::asm!(
+                "in al, dx",
+                out("al") status,
+                in("dx") 0x64u16,
+                options(nomem, nostack, preserves_flags)
+            );
+            if (status & 0x02) == 0 {
+                break;
+            }
+        }
+
+        // Send reset command
+        core::arch::asm!(
+            "out dx, al",
+            in("dx") 0x64u16,
+            in("al") 0xFEu8,
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+
+    // If reset failed, halt
+    crate::serial_println!("[ACPI] Shutdown failed, halting");
+    loop {
+        core::arch::asm!("cli; hlt", options(nomem, nostack));
+    }
+}
+
+/// Perform ACPI reset
+///
+/// # Safety
+/// This will reset the system.
+pub unsafe fn reset() -> ! {
+    crate::serial_println!("[ACPI] Initiating system reset");
+
+    let sleep_info = SLEEP_STATES.lock();
+
+    // Try ACPI reset register first (ACPI 2.0+)
+    if sleep_info.reset_supported {
+        let reset_reg = sleep_info.reset_register;
+        let reset_val = sleep_info.reset_value;
+
+        match reset_reg.address_space {
+            0 => {
+                // System memory
+                ptr::write_volatile(reset_reg.address as *mut u8, reset_val);
+            }
+            1 => {
+                // I/O space
+                core::arch::asm!(
+                    "out dx, al",
+                    in("dx") reset_reg.address as u16,
+                    in("al") reset_val,
+                    options(nomem, nostack, preserves_flags)
+                );
+            }
+            2 => {
+                // PCI config space (not commonly used)
+                crate::serial_println!("[ACPI] PCI reset not implemented");
+            }
+            _ => {}
+        }
+
+        // Wait a bit
+        for _ in 0..1000000 {
+            core::hint::spin_loop();
+        }
+    }
+
+    drop(sleep_info);
+
+    // Fallback to keyboard controller reset
+    crate::serial_println!("[ACPI] ACPI reset failed, trying keyboard controller");
+
+    // Triple fault method: load invalid IDT and trigger interrupt
+    // First try keyboard controller
+    for _ in 0..10 {
+        let mut status: u8;
+        loop {
+            core::arch::asm!(
+                "in al, dx",
+                out("al") status,
+                in("dx") 0x64u16,
+                options(nomem, nostack, preserves_flags)
+            );
+            if (status & 0x02) == 0 {
+                break;
+            }
+        }
+
+        core::arch::asm!(
+            "out dx, al",
+            in("dx") 0x64u16,
+            in("al") 0xFEu8,
+            options(nomem, nostack, preserves_flags)
+        );
+    }
+
+    // Triple fault as last resort
+    crate::serial_println!("[ACPI] Keyboard reset failed, triple faulting");
+
+    // Load null IDT and trigger interrupt
+    let null_idt: [u8; 6] = [0; 6];
+    core::arch::asm!(
+        "lidt [{}]",
+        "int3",
+        in(reg) null_idt.as_ptr(),
+        options(nomem, nostack)
+    );
+
+    loop {
+        core::arch::asm!("hlt", options(nomem, nostack));
+    }
+}
+
+/// Store PM control registers from FADT
+pub(crate) unsafe fn store_fadt_pm_info(fadt_addr: u64) {
+    let fadt = &*(fadt_addr as *const Fadt);
+    let mut pm = PM_CONTROL.lock();
+
+    // Read unaligned fields
+    pm.pm1a_event = ptr::read_unaligned(ptr::addr_of!(fadt.pm1a_event_block));
+    pm.pm1b_event = ptr::read_unaligned(ptr::addr_of!(fadt.pm1b_event_block));
+    pm.pm1a_control = ptr::read_unaligned(ptr::addr_of!(fadt.pm1a_control_block));
+    pm.pm1b_control = ptr::read_unaligned(ptr::addr_of!(fadt.pm1b_control_block));
+    pm.pm_timer = ptr::read_unaligned(ptr::addr_of!(fadt.pm_timer_block));
+    pm.pm1_event_len = fadt.pm1_event_length;
+    pm.pm1_control_len = fadt.pm1_control_length;
+    pm.gpe0_block = ptr::read_unaligned(ptr::addr_of!(fadt.gpe0_block));
+    pm.gpe1_block = ptr::read_unaligned(ptr::addr_of!(fadt.gpe1_block));
+    pm.sci_interrupt = ptr::read_unaligned(ptr::addr_of!(fadt.sci_interrupt));
+    pm.smi_command = ptr::read_unaligned(ptr::addr_of!(fadt.smi_command_port));
+    pm.acpi_enable = fadt.acpi_enable;
+    pm.acpi_disable = fadt.acpi_disable;
+
+    crate::serial_println!("[ACPI] PM1a_evt={:#x}, PM1a_ctrl={:#x}, PM_tmr={:#x}",
+        pm.pm1a_event, pm.pm1a_control, pm.pm_timer);
+    crate::serial_println!("[ACPI] SCI={}, SMI_cmd={:#x}", pm.sci_interrupt, pm.smi_command);
+}
+
+/// Get sleep state capabilities
+pub fn get_sleep_capabilities() -> SleepStateInfo {
+    *SLEEP_STATES.lock()
+}
+
+/// Check if a specific sleep state is supported
+pub fn is_sleep_state_supported(state: u8) -> bool {
+    let info = SLEEP_STATES.lock();
+    match state {
+        0 => true,
+        1 => info.s1_supported,
+        2 => info.s2_supported,
+        3 => info.s3_supported,
+        4 => info.s4_supported,
+        5 => info.s5_supported,
+        _ => false,
+    }
+}
+
+/// Get SCI interrupt number
+pub fn get_sci_interrupt() -> u16 {
+    PM_CONTROL.lock().sci_interrupt
+}
+
+/// Get PM control info for diagnostics
+pub fn get_pm_control_info() -> AcpiPmControl {
+    *PM_CONTROL.lock()
 }

@@ -357,12 +357,28 @@ pub fn init() {
     if crate::hal::acpi::is_initialized() {
         let mut caps = POWER_CAPABILITIES.lock();
 
-        // Read FADT flags for power capabilities
-        // For now, we'll set conservative defaults
-        caps.system_s5 = true;  // Soft off always available
+        // Read sleep state capabilities from ACPI
+        let sleep_info = crate::hal::acpi::get_sleep_capabilities();
+        caps.system_s1 = sleep_info.s1_supported;
+        caps.system_s2 = sleep_info.s2_supported;
+        caps.system_s3 = sleep_info.s3_supported;
+        caps.system_s4 = sleep_info.s4_supported;
+        caps.system_s5 = sleep_info.s5_supported;
 
-        // TODO: Parse ACPI tables for detailed S-state support
-        // For now, assume no sleep states are available
+        // Read PM control info
+        let pm_info = crate::hal::acpi::get_pm_control_info();
+
+        crate::serial_println!("[PO] ACPI capabilities detected:");
+        crate::serial_println!("[PO]   S1={}, S2={}, S3={}, S4={}, S5={}",
+            caps.system_s1, caps.system_s2, caps.system_s3, caps.system_s4, caps.system_s5);
+        crate::serial_println!("[PO]   PM1a_ctrl={:#x}, SCI={}",
+            pm_info.pm1a_control, pm_info.sci_interrupt);
+
+        // Assume power button present (standard on PC)
+        caps.power_button_present = true;
+
+        // Enable ACPI mode if not already enabled
+        let _ = crate::hal::acpi::enable_acpi();
     }
 
     // Set initial state to Working
@@ -417,43 +433,162 @@ pub fn set_system_power_state(state: SystemPowerState) -> Result<(), i32> {
     drop(caps);
 
     if !supported && state != SystemPowerState::Working {
+        crate::serial_println!("[PO] Power state {:?} not supported", state);
         return Err(-2); // STATUS_NOT_SUPPORTED
     }
 
     // Mark action in progress
     PO_FLAGS.fetch_or(po_flags::ACTION_IN_PROGRESS, Ordering::SeqCst);
 
-    // Perform state transition
+    // Record the power event for statistics
+    record_power_event(state);
+
+    // Broadcast query for suspend permission (for sleep states)
     match state {
-        SystemPowerState::Working => {
-            // Resume from sleep - already handled during wake
-            SYSTEM_POWER_STATE.store(state as u8, Ordering::SeqCst);
-        }
-        SystemPowerState::Shutdown => {
-            SYSTEM_POWER_STATE.store(state as u8, Ordering::SeqCst);
-            // TODO: Notify all devices to enter D3
-            // TODO: Perform actual shutdown via ACPI
-            crate::serial_println!("[PO] System shutdown initiated");
-        }
         SystemPowerState::Sleeping1 |
         SystemPowerState::Sleeping2 |
-        SystemPowerState::Sleeping3 => {
-            SYSTEM_POWER_STATE.store(state as u8, Ordering::SeqCst);
-            // TODO: Notify devices, save context, enter sleep
-            crate::serial_println!("[PO] System sleep S{} requested", state as u8);
-        }
+        SystemPowerState::Sleeping3 |
         SystemPowerState::Hibernate => {
-            SYSTEM_POWER_STATE.store(state as u8, Ordering::SeqCst);
-            // TODO: Write memory to hibernate file, shutdown
-            crate::serial_println!("[PO] System hibernate requested");
+            broadcast_power_event(PowerBroadcast::QuerySuspend, state as usize);
         }
         _ => {}
     }
 
+    // Notify all registered devices to transition to appropriate D-state
+    notify_devices_of_system_power_change(state);
+
+    // Perform state transition
+    let result = match state {
+        SystemPowerState::Working => {
+            // Resume from sleep - already handled during wake
+            SYSTEM_POWER_STATE.store(state as u8, Ordering::SeqCst);
+            broadcast_power_event(PowerBroadcast::ResumeSuspend, 0);
+            Ok(())
+        }
+        SystemPowerState::Shutdown => {
+            SYSTEM_POWER_STATE.store(state as u8, Ordering::SeqCst);
+            crate::serial_println!("[PO] System shutdown initiated");
+
+            // Stop all services gracefully
+            crate::svc::database::stop_all_services();
+
+            // Perform actual shutdown via ACPI
+            unsafe {
+                crate::hal::acpi::shutdown();
+            }
+            // Note: shutdown() never returns
+        }
+        SystemPowerState::Sleeping1 => {
+            crate::serial_println!("[PO] Entering S1 (standby)...");
+            broadcast_power_event(PowerBroadcast::Suspend, 1);
+            SYSTEM_POWER_STATE.store(state as u8, Ordering::SeqCst);
+
+            // Enter S1 via ACPI
+            let result = unsafe { crate::hal::acpi::enter_sleep_state(1) };
+
+            // If we return, we woke up
+            if result.is_ok() {
+                SYSTEM_POWER_STATE.store(SystemPowerState::Working as u8, Ordering::SeqCst);
+                broadcast_power_event(PowerBroadcast::ResumeSuspend, 0);
+                crate::serial_println!("[PO] Resumed from S1");
+                Ok(())
+            } else {
+                crate::serial_println!("[PO] S1 entry failed");
+                Err(-3)
+            }
+        }
+        SystemPowerState::Sleeping2 => {
+            crate::serial_println!("[PO] Entering S2...");
+            broadcast_power_event(PowerBroadcast::Suspend, 2);
+            SYSTEM_POWER_STATE.store(state as u8, Ordering::SeqCst);
+
+            let result = unsafe { crate::hal::acpi::enter_sleep_state(2) };
+
+            if result.is_ok() {
+                SYSTEM_POWER_STATE.store(SystemPowerState::Working as u8, Ordering::SeqCst);
+                broadcast_power_event(PowerBroadcast::ResumeSuspend, 0);
+                Ok(())
+            } else {
+                Err(-3)
+            }
+        }
+        SystemPowerState::Sleeping3 => {
+            crate::serial_println!("[PO] Entering S3 (suspend to RAM)...");
+            broadcast_power_event(PowerBroadcast::Suspend, 3);
+            SYSTEM_POWER_STATE.store(state as u8, Ordering::SeqCst);
+
+            // Save processor state before S3
+            // TODO: Implement CPU context save
+
+            let result = unsafe { crate::hal::acpi::enter_sleep_state(3) };
+
+            // For S3, we normally don't return here - resume starts from BIOS
+            // If we do return, either S3 failed or wasn't really S3
+            if result.is_ok() {
+                SYSTEM_POWER_STATE.store(SystemPowerState::Working as u8, Ordering::SeqCst);
+                broadcast_power_event(PowerBroadcast::ResumeSuspend, 0);
+                crate::serial_println!("[PO] Resumed from S3");
+                Ok(())
+            } else {
+                crate::serial_println!("[PO] S3 entry failed");
+                Err(-3)
+            }
+        }
+        SystemPowerState::Hibernate => {
+            crate::serial_println!("[PO] System hibernate requested");
+            broadcast_power_event(PowerBroadcast::Suspend, 4);
+            SYSTEM_POWER_STATE.store(state as u8, Ordering::SeqCst);
+
+            // TODO: Write memory to hibernate file
+            // For now, just enter S4 via ACPI
+            let result = unsafe { crate::hal::acpi::enter_sleep_state(4) };
+
+            if result.is_ok() {
+                SYSTEM_POWER_STATE.store(SystemPowerState::Working as u8, Ordering::SeqCst);
+                broadcast_power_event(PowerBroadcast::ResumeSuspend, 0);
+                Ok(())
+            } else {
+                crate::serial_println!("[PO] S4 entry failed");
+                Err(-3)
+            }
+        }
+        _ => Ok(()),
+    };
+
     // Clear action in progress
     PO_FLAGS.fetch_and(!po_flags::ACTION_IN_PROGRESS, Ordering::SeqCst);
 
-    Ok(())
+    result
+}
+
+/// Notify all managed devices of system power state change
+fn notify_devices_of_system_power_change(system_state: SystemPowerState) {
+    // Determine target D-state based on S-state
+    let target_d_state = match system_state {
+        SystemPowerState::Working => DevicePowerState::D0,
+        SystemPowerState::Sleeping1 => DevicePowerState::D1,
+        SystemPowerState::Sleeping2 => DevicePowerState::D2,
+        SystemPowerState::Sleeping3 |
+        SystemPowerState::Hibernate |
+        SystemPowerState::Shutdown => DevicePowerState::D3,
+        _ => DevicePowerState::D0,
+    };
+
+    let _guard = DEVICE_POWER_LOCK.lock();
+
+    unsafe {
+        for entry in DEVICE_POWER_STATES.iter_mut() {
+            if entry.device != 0 {
+                entry.target_state = target_d_state;
+                entry.transitioning = true;
+                // In a full implementation, this would send power IRPs
+                entry.state = target_d_state;
+                entry.transitioning = false;
+            }
+        }
+    }
+
+    crate::serial_println!("[PO] Notified devices to enter {:?}", target_d_state);
 }
 
 /// Get power capabilities
@@ -488,19 +623,64 @@ pub fn is_action_in_progress() -> bool {
 }
 
 /// Initiate system shutdown
-pub fn shutdown() -> Result<(), i32> {
-    set_system_power_state(SystemPowerState::Shutdown)
+///
+/// This function initiates a graceful system shutdown. It will:
+/// 1. Stop all running services
+/// 2. Notify all devices to enter D3 (off) state
+/// 3. Perform ACPI S5 shutdown
+///
+/// This function does not return on success.
+pub fn shutdown() -> ! {
+    crate::serial_println!("[PO] Initiating system shutdown...");
+
+    // Mark action in progress
+    PO_FLAGS.fetch_or(po_flags::ACTION_IN_PROGRESS, Ordering::SeqCst);
+    SYSTEM_POWER_STATE.store(SystemPowerState::Shutdown as u8, Ordering::SeqCst);
+
+    // Record shutdown event
+    {
+        let mut stats = POWER_STATS.lock();
+        stats.shutdown_count += 1;
+    }
+
+    // Stop all services gracefully
+    let stopped = crate::svc::database::stop_all_services();
+    crate::serial_println!("[PO] Stopped {} services", stopped);
+
+    // Notify all devices to enter D3
+    notify_devices_of_system_power_change(SystemPowerState::Shutdown);
+
+    // Perform ACPI shutdown
+    unsafe {
+        crate::hal::acpi::shutdown()
+    }
 }
 
 /// Initiate system restart
-pub fn restart() -> Result<(), i32> {
-    // Set shutdown flag then reset
-    let result = set_system_power_state(SystemPowerState::Shutdown);
-    if result.is_ok() {
-        // TODO: Trigger system reset via keyboard controller or ACPI
-        crate::serial_println!("[PO] System restart requested");
+///
+/// This function initiates a system restart. It will:
+/// 1. Stop all running services
+/// 2. Notify all devices
+/// 3. Perform ACPI reset
+///
+/// This function does not return on success.
+pub fn restart() -> ! {
+    crate::serial_println!("[PO] Initiating system restart...");
+
+    // Mark action in progress
+    PO_FLAGS.fetch_or(po_flags::ACTION_IN_PROGRESS, Ordering::SeqCst);
+
+    // Stop all services gracefully
+    let stopped = crate::svc::database::stop_all_services();
+    crate::serial_println!("[PO] Stopped {} services", stopped);
+
+    // Notify all devices to enter D3
+    notify_devices_of_system_power_change(SystemPowerState::Shutdown);
+
+    // Perform ACPI reset
+    unsafe {
+        crate::hal::acpi::reset()
     }
-    result
 }
 
 // ============================================================================

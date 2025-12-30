@@ -158,9 +158,9 @@ const COMMANDS: &[&str] = &[
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net", "ntfs",
     "ob", "obdir",
-    "pagetable", "partition", "pci", "pe", "peb", "pfn", "pipes", "pool", "pooltag", "port", "prcb", "prefetch", "ps", "pwd",
+    "pagetable", "partition", "pci", "pe", "peb", "pfn", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "ps", "pwd",
     "quit",
-    "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "rtl",
+    "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "rtl", "shutdown",
     "sc", "sched", "se", "section", "services", "smbios", "stack", "suspend", "sysinfo",
     "tasks", "teb", "time", "timer", "timerq", "touch", "type",
     "usertest",
@@ -1045,7 +1045,7 @@ impl Shell {
         // Hardware info commands
         } else if eq_ignore_case(cmd, "cpuinfo") {
             commands::cmd_cpuinfo();
-        } else if eq_ignore_case(cmd, "power") {
+        } else if eq_ignore_case(cmd, "power") || eq_ignore_case(cmd, "po") {
             commands::cmd_power(&args[1..argc]);
         } else if eq_ignore_case(cmd, "shutdown") {
             commands::cmd_shutdown();

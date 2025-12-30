@@ -107,8 +107,9 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    cpuinfo        Show CPU and ACPI information");
         outln!("    acpi [tables]  Scan ACPI tables (RSDP, RSDT/XSDT)");
         outln!("    pci [scan]     Scan PCI devices");
-        outln!("    power          Show power management status");
-        outln!("    shutdown       Shut down the system");
+        outln!("    power [cmd]    Power management (acpi, throttle, sleep, policy)");
+        outln!("    shutdown       Shut down the system (ACPI S5)");
+        outln!("    reboot         Restart the system (ACPI reset)");
         outln!("");
         outln!("  Services:");
         outln!("    services       List/manage services");
@@ -1132,19 +1133,10 @@ pub fn cmd_ps(args: &[&str]) {
 /// Reboot the system
 pub fn cmd_reboot() {
     outln!("Rebooting...");
+    outln!("Stopping services and resetting...");
 
-    // Use keyboard controller reset
-    unsafe {
-        // Wait for keyboard controller
-        while (crate::arch::io::inb(0x64) & 0x02) != 0 {}
-        // Send reset command
-        crate::arch::io::outb(0x64, 0xFE);
-    }
-
-    // If that didn't work, triple fault
-    loop {
-        crate::arch::halt();
-    }
+    // restart() never returns - it will reset the system
+    crate::po::restart();
 }
 
 /// Test suspend/resume syscalls
@@ -1460,12 +1452,14 @@ pub fn cmd_power(args: &[&str]) {
     if args.is_empty() {
         // Show power status
         outln!("Power Management Status:");
+        outln!("========================");
         outln!("");
 
         // Power manager state
         if crate::po::is_initialized() {
             let state = crate::po::get_system_power_state();
-            outln!("  System Power State: {:?}", state);
+            outln!("System State:");
+            outln!("  Power State: {:?}", state);
             outln!("  AC Power: {}", crate::po::is_ac_power());
             outln!("  Battery Power: {}", crate::po::is_battery_power());
             outln!("  Action in Progress: {}", crate::po::is_action_in_progress());
@@ -1474,21 +1468,82 @@ pub fn cmd_power(args: &[&str]) {
 
             // Capabilities
             let caps = crate::po::get_capabilities();
-            outln!("  Power Capabilities:");
-            outln!("    Power Button: {}", caps.power_button_present);
-            outln!("    Sleep Button: {}", caps.sleep_button_present);
-            outln!("    S1 (Standby): {}", caps.system_s1);
-            outln!("    S3 (Sleep): {}", caps.system_s3);
-            outln!("    S4 (Hibernate): {}", caps.system_s4);
-            outln!("    S5 (Soft Off): {}", caps.system_s5);
+            outln!("Power Capabilities:");
+            outln!("  Power Button: {}", caps.power_button_present);
+            outln!("  Sleep Button: {}", caps.sleep_button_present);
+            outln!("  S1 (Standby): {}", caps.system_s1);
+            outln!("  S2: {}", caps.system_s2);
+            outln!("  S3 (Sleep): {}", caps.system_s3);
+            outln!("  S4 (Hibernate): {}", caps.system_s4);
+            outln!("  S5 (Soft Off): {}", caps.system_s5);
+            outln!("");
+
+            // Device power states
+            let device_counts = crate::po::get_device_power_state_counts();
+            outln!("Device Power States:");
+            outln!("  D0 (On): {} devices", device_counts[1]);
+            outln!("  D1: {} devices", device_counts[2]);
+            outln!("  D2: {} devices", device_counts[3]);
+            outln!("  D3 (Off): {} devices", device_counts[4]);
+            outln!("");
+
+            // Power statistics
+            let stats = crate::po::get_power_stats();
+            outln!("Power Statistics:");
+            outln!("  Sleep events: {}", stats.sleep_count);
+            outln!("  Wake events: {}", stats.wake_count);
+            outln!("  Hibernate events: {}", stats.hibernate_count);
+            outln!("  Shutdown events: {}", stats.shutdown_count);
         } else {
             outln!("  Power manager not initialized");
         }
 
         outln!("");
-        outln!("Usage:");
-        outln!("  power              - Show power status");
-        outln!("  power throttle N   - Set CPU throttle to N%");
+        outln!("Commands:");
+        outln!("  power             - Show power status");
+        outln!("  power acpi        - Show ACPI PM control info");
+        outln!("  power throttle N  - Set CPU throttle to N%");
+        outln!("  power sleep N     - Enter sleep state SN (1-4)");
+        outln!("  power policy      - Show power policy");
+    } else if eq_ignore_case(args[0], "acpi") {
+        // Show ACPI PM control information
+        outln!("ACPI Power Management:");
+        outln!("======================");
+
+        if crate::hal::acpi::is_initialized() {
+            let pm = crate::hal::acpi::get_pm_control_info();
+            outln!("PM1 Registers:");
+            outln!("  PM1a Event:   {:#06x}", pm.pm1a_event);
+            outln!("  PM1b Event:   {:#06x}", pm.pm1b_event);
+            outln!("  PM1a Control: {:#06x}", pm.pm1a_control);
+            outln!("  PM1b Control: {:#06x}", pm.pm1b_control);
+            outln!("  PM Timer:     {:#06x}", pm.pm_timer);
+            outln!("");
+            outln!("Interrupts:");
+            outln!("  SCI:          {}", pm.sci_interrupt);
+            outln!("  SMI Command:  {:#06x}", pm.smi_command);
+            outln!("");
+            outln!("Current Status:");
+
+            // Read actual PM registers
+            let pm1_status = crate::hal::acpi::read_pm1_status();
+            let pm1_enable = crate::hal::acpi::read_pm1_enable();
+            let pm1_control = crate::hal::acpi::read_pm1_control();
+            let pm_timer = crate::hal::acpi::read_pm_timer();
+
+            outln!("  PM1 Status:  {:#06x}", pm1_status);
+            if (pm1_status & 0x0100) != 0 { outln!("    - Power button pressed"); }
+            if (pm1_status & 0x0200) != 0 { outln!("    - Sleep button pressed"); }
+            if (pm1_status & 0x8000) != 0 { outln!("    - Wake event"); }
+
+            outln!("  PM1 Enable:  {:#06x}", pm1_enable);
+            outln!("  PM1 Control: {:#06x}", pm1_control);
+            if (pm1_control & 0x0001) != 0 { outln!("    - SCI enabled (ACPI mode)"); }
+
+            outln!("  PM Timer:    {:#010x}", pm_timer);
+        } else {
+            outln!("  ACPI not initialized");
+        }
     } else if eq_ignore_case(args[0], "throttle") {
         if args.len() < 2 {
             outln!("Usage: power throttle <0-100>");
@@ -1501,26 +1556,72 @@ pub fn cmd_power(args: &[&str]) {
         } else {
             outln!("Invalid throttle value");
         }
+    } else if eq_ignore_case(args[0], "sleep") {
+        if args.len() < 2 {
+            outln!("Usage: power sleep <1-4>");
+            outln!("  1 = S1 (Standby)");
+            outln!("  3 = S3 (Sleep/Suspend to RAM)");
+            outln!("  4 = S4 (Hibernate)");
+            return;
+        }
+        if let Some(state) = parse_number(args[1]) {
+            let state = state as u8;
+            if state < 1 || state > 4 {
+                outln!("Invalid sleep state. Use 1-4.");
+                return;
+            }
+
+            // Check if state is supported
+            if !crate::hal::acpi::is_sleep_state_supported(state) {
+                outln!("Sleep state S{} is not supported on this system", state);
+                return;
+            }
+
+            outln!("Entering sleep state S{}...", state);
+
+            let power_state = match state {
+                1 => crate::po::SystemPowerState::Sleeping1,
+                2 => crate::po::SystemPowerState::Sleeping2,
+                3 => crate::po::SystemPowerState::Sleeping3,
+                4 => crate::po::SystemPowerState::Hibernate,
+                _ => return,
+            };
+
+            match crate::po::set_system_power_state(power_state) {
+                Ok(()) => outln!("Resumed from S{}", state),
+                Err(e) => outln!("Failed to enter sleep state: error {}", e),
+            }
+        } else {
+            outln!("Invalid sleep state number");
+        }
+    } else if eq_ignore_case(args[0], "policy") {
+        // Show power policy
+        let policy = crate::po::get_policy();
+        outln!("Power Policy:");
+        outln!("=============");
+        outln!("  Revision: {}", policy.revision);
+        outln!("  Power Button: {:?}", policy.power_button_action);
+        outln!("  Sleep Button: {:?}", policy.sleep_button_action);
+        outln!("  Lid Close: {:?}", policy.lid_close_action);
+        outln!("  Idle Timeout: {} seconds", policy.idle_timeout);
+        outln!("  Idle Action: {:?}", policy.idle_action);
+        outln!("  Min Sleep: {:?}", policy.min_sleep);
+        outln!("  Max Sleep: {:?}", policy.max_sleep);
+        outln!("  Video Timeout: {} seconds", policy.video_timeout);
+        outln!("  Spindown Timeout: {} seconds", policy.spindown_timeout);
     } else {
         outln!("Unknown power command: {}", args[0]);
+        outln!("Use 'power' for help");
     }
 }
 
 /// Shutdown the system
 pub fn cmd_shutdown() {
     outln!("Initiating system shutdown...");
-    match crate::po::shutdown() {
-        Ok(()) => {
-            outln!("Shutdown in progress...");
-            // Halt all processing
-            loop {
-                crate::arch::halt();
-            }
-        }
-        Err(e) => {
-            outln!("Shutdown failed: error {}", e);
-        }
-    }
+    outln!("Stopping services and powering off...");
+
+    // shutdown() never returns - it will power off the system
+    crate::po::shutdown();
 }
 
 /// VEH (Vectored Exception Handler) information and testing
