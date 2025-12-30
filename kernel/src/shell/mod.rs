@@ -156,11 +156,11 @@ const COMMANDS: &[&str] = &[
     "job", "ke", "keyedev",
     "ldr", "lookaside", "ls", "luid",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
-    "net", "netinfo", "netserv", "ntfs",
+    "net", "netinfo", "netserv", "netstat", "ntfs",
     "ob", "obdir",
     "pagetable", "partition", "pci", "pe", "peb", "pfn", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "ps", "pwd",
     "qotd", "quit",
-    "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "rtl", "shutdown",
+    "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "route", "rtl", "shutdown",
     "sc", "sched", "se", "section", "services", "smbios", "stack", "suspend", "sysinfo",
     "tasks", "teb", "time", "timer", "timerq", "timeserv", "touch", "type",
     "userproc", "usertest",
@@ -1306,6 +1306,12 @@ impl Shell {
         // Network services summary
         } else if eq_ignore_case(cmd, "netserv") {
             commands::cmd_netserv(&args[1..argc]);
+        // Netstat - network connections
+        } else if eq_ignore_case(cmd, "netstat") {
+            commands::cmd_netstat(&args[1..argc]);
+        // Route table
+        } else if eq_ignore_case(cmd, "route") {
+            commands::cmd_route(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

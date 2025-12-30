@@ -468,3 +468,35 @@ pub fn get_socket_info(socket_id: usize) -> Option<(UdpSocketState, u16, usize)>
         Some((socket.state, socket.local_port, socket.rx_count))
     }
 }
+
+/// UDP endpoint info for netstat display
+#[derive(Debug, Clone)]
+pub struct UdpEndpointInfo {
+    pub socket_id: usize,
+    pub state: UdpSocketState,
+    pub local_port: u16,
+    pub local_ip: Ipv4Address,
+    pub rx_queue: usize,
+}
+
+/// Enumerate all active UDP endpoints
+pub fn enumerate_endpoints() -> alloc::vec::Vec<UdpEndpointInfo> {
+    let _guard = UDP_LOCK.lock();
+    let mut endpoints = alloc::vec::Vec::new();
+
+    unsafe {
+        for (i, socket) in UDP_SOCKETS.iter().enumerate() {
+            if socket.state == UdpSocketState::Bound {
+                endpoints.push(UdpEndpointInfo {
+                    socket_id: i,
+                    state: socket.state,
+                    local_port: socket.local_port,
+                    local_ip: socket.local_ip,
+                    rx_queue: socket.rx_count,
+                });
+            }
+        }
+    }
+
+    endpoints
+}

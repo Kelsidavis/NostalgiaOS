@@ -2,6 +2,8 @@
 //!
 //! Implementation of all built-in shell commands.
 
+extern crate alloc;
+
 use crate::fs;
 use super::{get_current_dir, set_current_dir, shell_write, shell_writeln};
 use core::fmt::Write;
@@ -17605,5 +17607,211 @@ pub fn cmd_netserv(args: &[&str]) {
         outln!("  status    Show status of all network services (default)");
         outln!("  all       Start all simple network services");
         outln!("  stop      Stop all simple network services");
+    }
+}
+
+/// Windows-style netstat command
+pub fn cmd_netstat(args: &[&str]) {
+    use crate::net::{tcp, udp};
+
+    let mut show_tcp = true;
+    let mut show_udp = true;
+    let mut show_all = false;
+    let mut show_stats = false;
+
+    // Parse arguments
+    for arg in args {
+        if eq_ignore_case(arg, "-a") || eq_ignore_case(arg, "/a") {
+            show_all = true;
+        } else if eq_ignore_case(arg, "-t") || eq_ignore_case(arg, "/t") {
+            show_tcp = true;
+            show_udp = false;
+        } else if eq_ignore_case(arg, "-u") || eq_ignore_case(arg, "/u") {
+            show_tcp = false;
+            show_udp = true;
+        } else if eq_ignore_case(arg, "-s") || eq_ignore_case(arg, "/s") {
+            show_stats = true;
+        } else if eq_ignore_case(arg, "-?") || eq_ignore_case(arg, "/?") || eq_ignore_case(arg, "help") {
+            outln!("Usage: netstat [options]");
+            outln!("");
+            outln!("Options:");
+            outln!("  -a        Show all connections and listening ports");
+            outln!("  -t        Show TCP connections only");
+            outln!("  -u        Show UDP endpoints only");
+            outln!("  -s        Show protocol statistics");
+            outln!("");
+            outln!("Without options, shows established TCP connections");
+            return;
+        }
+    }
+
+    if show_stats {
+        // Show protocol statistics
+        let net_stats = crate::net::get_stats();
+        outln!("");
+        outln!("Network Statistics:");
+        outln!("  Packets Received:     {}", net_stats.packets_received);
+        outln!("  Packets Transmitted:  {}", net_stats.packets_transmitted);
+        outln!("  Receive Errors:       {}", net_stats.receive_errors);
+        outln!("  Transmit Errors:      {}", net_stats.transmit_errors);
+        outln!("  Bytes Received:       {}", net_stats.bytes_received);
+        outln!("  Bytes Transmitted:    {}", net_stats.bytes_transmitted);
+        outln!("");
+
+        let (tcp_active, tcp_max) = tcp::get_socket_stats();
+        outln!("TCP Statistics:");
+        outln!("  Active Sockets:  {} / {}", tcp_active, tcp_max);
+        outln!("");
+
+        let (udp_active, udp_max) = udp::get_socket_stats();
+        outln!("UDP Statistics:");
+        outln!("  Active Sockets:  {} / {}", udp_active, udp_max);
+        return;
+    }
+
+    outln!("");
+    outln!("Active Connections");
+    outln!("");
+
+    if show_tcp {
+        outln!("  Proto  Local Address          Foreign Address        State");
+
+        let tcp_connections = tcp::enumerate_connections();
+        for conn in &tcp_connections {
+            // Format state
+            let state_str = match conn.state {
+                tcp::TcpState::Closed => "CLOSED",
+                tcp::TcpState::Listen => "LISTENING",
+                tcp::TcpState::SynSent => "SYN_SENT",
+                tcp::TcpState::SynReceived => "SYN_RECEIVED",
+                tcp::TcpState::Established => "ESTABLISHED",
+                tcp::TcpState::FinWait1 => "FIN_WAIT_1",
+                tcp::TcpState::FinWait2 => "FIN_WAIT_2",
+                tcp::TcpState::CloseWait => "CLOSE_WAIT",
+                tcp::TcpState::Closing => "CLOSING",
+                tcp::TcpState::LastAck => "LAST_ACK",
+                tcp::TcpState::TimeWait => "TIME_WAIT",
+            };
+
+            // Skip non-established if not -a
+            if !show_all && conn.state != tcp::TcpState::Established &&
+               conn.state != tcp::TcpState::Listen {
+                continue;
+            }
+
+            // Format addresses
+            let local_addr = alloc::format!("0.0.0.0:{}", conn.local_port);
+            let remote_addr = if conn.remote_port == 0 {
+                alloc::format!("*:*")
+            } else {
+                alloc::format!("{}.{}.{}.{}:{}",
+                    conn.remote_ip.0[0], conn.remote_ip.0[1],
+                    conn.remote_ip.0[2], conn.remote_ip.0[3],
+                    conn.remote_port)
+            };
+
+            outln!("  TCP    {:<22} {:<22} {}", local_addr, remote_addr, state_str);
+        }
+
+        if tcp_connections.is_empty() {
+            outln!("  (no TCP connections)");
+        }
+    }
+
+    if show_udp {
+        if show_tcp {
+            outln!("");
+        }
+        outln!("  Proto  Local Address          State");
+
+        let udp_endpoints = udp::enumerate_endpoints();
+        for ep in &udp_endpoints {
+            let local_addr = alloc::format!("{}.{}.{}.{}:{}",
+                ep.local_ip.0[0], ep.local_ip.0[1],
+                ep.local_ip.0[2], ep.local_ip.0[3],
+                ep.local_port);
+
+            let state = if ep.rx_queue > 0 {
+                alloc::format!("BOUND ({} queued)", ep.rx_queue)
+            } else {
+                alloc::format!("BOUND")
+            };
+
+            outln!("  UDP    {:<22} {}", local_addr, state);
+        }
+
+        if udp_endpoints.is_empty() {
+            outln!("  (no UDP endpoints)");
+        }
+    }
+
+    outln!("");
+}
+
+/// Route table display command
+pub fn cmd_route(args: &[&str]) {
+    use crate::net;
+
+    if args.is_empty() || eq_ignore_case(args[0], "print") {
+        outln!("");
+        outln!("IPv4 Route Table");
+        outln!("=========================================================================");
+        outln!("Active Routes:");
+        outln!("Network Destination    Netmask          Gateway         Interface  Metric");
+
+        // Display routes based on configured devices
+        let count = net::get_device_count();
+        for i in 0..count {
+            if let Some(device) = net::get_device(i) {
+                if let (Some(ip), Some(mask)) = (device.ip_address, device.subnet_mask) {
+                    // Calculate network address
+                    let net_addr = [
+                        ip.0[0] & mask.0[0],
+                        ip.0[1] & mask.0[1],
+                        ip.0[2] & mask.0[2],
+                        ip.0[3] & mask.0[3],
+                    ];
+
+                    // Local network route
+                    outln!("{:>3}.{:>3}.{:>3}.{:>3}    {:>3}.{:>3}.{:>3}.{:>3}    On-link         {:>3}.{:>3}.{:>3}.{:>3}    1",
+                        net_addr[0], net_addr[1], net_addr[2], net_addr[3],
+                        mask.0[0], mask.0[1], mask.0[2], mask.0[3],
+                        ip.0[0], ip.0[1], ip.0[2], ip.0[3]);
+
+                    // Host route for local address
+                    outln!("{:>3}.{:>3}.{:>3}.{:>3}    255.255.255.255    On-link         {:>3}.{:>3}.{:>3}.{:>3}    1",
+                        ip.0[0], ip.0[1], ip.0[2], ip.0[3],
+                        ip.0[0], ip.0[1], ip.0[2], ip.0[3]);
+
+                    // Default gateway if configured
+                    if let Some(gw) = device.gateway {
+                        outln!("          0.0.0.0          0.0.0.0    {:>3}.{:>3}.{:>3}.{:>3}    {:>3}.{:>3}.{:>3}.{:>3}    1",
+                            gw.0[0], gw.0[1], gw.0[2], gw.0[3],
+                            ip.0[0], ip.0[1], ip.0[2], ip.0[3]);
+                    }
+                }
+            }
+        }
+
+        // Loopback routes
+        outln!("        127.0.0.0        255.0.0.0    On-link             127.0.0.1    1");
+        outln!("        127.0.0.1    255.255.255.255    On-link             127.0.0.1    1");
+        outln!("  127.255.255.255    255.255.255.255    On-link             127.0.0.1    1");
+
+        // Broadcast
+        outln!("  255.255.255.255    255.255.255.255    On-link             127.0.0.1    1");
+
+        outln!("=========================================================================");
+        outln!("");
+    } else if eq_ignore_case(args[0], "help") || eq_ignore_case(args[0], "/?") {
+        outln!("Usage: route [print]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  print     Display the IP routing table (default)");
+        outln!("");
+        outln!("Note: Route modification not yet implemented");
+    } else {
+        outln!("Unknown route command: {}", args[0]);
+        outln!("Use 'route help' for usage");
     }
 }

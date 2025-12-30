@@ -1097,3 +1097,41 @@ pub fn get_socket_info(socket: TcpSocket) -> Option<(TcpState, u16, u16, Ipv4Add
     }
     None
 }
+
+/// Connection info for netstat display
+#[derive(Debug, Clone)]
+pub struct TcpConnectionInfo {
+    pub socket_id: usize,
+    pub state: TcpState,
+    pub local_port: u16,
+    pub remote_port: u16,
+    pub remote_ip: Ipv4Address,
+    pub rx_queue: usize,
+    pub tx_queue: usize,
+}
+
+/// Enumerate all active TCP connections
+pub fn enumerate_connections() -> alloc::vec::Vec<TcpConnectionInfo> {
+    let mut connections = alloc::vec::Vec::new();
+
+    unsafe {
+        if let Some(ref sockets) = TCP_SOCKETS {
+            for (i, socket) in sockets.iter().enumerate() {
+                let tcb = socket.lock();
+                if tcb.is_open && tcb.state != TcpState::Closed {
+                    connections.push(TcpConnectionInfo {
+                        socket_id: i,
+                        state: tcb.state,
+                        local_port: tcb.local_port,
+                        remote_port: tcb.remote_port,
+                        remote_ip: tcb.remote_ip,
+                        rx_queue: tcb.rx_buffer.len(),
+                        tx_queue: tcb.tx_buffer.len(),
+                    });
+                }
+            }
+        }
+    }
+
+    connections
+}
