@@ -17045,3 +17045,164 @@ pub fn cmd_serial(args: &[&str]) {
         outln!("Use 'serial' for help");
     }
 }
+
+/// Event log viewing command
+pub fn cmd_eventlog(args: &[&str]) {
+    use crate::ex::eventlog;
+
+    if args.is_empty() {
+        outln!("Usage: eventlog <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  list [n]     Show last n events (default 10)");
+        outln!("  errors       Show recent error events");
+        outln!("  warnings     Show recent warning events");
+        outln!("  stats        Show event log statistics");
+        outln!("  clear        Clear event log");
+        outln!("  test         Generate test events");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "stats") {
+        let stats = eventlog::get_stats();
+        outln!("Event Log Statistics:");
+        outln!("  Total events logged: {}", stats.total_events);
+        outln!("  Events in buffer: {}", stats.stored_events);
+        outln!("  Info events: {}", stats.info_events);
+        outln!("  Warning events: {}", stats.warning_events);
+        outln!("  Error events: {}", stats.error_events);
+    } else if eq_ignore_case(args[0], "list") {
+        let count = if args.len() > 1 {
+            args[1].parse().unwrap_or(10)
+        } else {
+            10
+        };
+
+        let events = eventlog::get_events(count);
+        if events.is_empty() {
+            outln!("No events in log");
+            return;
+        }
+
+        outln!("Recent Events ({}):", events.len());
+        outln!("");
+        for event in events {
+            outln!(
+                "[{}] [{}] #{}: {}",
+                event.source.name(),
+                event.event_type.name(),
+                event.event_id,
+                event.message
+            );
+        }
+    } else if eq_ignore_case(args[0], "errors") {
+        let events = eventlog::get_events_by_type(eventlog::EventType::Error, 20);
+        if events.is_empty() {
+            outln!("No error events in log");
+            return;
+        }
+
+        outln!("Recent Errors ({}):", events.len());
+        outln!("");
+        for event in events {
+            outln!(
+                "[{}] #{}: {}",
+                event.source.name(),
+                event.event_id,
+                event.message
+            );
+        }
+    } else if eq_ignore_case(args[0], "warnings") {
+        let events = eventlog::get_events_by_type(eventlog::EventType::Warning, 20);
+        if events.is_empty() {
+            outln!("No warning events in log");
+            return;
+        }
+
+        outln!("Recent Warnings ({}):", events.len());
+        outln!("");
+        for event in events {
+            outln!(
+                "[{}] #{}: {}",
+                event.source.name(),
+                event.event_id,
+                event.message
+            );
+        }
+    } else if eq_ignore_case(args[0], "clear") {
+        eventlog::clear();
+        outln!("Event log cleared");
+    } else if eq_ignore_case(args[0], "test") {
+        eventlog::log_info(eventlog::EventSource::System, 1, "Test information event");
+        eventlog::log_warning(eventlog::EventSource::System, 2, "Test warning event");
+        eventlog::log_error(eventlog::EventSource::System, 3, "Test error event");
+        outln!("Generated 3 test events");
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'eventlog' for help");
+    }
+}
+
+/// Echo/chargen server command
+pub fn cmd_echoserv(args: &[&str]) {
+    use crate::net::echo;
+
+    if args.is_empty() {
+        outln!("Usage: echoserv <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  start echo     Start UDP echo server");
+        outln!("  stop echo      Stop UDP echo server");
+        outln!("  start chargen  Start UDP chargen server");
+        outln!("  stop chargen   Stop UDP chargen server");
+        outln!("  stats          Show echo service statistics");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "stats") {
+        let stats = echo::get_stats();
+        outln!("Echo Service Statistics:");
+        outln!("  UDP echo server: {}", if stats.echo_udp_running { "running" } else { "stopped" });
+        outln!("  UDP chargen server: {}", if stats.chargen_udp_running { "running" } else { "stopped" });
+        outln!("  Echo packets: {}", stats.udp_packets);
+        outln!("  Echo bytes: {}", stats.udp_bytes);
+        outln!("  Chargen packets: {}", stats.chargen_packets);
+    } else if eq_ignore_case(args[0], "start") {
+        if args.len() < 2 {
+            outln!("Usage: echoserv start <echo|chargen>");
+            return;
+        }
+
+        if eq_ignore_case(args[1], "echo") {
+            match echo::start_echo_udp() {
+                Ok(_) => outln!("UDP echo server started on port 7"),
+                Err(e) => outln!("Failed to start echo server: {}", e),
+            }
+        } else if eq_ignore_case(args[1], "chargen") {
+            match echo::start_chargen_udp() {
+                Ok(_) => outln!("UDP chargen server started on port 19"),
+                Err(e) => outln!("Failed to start chargen server: {}", e),
+            }
+        } else {
+            outln!("Unknown service: {}", args[1]);
+        }
+    } else if eq_ignore_case(args[0], "stop") {
+        if args.len() < 2 {
+            outln!("Usage: echoserv stop <echo|chargen>");
+            return;
+        }
+
+        if eq_ignore_case(args[1], "echo") {
+            echo::stop_echo_udp();
+            outln!("UDP echo server stopped");
+        } else if eq_ignore_case(args[1], "chargen") {
+            echo::stop_chargen_udp();
+            outln!("UDP chargen server stopped");
+        } else {
+            outln!("Unknown service: {}", args[1]);
+        }
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'echoserv' for help");
+    }
+}

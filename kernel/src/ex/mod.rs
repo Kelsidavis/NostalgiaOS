@@ -32,6 +32,7 @@ pub mod resource;
 pub mod rundown;
 pub mod sysinfo;
 pub mod worker;
+pub mod eventlog;
 // pub mod pool;      // Uses mm::pool
 // pub mod timer;     // Uses ke::timer
 
