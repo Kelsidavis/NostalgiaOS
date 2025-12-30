@@ -152,11 +152,11 @@ const COMMANDS: &[&str] = &[
     "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
     "files", "finger",
     "hal", "handles", "heap", "help", "history", "hpet",
-    "int", "io", "iocp", "ioq", "irql", "irqstat",
+    "ident", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
     "job", "ke", "keyedev",
     "ldr", "lookaside", "ls", "luid",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
-    "net", "netinfo", "ntfs",
+    "net", "netinfo", "netserv", "ntfs",
     "ob", "obdir",
     "pagetable", "partition", "pci", "pe", "peb", "pfn", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "ps", "pwd",
     "qotd", "quit",
@@ -165,7 +165,7 @@ const COMMANDS: &[&str] = &[
     "tasks", "teb", "time", "timer", "timerq", "timeserv", "touch", "type",
     "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "version", "volumes",
-    "waitq", "worker", "wset",
+    "waitq", "whois", "worker", "wset",
 ];
 
 /// Current working directory
@@ -1294,6 +1294,18 @@ impl Shell {
         // Finger server
         } else if eq_ignore_case(cmd, "finger") {
             commands::cmd_finger(&args[1..argc]);
+        // WHOIS client
+        } else if eq_ignore_case(cmd, "whois") {
+            commands::cmd_whois(&args[1..argc]);
+        // Ident protocol
+        } else if eq_ignore_case(cmd, "ident") {
+            commands::cmd_ident(&args[1..argc]);
+        // Windows-style ipconfig
+        } else if eq_ignore_case(cmd, "ipconfig") {
+            commands::cmd_ipconfig(&args[1..argc]);
+        // Network services summary
+        } else if eq_ignore_case(cmd, "netserv") {
+            commands::cmd_netserv(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

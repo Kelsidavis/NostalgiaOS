@@ -36,6 +36,8 @@ pub mod time;
 pub mod discard;
 pub mod daytime;
 pub mod finger;
+pub mod whois;
+pub mod ident;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::vec::Vec;
@@ -136,6 +138,8 @@ pub fn init() {
     discard::init();
     daytime::init();
     finger::init();
+    whois::init();
+    ident::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 

@@ -17402,3 +17402,208 @@ pub fn cmd_finger(args: &[&str]) {
         outln!("Use 'finger' for help");
     }
 }
+
+/// Whois client command
+pub fn cmd_whois(args: &[&str]) {
+    use crate::net::whois;
+
+    if args.is_empty() {
+        outln!("Usage: whois <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  stats       Show WHOIS statistics");
+        outln!("  servers     List known WHOIS servers");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "stats") {
+        let stats = whois::get_stats();
+        outln!("WHOIS Statistics:");
+        outln!("  Queries:  {}", stats.queries);
+    } else if eq_ignore_case(args[0], "servers") {
+        outln!("Known WHOIS Servers:");
+        outln!("  IANA:     {:?} (TLD/IP allocation)", whois::servers::IANA);
+        outln!("  ARIN:     {:?} (North America)", whois::servers::ARIN);
+        outln!("  RIPE:     {:?} (Europe)", whois::servers::RIPE);
+        outln!("  APNIC:    {:?} (Asia-Pacific)", whois::servers::APNIC);
+        outln!("  Verisign: {:?} (.com/.net)", whois::servers::VERISIGN);
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'whois' for help");
+    }
+}
+
+/// Ident protocol command
+pub fn cmd_ident(args: &[&str]) {
+    use crate::net::ident;
+
+    if args.is_empty() {
+        outln!("Usage: ident <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  stats       Show ident statistics");
+        outln!("  username    Show/set ident username");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "stats") {
+        let stats = ident::get_stats();
+        outln!("Ident Service Statistics:");
+        outln!("  Queries:   {}", stats.queries);
+        outln!("  Responses: {}", stats.responses);
+        outln!("  Username:  {}", ident::get_username());
+    } else if eq_ignore_case(args[0], "username") {
+        if args.len() > 1 {
+            ident::set_username(args[1]);
+            outln!("Ident username set to: {}", args[1]);
+        } else {
+            outln!("Current ident username: {}", ident::get_username());
+        }
+    } else {
+        outln!("Unknown command: {}", args[0]);
+        outln!("Use 'ident' for help");
+    }
+}
+
+/// Windows-style ipconfig command
+pub fn cmd_ipconfig(args: &[&str]) {
+    use crate::net;
+
+    let show_all = args.iter().any(|a| eq_ignore_case(a, "/all") || eq_ignore_case(a, "-a"));
+
+    outln!("");
+    outln!("Nostalgia OS IP Configuration");
+    outln!("");
+
+    let count = net::get_device_count();
+    if count == 0 {
+        outln!("   No network adapters found.");
+        return;
+    }
+
+    for i in 0..count {
+        if let Some(device) = net::get_device(i) {
+            // Determine adapter type
+            let adapter_type = if device.info.name.contains("loop") || device.info.name.contains("Loop") {
+                "Loopback Pseudo-Interface"
+            } else if device.info.name.contains("virtio") || device.info.name.contains("VirtIO") {
+                "Ethernet adapter VirtIO-NET"
+            } else {
+                "Ethernet adapter"
+            };
+
+            outln!("{} {}:", adapter_type, device.info.name);
+            outln!("");
+
+            // Connection status
+            let state = device.state();
+            outln!("   Connection-specific DNS Suffix  . :");
+            outln!("   Connection Status  . . . . . . . . : {:?}", state);
+
+            if show_all {
+                // Full information
+                outln!("   Description . . . . . . . . . . . : {}", device.info.name);
+                outln!("   Physical Address. . . . . . . . . : {:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X}",
+                    device.info.mac_address.0[0], device.info.mac_address.0[1],
+                    device.info.mac_address.0[2], device.info.mac_address.0[3],
+                    device.info.mac_address.0[4], device.info.mac_address.0[5]);
+            }
+
+            // IP configuration
+            if let Some(ip) = device.ip_address {
+                if show_all {
+                    outln!("   Autoconfiguration Enabled . . . . : Yes");
+                }
+                outln!("   IPv4 Address. . . . . . . . . . . : {}.{}.{}.{}",
+                    ip.0[0], ip.0[1], ip.0[2], ip.0[3]);
+            } else {
+                outln!("   IPv4 Address. . . . . . . . . . . : Not configured");
+            }
+
+            if let Some(mask) = device.subnet_mask {
+                outln!("   Subnet Mask . . . . . . . . . . . : {}.{}.{}.{}",
+                    mask.0[0], mask.0[1], mask.0[2], mask.0[3]);
+            }
+
+            if let Some(gw) = device.gateway {
+                outln!("   Default Gateway . . . . . . . . . : {}.{}.{}.{}",
+                    gw.0[0], gw.0[1], gw.0[2], gw.0[3]);
+            }
+
+            if show_all {
+                outln!("   MTU . . . . . . . . . . . . . . . : {}", device.info.capabilities.mtu);
+                outln!("   Link Speed. . . . . . . . . . . . : {} Mbps", device.info.capabilities.link_speed);
+
+                // Statistics
+                outln!("   Packets Received. . . . . . . . . : {}", device.stats.rx_packets);
+                outln!("   Packets Sent. . . . . . . . . . . : {}", device.stats.tx_packets);
+                outln!("   Bytes Received. . . . . . . . . . : {}", device.stats.rx_bytes);
+                outln!("   Bytes Sent. . . . . . . . . . . . : {}", device.stats.tx_bytes);
+            }
+
+            outln!("");
+        }
+    }
+}
+
+/// Network services summary command
+pub fn cmd_netserv(args: &[&str]) {
+    use crate::net;
+
+    if args.is_empty() || eq_ignore_case(args[0], "status") {
+        outln!("Network Services Status:");
+        outln!("");
+        outln!("  Service       Port   Status");
+        outln!("  -----------   ----   -------");
+
+        // Echo service
+        let echo_stats = net::echo::get_stats();
+        outln!("  Echo UDP       7     {}", if echo_stats.echo_udp_running { "Running" } else { "Stopped" });
+        outln!("  Chargen UDP   19     {}", if echo_stats.chargen_udp_running { "Running" } else { "Stopped" });
+
+        // QOTD
+        let qotd_stats = net::qotd::get_stats();
+        outln!("  QOTD UDP      17     {}", if qotd_stats.udp_running { "Running" } else { "Stopped" });
+
+        // TIME
+        let time_stats = net::time::get_stats();
+        outln!("  TIME UDP      37     {}", if time_stats.udp_running { "Running" } else { "Stopped" });
+
+        // Discard
+        let discard_stats = net::discard::get_stats();
+        outln!("  Discard UDP    9     {}", if discard_stats.udp_running { "Running" } else { "Stopped" });
+
+        // Daytime
+        let daytime_stats = net::daytime::get_stats();
+        outln!("  Daytime UDP   13     {}", if daytime_stats.udp_running { "Running" } else { "Stopped" });
+
+        outln!("");
+        outln!("Use individual service commands to start/stop services.");
+        outln!("(httpd/telnet status available via 'netinfo' command)");
+    } else if eq_ignore_case(args[0], "all") {
+        outln!("Starting all simple network services...");
+        let _ = net::echo::start_echo_udp();
+        let _ = net::echo::start_chargen_udp();
+        let _ = net::qotd::start_qotd_udp();
+        let _ = net::time::start_time_udp();
+        let _ = net::discard::start_discard_udp();
+        let _ = net::daytime::start_daytime_udp();
+        outln!("Simple services started (echo, chargen, qotd, time, discard, daytime)");
+    } else if eq_ignore_case(args[0], "stop") {
+        outln!("Stopping all simple network services...");
+        net::echo::stop_echo_udp();
+        net::echo::stop_chargen_udp();
+        net::qotd::stop_qotd_udp();
+        net::time::stop_time_udp();
+        net::discard::stop_discard_udp();
+        net::daytime::stop_daytime_udp();
+        outln!("Simple services stopped");
+    } else {
+        outln!("Usage: netserv [status|all|stop]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  status    Show status of all network services (default)");
+        outln!("  all       Start all simple network services");
+        outln!("  stop      Stop all simple network services");
+    }
+}
