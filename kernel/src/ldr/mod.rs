@@ -1278,6 +1278,331 @@ pub unsafe fn load_executable(
     })
 }
 
+/// Load an executable into a process's address space
+///
+/// This function loads a PE executable into the process's own page tables,
+/// providing true process isolation. Each process gets its own copy of
+/// the executable mapped at the preferred base address (or a relocated address).
+///
+/// # Arguments
+/// * `process` - Target process with initialized address space
+/// * `file_base` - Pointer to PE file in memory
+/// * `file_size` - Size of the PE file
+///
+/// # Returns
+/// Ok((entry_point, image_base, image_size)) on success
+///
+/// # Safety
+/// - file_base must point to a valid PE file
+/// - process must have a valid address space
+pub unsafe fn load_executable_to_address_space(
+    process: *mut crate::ps::EProcess,
+    file_base: *const u8,
+    _file_size: usize,
+) -> Result<(u64, u64, u32), PeError> {
+    use crate::mm::{MmAddressSpace, pte_flags, mm_map_user_page, PAGE_SIZE};
+
+    if process.is_null() {
+        crate::serial_println!("[LDR] Error: Null process");
+        return Err(PeError::OutOfMemory);
+    }
+
+    // Get the process's address space
+    let aspace = (*process).address_space as *mut MmAddressSpace;
+    if aspace.is_null() {
+        crate::serial_println!("[LDR] Error: Process has no address space");
+        return Err(PeError::OutOfMemory);
+    }
+
+    // Parse PE headers
+    let pe_info = parse_pe(file_base)?;
+
+    // Validate it's an executable
+    if pe_info.is_dll {
+        crate::serial_println!("[LDR] Error: Cannot load DLL as executable");
+        return Err(PeError::InvalidOptionalHeader);
+    }
+
+    let image_size = pe_info.size_of_image as usize;
+    let preferred_base = pe_info.image_base;
+    let page_count = (image_size + PAGE_SIZE - 1) / PAGE_SIZE;
+
+    crate::serial_println!("[LDR] Loading executable to address space:");
+    crate::serial_println!("[LDR]   PML4:         {:#x}", (*aspace).pml4_physical);
+    crate::serial_println!("[LDR]   Preferred:    {:#x}", preferred_base);
+    crate::serial_println!("[LDR]   Image size:   {:#x} ({} pages)", image_size, page_count);
+
+    // Allocate user pages at the preferred base address
+    // Each section will be mapped with appropriate permissions
+    let mut loaded_base = preferred_base;
+
+    // Map pages for the entire image at the preferred base
+    // For simplicity, map with RWX first, then we can adjust per-section later
+    let mut mapped_pages = 0usize;
+    for i in 0..page_count {
+        let virt_addr = preferred_base + (i * PAGE_SIZE) as u64;
+        let flags = pte_flags::USER_RWX; // User-accessible, read-write-execute
+
+        if mm_map_user_page(aspace, virt_addr, flags).is_none() {
+            crate::serial_println!("[LDR] Failed to map page {} at {:#x}", i, virt_addr);
+
+            // If we fail at the preferred base, try an alternative
+            if i == 0 {
+                // Try loading at 0x10000 (64KB) instead
+                loaded_base = 0x10000;
+                crate::serial_println!("[LDR] Trying alternate base {:#x}", loaded_base);
+
+                // Map at alternate location
+                for j in 0..page_count {
+                    let alt_addr = loaded_base + (j * PAGE_SIZE) as u64;
+                    if mm_map_user_page(aspace, alt_addr, flags).is_none() {
+                        crate::serial_println!("[LDR] Failed to map at alternate base");
+                        return Err(PeError::OutOfMemory);
+                    }
+                    mapped_pages += 1;
+                }
+                break;
+            } else {
+                // Partial mapping failure - this is bad
+                return Err(PeError::OutOfMemory);
+            }
+        }
+        mapped_pages += 1;
+    }
+
+    crate::serial_println!("[LDR]   Mapped {} pages at {:#x}", mapped_pages, loaded_base);
+
+    // Now copy the PE sections to the mapped pages
+    // We need to access the user pages through the process's page tables
+    // Since we're in kernel mode, we can access via identity mapping
+
+    // Get the physical addresses for the mapped pages and copy data
+    let section_headers = get_section_headers(file_base).ok_or(PeError::InvalidSection)?;
+
+    // First, copy the PE headers (up to size_of_headers)
+    let headers_size = pe_info.size_of_headers as usize;
+    copy_to_user_pages(aspace, loaded_base, file_base, headers_size)?;
+
+    // Copy each section
+    for section in section_headers.iter() {
+        // Read packed struct fields to local variables (avoid unaligned access)
+        let virtual_size = { section.virtual_size };
+        let size_of_raw_data = { section.size_of_raw_data };
+        let virtual_address = { section.virtual_address };
+        let pointer_to_raw_data = { section.pointer_to_raw_data };
+        let name = { section.name };
+
+        if virtual_size == 0 || size_of_raw_data == 0 {
+            continue;
+        }
+
+        let section_rva = virtual_address as u64;
+        let section_dest = loaded_base + section_rva;
+        let section_src = file_base.add(pointer_to_raw_data as usize);
+        let copy_size = core::cmp::min(virtual_size, size_of_raw_data) as usize;
+
+        crate::serial_println!("[LDR]   Section '{}': {:#x} -> {:#x} ({} bytes)",
+            core::str::from_utf8_unchecked(&name),
+            pointer_to_raw_data,
+            section_dest,
+            copy_size
+        );
+
+        copy_to_user_pages(aspace, section_dest, section_src, copy_size)?;
+
+        // Zero-fill any extra space if virtual_size > raw_size
+        if virtual_size > size_of_raw_data {
+            let zero_start = section_dest + size_of_raw_data as u64;
+            let zero_size = (virtual_size - size_of_raw_data) as usize;
+            zero_user_pages(aspace, zero_start, zero_size)?;
+        }
+    }
+
+    // Process relocations if needed
+    if loaded_base != preferred_base {
+        if !pe_info.has_relocations {
+            crate::serial_println!("[LDR] Error: Image requires relocation but has none");
+            return Err(PeError::NotRelocatable);
+        }
+        crate::serial_println!("[LDR] Relocating from {:#x} to {:#x}", preferred_base, loaded_base);
+
+        // We need to process relocations in the user pages
+        // This is more complex since we're working with user page tables
+        // For now, we'll do it through identity mapping since low memory is identity-mapped
+        process_relocations_in_place(aspace, loaded_base, preferred_base, &pe_info)?;
+    }
+
+    let entry_point = loaded_base + pe_info.entry_point_rva as u64;
+
+    crate::serial_println!("[LDR] Executable loaded to address space:");
+    crate::serial_println!("[LDR]   Image base:  {:#x}", loaded_base);
+    crate::serial_println!("[LDR]   Entry point: {:#x}", entry_point);
+
+    Ok((entry_point, loaded_base, pe_info.size_of_image))
+}
+
+/// Copy data to user pages in a process's address space
+unsafe fn copy_to_user_pages(
+    aspace: *mut crate::mm::MmAddressSpace,
+    dest_virt: u64,
+    src: *const u8,
+    len: usize,
+) -> Result<(), PeError> {
+    use crate::mm::{PAGE_SIZE, pte::mm_virtual_to_physical};
+
+    let pml4 = (*aspace).pml4_physical;
+    let mut remaining = len;
+    let mut src_ptr = src;
+    let mut dest_addr = dest_virt;
+
+    while remaining > 0 {
+        // Get the physical address for this page
+        let dest_phys = match mm_virtual_to_physical(pml4, dest_addr) {
+            Some(p) => p,
+            None => {
+                crate::serial_println!("[LDR] Failed to get physical for {:#x}", dest_addr);
+                return Err(PeError::OutOfMemory);
+            }
+        };
+
+        // Calculate offset within page and how much to copy
+        let page_offset = (dest_addr & 0xFFF) as usize;
+        let copy_size = core::cmp::min(remaining, PAGE_SIZE - page_offset);
+
+        // Copy through identity-mapped physical address
+        let dest_ptr = dest_phys as *mut u8;
+        core::ptr::copy_nonoverlapping(src_ptr, dest_ptr, copy_size);
+
+        remaining -= copy_size;
+        src_ptr = src_ptr.add(copy_size);
+        dest_addr += copy_size as u64;
+    }
+
+    Ok(())
+}
+
+/// Zero user pages in a process's address space
+unsafe fn zero_user_pages(
+    aspace: *mut crate::mm::MmAddressSpace,
+    dest_virt: u64,
+    len: usize,
+) -> Result<(), PeError> {
+    use crate::mm::{PAGE_SIZE, pte::mm_virtual_to_physical};
+
+    let pml4 = (*aspace).pml4_physical;
+    let mut remaining = len;
+    let mut dest_addr = dest_virt;
+
+    while remaining > 0 {
+        let dest_phys = match mm_virtual_to_physical(pml4, dest_addr) {
+            Some(p) => p,
+            None => return Err(PeError::OutOfMemory),
+        };
+
+        let page_offset = (dest_addr & 0xFFF) as usize;
+        let zero_size = core::cmp::min(remaining, crate::mm::PAGE_SIZE - page_offset);
+
+        let dest_ptr = dest_phys as *mut u8;
+        core::ptr::write_bytes(dest_ptr, 0, zero_size);
+
+        remaining -= zero_size;
+        dest_addr += zero_size as u64;
+    }
+
+    Ok(())
+}
+
+/// Process relocations in user pages
+unsafe fn process_relocations_in_place(
+    aspace: *mut crate::mm::MmAddressSpace,
+    image_base: u64,
+    original_base: u64,
+    _pe_info: &PeInfo,
+) -> Result<(), PeError> {
+    use crate::mm::pte::mm_virtual_to_physical;
+
+    let pml4 = (*aspace).pml4_physical;
+    let delta = image_base.wrapping_sub(original_base) as i64;
+
+    if delta == 0 {
+        return Ok(());
+    }
+
+    // Get the relocation directory from the loaded image
+    // We need to read from physical memory through identity mapping
+    let header_phys = mm_virtual_to_physical(pml4, image_base).ok_or(PeError::RelocationError)?;
+    let header_base = header_phys as *const u8;
+
+    // Get relocation directory using the copied headers
+    let reloc_dir = match get_data_directory(header_base, directory_entry::IMAGE_DIRECTORY_ENTRY_BASERELOC) {
+        Some(dir) if dir.is_present() => dir,
+        _ => return Ok(()), // No relocations
+    };
+
+    let reloc_dir_rva = reloc_dir.virtual_address;
+    if reloc_dir_rva == 0 {
+        return Ok(());
+    }
+
+    // Read relocation data through physical mapping
+    let reloc_virt = image_base + reloc_dir_rva as u64;
+    let reloc_phys = mm_virtual_to_physical(pml4, reloc_virt).ok_or(PeError::RelocationError)?;
+
+    let mut block_ptr = reloc_phys as *const ImageBaseRelocation;
+
+    loop {
+        let block = &*block_ptr;
+
+        if block.virtual_address == 0 || block.size_of_block == 0 {
+            break;
+        }
+
+        let entry_count = (block.size_of_block as usize - 8) / 2;
+        let entries = core::slice::from_raw_parts(
+            (block_ptr as *const u8).add(8) as *const u16,
+            entry_count,
+        );
+
+        for &entry in entries {
+            let reloc_type = (entry >> 12) as u8;
+            let offset = (entry & 0x0FFF) as u32;
+
+            if reloc_type == 0 {
+                continue; // Padding
+            }
+
+            let target_rva = block.virtual_address + offset;
+            let target_virt = image_base + target_rva as u64;
+            let target_phys = match mm_virtual_to_physical(pml4, target_virt) {
+                Some(p) => p,
+                None => continue, // Skip if not mapped
+            };
+
+            match reloc_type {
+                IMAGE_REL_BASED_HIGHLOW => {
+                    // 32-bit relocation
+                    let ptr = target_phys as *mut u32;
+                    let old_val = *ptr;
+                    *ptr = old_val.wrapping_add(delta as u32);
+                }
+                IMAGE_REL_BASED_DIR64 => {
+                    // 64-bit relocation
+                    let ptr = target_phys as *mut u64;
+                    let old_val = *ptr;
+                    *ptr = (old_val as i64).wrapping_add(delta) as u64;
+                }
+                _ => {} // Ignore other types
+            }
+        }
+
+        // Move to next block
+        block_ptr = (block_ptr as *const u8).add(block.size_of_block as usize) as *const ImageBaseRelocation;
+    }
+
+    crate::serial_println!("[LDR] Relocations applied (delta={:#x})", delta);
+    Ok(())
+}
+
 /// Load a DLL into an existing process
 ///
 /// # Arguments
