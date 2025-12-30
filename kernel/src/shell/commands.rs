@@ -22002,3 +22002,403 @@ pub fn cmd_compact(args: &[&str]) {
         outln!(" The compression ratio is 1.0 to 1.");
     }
 }
+
+// ============================================================================
+// WMIC Command - WMI Command-Line Interface
+// ============================================================================
+
+/// WMIC command - Windows Management Instrumentation command-line
+pub fn cmd_wmic(args: &[&str]) {
+    if args.is_empty() {
+        outln!("WMIC - WMI Command-line Interface");
+        outln!("");
+        outln!("Usage: WMIC [global switches] <alias> [WQL] [verb clause]");
+        outln!("");
+        outln!("Common Aliases:");
+        outln!("  CPU             Processor information");
+        outln!("  OS              Operating system");
+        outln!("  PROCESS         Process list");
+        outln!("  SERVICE         Service list");
+        outln!("  DISKDRIVE       Disk drives");
+        outln!("  LOGICALDISK     Logical disks");
+        outln!("  NIC             Network adapters");
+        outln!("  BIOS            BIOS information");
+        outln!("  MEMORYCHIP      Memory modules");
+        outln!("  USERACCOUNT     User accounts");
+        outln!("");
+        outln!("Verbs: GET, LIST, CALL, SET");
+        outln!("");
+        outln!("Examples:");
+        outln!("  wmic cpu get name,numberofcores");
+        outln!("  wmic os get caption,version");
+        outln!("  wmic process list brief");
+        return;
+    }
+
+    let alias = args[0].to_ascii_uppercase();
+    let verb = if args.len() > 1 {
+        args[1].to_ascii_uppercase()
+    } else {
+        alloc::string::String::from("LIST")
+    };
+
+    if alias == "CPU" {
+        outln!("");
+        outln!("Name                                      NumberOfCores  MaxClockSpeed");
+        outln!("========================================  =============  =============");
+        outln!("Intel(R) Core(TM) Processor               4              3600");
+    } else if alias == "OS" {
+        outln!("");
+        outln!("Caption                                   Version        BuildNumber");
+        outln!("========================================  =============  ===========");
+        outln!("Nostalgos (Windows Server 2003 Clone)     5.2.3790       3790");
+    } else if alias == "PROCESS" {
+        outln!("");
+        if verb == "LIST" {
+            outln!("Handle  Name              ProcessId  ThreadCount");
+            outln!("======  ================  =========  ===========");
+            outln!("0       System Idle       0          1");
+            outln!("4       System            4          64");
+            outln!("264     smss.exe          264        3");
+            outln!("324     csrss.exe         324        12");
+            outln!("352     winlogon.exe      352        18");
+            outln!("400     services.exe      400        16");
+        } else {
+            outln!("Name              ProcessId  CommandLine");
+            outln!("================  =========  ===========");
+            outln!("System            4          ");
+            outln!("smss.exe          264        \\SystemRoot\\System32\\smss.exe");
+        }
+    } else if alias == "SERVICE" {
+        outln!("");
+        outln!("Name                  DisplayName                     State    StartMode");
+        outln!("====================  ==============================  =======  =========");
+        outln!("Dhcp                  DHCP Client                     Running  Auto");
+        outln!("Dnscache              DNS Client                      Running  Auto");
+        outln!("EventLog              Event Log                       Running  Auto");
+        outln!("lanmanserver          Server                          Running  Auto");
+        outln!("RpcSs                 Remote Procedure Call (RPC)     Running  Auto");
+    } else if alias == "DISKDRIVE" {
+        outln!("");
+        outln!("Model                         Size          Partitions");
+        outln!("============================  ============  ==========");
+        outln!("VirtIO Block Device           536870912     1");
+    } else if alias == "LOGICALDISK" {
+        outln!("");
+        outln!("DeviceID  FileSystem  FreeSpace    Size         VolumeName");
+        outln!("========  ==========  ===========  ===========  ==========");
+        outln!("C:        NTFS        402653184    536870912    NOSTALGOS");
+    } else if alias == "NIC" {
+        outln!("");
+        outln!("Description                   MACAddress");
+        outln!("============================  =================");
+        for i in 0..4 {
+            if let Some(device) = crate::net::get_device(i) {
+                let mac = device.info.mac_address;
+                outln!("{:<30} {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+                    &device.info.name,
+                    mac.0[0], mac.0[1], mac.0[2], mac.0[3], mac.0[4], mac.0[5]);
+            }
+        }
+    } else if alias == "BIOS" {
+        outln!("");
+        outln!("Manufacturer    Name                  Version");
+        outln!("==============  ====================  =======");
+        outln!("SeaBIOS         SeaBIOS               1.16.0");
+    } else if alias == "MEMORYCHIP" {
+        outln!("");
+        outln!("BankLabel    Capacity     Speed");
+        outln!("===========  ===========  =====");
+        outln!("BANK 0       536870912    Unknown");
+    } else if alias == "USERACCOUNT" {
+        outln!("");
+        outln!("Name            Disabled  LocalAccount");
+        outln!("==============  ========  ============");
+        outln!("Administrator   FALSE     TRUE");
+        outln!("Guest           TRUE      TRUE");
+    } else {
+        outln!("Alias not found: {}", alias);
+        outln!("Use 'wmic' for list of aliases.");
+    }
+}
+
+// ============================================================================
+// DRIVERQUERY Command - List Installed Drivers
+// ============================================================================
+
+/// DRIVERQUERY command - list installed drivers
+pub fn cmd_driverquery(args: &[&str]) {
+    let verbose = args.iter().any(|a| a.to_ascii_uppercase() == "/V");
+
+    if args.iter().any(|a| *a == "/?") {
+        outln!("Displays a list of all installed device drivers.");
+        outln!("");
+        outln!("DRIVERQUERY [/FO format] [/NH] [/V] [/SI]");
+        outln!("");
+        outln!("  /V   Verbose output");
+        outln!("  /SI  Show signed driver information");
+        return;
+    }
+
+    outln!("");
+    if verbose {
+        outln!("Module Name    Display Name                 Driver Type   Start Mode  State");
+        outln!("============   ===========================  ============  ==========  =======");
+        outln!("ACPI           Microsoft ACPI Driver        Kernel        Boot        Running");
+        outln!("atapi          Standard IDE/ESDI           Kernel        Boot        Running");
+        outln!("Disk           Disk Driver                  Kernel        Boot        Running");
+        outln!("i8042prt       i8042 Keyboard Port         Kernel        System      Running");
+        outln!("Kbdclass       Keyboard Class Driver        Kernel        System      Running");
+        outln!("Mouclass       Mouse Class Driver           Kernel        System      Running");
+        outln!("Ntfs           Ntfs                         File System   Boot        Running");
+        outln!("PCI            PCI Bus Driver               Kernel        Boot        Running");
+        outln!("Tcpip          TCP/IP Protocol Driver       Kernel        System      Running");
+    } else {
+        outln!("Module Name    Display Name                           Driver Type");
+        outln!("============   =====================================  ============");
+        outln!("ACPI           Microsoft ACPI Driver                  Kernel");
+        outln!("atapi          Standard IDE/ESDI Controller           Kernel");
+        outln!("Disk           Disk Driver                            Kernel");
+        outln!("i8042prt       i8042 Keyboard and PS/2 Mouse Port     Kernel");
+        outln!("Kbdclass       Keyboard Class Driver                  Kernel");
+        outln!("Mouclass       Mouse Class Driver                     Kernel");
+        outln!("Ntfs           Ntfs                                   File System");
+        outln!("PCI            PCI Bus Driver                         Kernel");
+        outln!("Tcpip          TCP/IP Protocol Driver                 Kernel");
+    }
+    outln!("");
+}
+
+// ============================================================================
+// OPENFILES Command - List Open Files
+// ============================================================================
+
+/// OPENFILES command - list files opened by remote users
+pub fn cmd_openfiles(args: &[&str]) {
+    if args.iter().any(|a| *a == "/?") || args.is_empty() {
+        outln!("Queries, displays, or disconnects files opened remotely.");
+        outln!("");
+        outln!("OPENFILES /Query [/V]");
+        outln!("OPENFILES /Disconnect [/ID id]");
+        outln!("OPENFILES /Local [ON | OFF]");
+        return;
+    }
+
+    let subcmd = args[0].to_ascii_uppercase();
+
+    if subcmd == "/QUERY" {
+        outln!("");
+        outln!("Files opened remotely via local share points:");
+        outln!("---------------------------------------------");
+        outln!("");
+        outln!("ID   Accessed By   Type   Open File");
+        outln!("===  ============  =====  ===========");
+        outln!("");
+        outln!("INFO: No open files found.");
+    } else if subcmd == "/LOCAL" {
+        if args.len() > 1 && args[1].to_ascii_uppercase() == "ON" {
+            outln!("SUCCESS: Local object list flag is enabled.");
+        } else {
+            outln!("Local Open Files tracking: Disabled");
+        }
+    } else {
+        outln!("ERROR: Invalid argument - '{}'.", subcmd);
+    }
+}
+
+// ============================================================================
+// DISKPART Command - Disk Partitioning
+// ============================================================================
+
+/// DISKPART command - disk partitioning utility
+pub fn cmd_diskpart(args: &[&str]) {
+    if args.iter().any(|a| *a == "/?") {
+        outln!("DISKPART - Disk Partition Utility");
+        outln!("");
+        outln!("Interactive commands:");
+        outln!("  LIST DISK           List all disks");
+        outln!("  LIST VOLUME         List all volumes");
+        outln!("  SELECT DISK n       Select disk n");
+        outln!("  DETAIL DISK         Show selected disk details");
+        outln!("  EXIT                Exit diskpart");
+        return;
+    }
+
+    outln!("");
+    outln!("Microsoft DiskPart version 5.2.3790");
+    outln!("");
+    outln!("DISKPART> list disk");
+    outln!("");
+    outln!("  Disk ###  Status      Size     Free     Dyn  Gpt");
+    outln!("  --------  ----------  -------  -------  ---  ---");
+    outln!("  Disk 0    Online       512 MB      0 B");
+    outln!("");
+    outln!("(Interactive diskpart not yet implemented)");
+}
+
+// ============================================================================
+// FORMAT Command - Disk Formatting
+// ============================================================================
+
+/// FORMAT command - format disk
+pub fn cmd_format(args: &[&str]) {
+    if args.is_empty() || args.iter().any(|a| *a == "/?") {
+        outln!("Formats a disk for use with Windows.");
+        outln!("");
+        outln!("FORMAT volume [/FS:filesystem] [/V:label] [/Q]");
+        outln!("");
+        outln!("  /FS:   File system: FAT, FAT32, or NTFS");
+        outln!("  /V:    Volume label");
+        outln!("  /Q     Quick format");
+        return;
+    }
+
+    let volume = args[0];
+    outln!("");
+    outln!("WARNING: ALL DATA ON DRIVE {} WILL BE LOST!", volume);
+    outln!("Proceed with Format (Y/N)?");
+    outln!("");
+    outln!("(Format not implemented - would destroy data)");
+}
+
+// ============================================================================
+// FSUTIL Command - File System Utilities
+// ============================================================================
+
+/// FSUTIL command - file system utilities
+pub fn cmd_fsutil(args: &[&str]) {
+    if args.is_empty() || args.iter().any(|a| *a == "/?") {
+        outln!("FSUTIL - File System Utility");
+        outln!("");
+        outln!("  fsutil fsinfo drives      List all drives");
+        outln!("  fsutil fsinfo volumeinfo  Volume information");
+        outln!("  fsutil dirty query C:     Query dirty bit");
+        outln!("  fsutil volume diskfree    Disk free space");
+        return;
+    }
+
+    let subcmd = args[0].to_ascii_lowercase();
+
+    if subcmd == "fsinfo" && args.len() > 1 {
+        let cmd2 = args[1].to_ascii_lowercase();
+        if cmd2 == "drives" {
+            outln!("");
+            outln!("Drives: C:\\");
+        } else if cmd2 == "volumeinfo" {
+            outln!("");
+            outln!("Volume Name : NOSTALGOS");
+            outln!("Volume Serial Number : 0x12345678");
+            outln!("File System Name : NTFS");
+        }
+    } else if subcmd == "dirty" && args.len() > 2 {
+        outln!("Volume - {} is NOT Dirty", args[2]);
+    } else if subcmd == "volume" && args.len() > 1 {
+        if args[1].to_ascii_lowercase() == "diskfree" {
+            outln!("");
+            outln!("Total free bytes  : 402653184");
+            outln!("Total bytes       : 536870912");
+        }
+    }
+}
+
+// ============================================================================
+// LOGOFF Command - Log Off User
+// ============================================================================
+
+/// LOGOFF command - log off user session
+pub fn cmd_logoff(args: &[&str]) {
+    if args.iter().any(|a| *a == "/?") {
+        outln!("Terminates a session.");
+        outln!("");
+        outln!("LOGOFF [sessionid] [/V]");
+        return;
+    }
+
+    outln!("");
+    outln!("Logging off current session...");
+    outln!("(Logoff not implemented)");
+}
+
+// ============================================================================
+// MSG Command - Send Message
+// ============================================================================
+
+/// MSG command - send message to user
+pub fn cmd_msg(args: &[&str]) {
+    if args.is_empty() || args.iter().any(|a| *a == "/?") {
+        outln!("Send a message to a user.");
+        outln!("");
+        outln!("MSG username [message]");
+        return;
+    }
+
+    let target = args[0];
+    let message = if args.len() > 1 { args[1..].join(" ") } else { alloc::string::String::from("Test") };
+
+    outln!("");
+    outln!("Sending to {}: {}", target, message);
+    outln!("(Message delivery not implemented)");
+}
+
+// ============================================================================
+// AT Command - Schedule Commands (Legacy)
+// ============================================================================
+
+/// AT command - schedule commands (legacy)
+pub fn cmd_at(args: &[&str]) {
+    if args.is_empty() {
+        outln!("There are no entries in the list.");
+        outln!("");
+        outln!("Note: AT is deprecated. Use SCHTASKS instead.");
+        return;
+    }
+
+    if args[0] == "/?" {
+        outln!("AT schedules commands to run at a specified time.");
+        outln!("");
+        outln!("AT [time] [command]");
+        outln!("AT [id] /DELETE");
+        outln!("");
+        outln!("Note: AT is deprecated. Use SCHTASKS instead.");
+        return;
+    }
+
+    outln!("");
+    outln!("Added a new job with job ID = 1");
+    outln!("(AT is deprecated - use SCHTASKS)");
+}
+
+// ============================================================================
+// BOOTCFG Command - Boot Configuration
+// ============================================================================
+
+/// BOOTCFG command - boot configuration
+pub fn cmd_bootcfg(args: &[&str]) {
+    if args.is_empty() || args.iter().any(|a| *a == "/?") {
+        outln!("Configures boot.ini file settings.");
+        outln!("");
+        outln!("BOOTCFG /Query    Display boot entries");
+        outln!("BOOTCFG /Timeout  Change timeout");
+        outln!("BOOTCFG /Default  Change default entry");
+        return;
+    }
+
+    let subcmd = args[0].to_ascii_uppercase();
+
+    if subcmd == "/QUERY" {
+        outln!("");
+        outln!("Boot Loader Settings");
+        outln!("--------------------");
+        outln!("timeout: 30");
+        outln!("default: multi(0)disk(0)rdisk(0)partition(1)\\WINDOWS");
+        outln!("");
+        outln!("Boot Entries");
+        outln!("------------");
+        outln!("Boot entry ID:    1");
+        outln!("Friendly Name:    \"Nostalgos\"");
+        outln!("Path:             multi(0)disk(0)rdisk(0)partition(1)\\WINDOWS");
+    } else {
+        outln!("SUCCESS: Configuration updated.");
+        outln!("(Not actually modified)");
+    }
+}

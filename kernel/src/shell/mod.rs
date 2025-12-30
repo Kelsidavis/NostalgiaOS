@@ -146,19 +146,19 @@ const HISTORY_SIZE: usize = 32;
 
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
-    "acpi", "apic", "apcq", "arp", "assoc", "attrib",
-    "blocks", "bt",
+    "acpi", "apic", "apcq", "arp", "assoc", "at", "attrib",
+    "blocks", "bootcfg", "bt",
     "cacls", "cache", "call", "callback", "cat", "cc", "cd", "chcp", "chkdsk", "choice", "cid", "cipher", "clear", "clip", "cls", "color", "comp", "compact", "copy", "cp", "cpufeatures", "cpuinfo",
-    "date", "daytime", "debug", "defrag", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "doskey", "dpcq", "dump", "echo", "echoserv", "endlocal", "erase", "eventlog", "ex", "exception", "exit",
-    "fc", "files", "find", "findstr", "finger", "for", "ftype",
+    "date", "daytime", "debug", "defrag", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "diskpart", "dmi", "doskey", "dpcq", "driverquery", "dump", "echo", "echoserv", "endlocal", "erase", "eventlog", "ex", "exception", "exit",
+    "fc", "files", "find", "findstr", "finger", "for", "format", "fsutil", "ftype",
     "getmac", "goto", "gpresult", "gpupdate",
     "hal", "handles", "head", "heap", "help", "history", "hostname", "hpet",
     "icacls", "ident", "if", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
     "job", "ke", "keyedev",
-    "label", "ldr", "lookaside", "ls", "luid",
-    "md", "mem", "memmap", "memory", "mkdir", "mm", "mode", "more", "msr", "mv",
+    "label", "ldr", "logoff", "lookaside", "ls", "luid",
+    "md", "mem", "memmap", "memory", "mkdir", "mm", "mode", "more", "msg", "msr", "mv",
     "net", "netinfo", "netserv", "netstat", "nslookup", "ntfs",
-    "ob", "obdir",
+    "ob", "obdir", "openfiles",
     "pagetable", "partition", "path", "pause", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "popd", "port", "power", "prcb", "prefetch", "prompt", "ps", "pushd", "pwd",
     "qotd", "quit",
     "ramdisk", "rd", "reboot", "recover", "reg", "ren", "rename", "replace", "resume", "rm", "rmdir", "robocopy", "route", "rtl", "runas",
@@ -166,7 +166,7 @@ const COMMANDS: &[&str] = &[
     "tail", "taskkill", "tasklist", "tasks", "teb", "time", "timeout", "timer", "timerq", "timeserv", "title", "touch", "tracert", "tree", "type",
     "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "verify", "version", "volumes",
-    "waitq", "wc", "where", "whois", "whoami", "worker", "wset", "xcopy",
+    "waitq", "wc", "where", "whois", "whoami", "wmic", "worker", "wset", "xcopy",
 ];
 
 /// Current working directory
@@ -1505,6 +1505,36 @@ impl Shell {
         // COMPACT - file compression
         } else if eq_ignore_case(cmd, "compact") {
             commands::cmd_compact(&args[1..argc]);
+        // WMIC - Windows Management Instrumentation
+        } else if eq_ignore_case(cmd, "wmic") {
+            commands::cmd_wmic(&args[1..argc]);
+        // DRIVERQUERY - list drivers
+        } else if eq_ignore_case(cmd, "driverquery") {
+            commands::cmd_driverquery(&args[1..argc]);
+        // OPENFILES - list open files
+        } else if eq_ignore_case(cmd, "openfiles") {
+            commands::cmd_openfiles(&args[1..argc]);
+        // DISKPART - disk partitioning
+        } else if eq_ignore_case(cmd, "diskpart") {
+            commands::cmd_diskpart(&args[1..argc]);
+        // FORMAT - format disk
+        } else if eq_ignore_case(cmd, "format") {
+            commands::cmd_format(&args[1..argc]);
+        // FSUTIL - file system utilities
+        } else if eq_ignore_case(cmd, "fsutil") {
+            commands::cmd_fsutil(&args[1..argc]);
+        // LOGOFF - log off user
+        } else if eq_ignore_case(cmd, "logoff") {
+            commands::cmd_logoff(&args[1..argc]);
+        // MSG - send message
+        } else if eq_ignore_case(cmd, "msg") {
+            commands::cmd_msg(&args[1..argc]);
+        // AT - scheduled tasks (legacy)
+        } else if eq_ignore_case(cmd, "at") {
+            commands::cmd_at(&args[1..argc]);
+        // BOOTCFG - boot configuration
+        } else if eq_ignore_case(cmd, "bootcfg") {
+            commands::cmd_bootcfg(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
