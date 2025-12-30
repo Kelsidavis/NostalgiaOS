@@ -148,12 +148,12 @@ const HISTORY_SIZE: usize = 32;
 const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq", "arp", "assoc", "attrib",
     "blocks", "bt",
-    "cache", "call", "callback", "cat", "cc", "cd", "chcp", "choice", "cid", "clear", "clip", "cls", "color", "comp", "copy", "cp", "cpufeatures", "cpuinfo",
-    "date", "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "doskey", "dpcq", "dump", "echo", "echoserv", "endlocal", "erase", "eventlog", "ex", "exception", "exit",
+    "cacls", "cache", "call", "callback", "cat", "cc", "cd", "chcp", "chkdsk", "choice", "cid", "cipher", "clear", "clip", "cls", "color", "comp", "compact", "copy", "cp", "cpufeatures", "cpuinfo",
+    "date", "daytime", "debug", "defrag", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "doskey", "dpcq", "dump", "echo", "echoserv", "endlocal", "erase", "eventlog", "ex", "exception", "exit",
     "fc", "files", "find", "findstr", "finger", "for", "ftype",
     "getmac", "goto", "gpresult", "gpupdate",
     "hal", "handles", "head", "heap", "help", "history", "hostname", "hpet",
-    "ident", "if", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
+    "icacls", "ident", "if", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
     "job", "ke", "keyedev",
     "label", "ldr", "lookaside", "ls", "luid",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "mode", "more", "msr", "mv",
@@ -161,8 +161,8 @@ const COMMANDS: &[&str] = &[
     "ob", "obdir",
     "pagetable", "partition", "path", "pause", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "popd", "port", "power", "prcb", "prefetch", "prompt", "ps", "pushd", "pwd",
     "qotd", "quit",
-    "ramdisk", "rd", "reboot", "reg", "ren", "rename", "replace", "resume", "rm", "rmdir", "route", "rtl", "shutdown",
-    "sc", "sched", "se", "section", "services", "set", "setlocal", "smbios", "sort", "stack", "start", "subst", "suspend", "sysinfo", "systeminfo",
+    "ramdisk", "rd", "reboot", "recover", "reg", "ren", "rename", "replace", "resume", "rm", "rmdir", "robocopy", "route", "rtl", "runas",
+    "sc", "sched", "schtasks", "se", "section", "services", "set", "setlocal", "setx", "shutdown", "smbios", "sort", "stack", "start", "subst", "suspend", "sysinfo", "systeminfo",
     "tail", "taskkill", "tasklist", "tasks", "teb", "time", "timeout", "timer", "timerq", "timeserv", "title", "touch", "tracert", "tree", "type",
     "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "verify", "version", "volumes",
@@ -1472,6 +1472,39 @@ impl Shell {
         // GETMAC - display MAC addresses
         } else if eq_ignore_case(cmd, "getmac") {
             commands::cmd_getmac(&args[1..argc]);
+        // SCHTASKS - scheduled tasks
+        } else if eq_ignore_case(cmd, "schtasks") {
+            commands::cmd_schtasks(&args[1..argc]);
+        // CACLS - file ACLs
+        } else if eq_ignore_case(cmd, "cacls") {
+            commands::cmd_cacls(&args[1..argc]);
+        // ICACLS - file ACLs (enhanced)
+        } else if eq_ignore_case(cmd, "icacls") {
+            commands::cmd_icacls(&args[1..argc]);
+        // CIPHER - file encryption
+        } else if eq_ignore_case(cmd, "cipher") {
+            commands::cmd_cipher(&args[1..argc]);
+        // CHKDSK - disk checking
+        } else if eq_ignore_case(cmd, "chkdsk") {
+            commands::cmd_chkdsk(&args[1..argc]);
+        // DEFRAG - disk defragmentation
+        } else if eq_ignore_case(cmd, "defrag") {
+            commands::cmd_defrag(&args[1..argc]);
+        // RECOVER - file recovery
+        } else if eq_ignore_case(cmd, "recover") {
+            commands::cmd_recover(&args[1..argc]);
+        // ROBOCOPY - robust file copy
+        } else if eq_ignore_case(cmd, "robocopy") {
+            commands::cmd_robocopy(&args[1..argc]);
+        // SETX - set environment variable permanently
+        } else if eq_ignore_case(cmd, "setx") {
+            commands::cmd_setx(&args[1..argc]);
+        // RUNAS - run as different user
+        } else if eq_ignore_case(cmd, "runas") {
+            commands::cmd_runas(&args[1..argc]);
+        // COMPACT - file compression
+        } else if eq_ignore_case(cmd, "compact") {
+            commands::cmd_compact(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

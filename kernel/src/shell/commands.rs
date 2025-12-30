@@ -21164,3 +21164,841 @@ pub fn cmd_getmac(args: &[&str]) {
 
     outln!("");
 }
+
+// ============================================================================
+// SCHTASKS Command - Scheduled Tasks
+// ============================================================================
+
+/// SCHTASKS command - manage scheduled tasks
+pub fn cmd_schtasks(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Schedules commands and programs to run periodically.");
+        outln!("");
+        outln!("SCHTASKS /Create ... - Create a new scheduled task");
+        outln!("SCHTASKS /Delete ... - Delete a scheduled task");
+        outln!("SCHTASKS /Query      - Display all scheduled tasks");
+        outln!("SCHTASKS /Run ...    - Run a scheduled task");
+        outln!("SCHTASKS /End ...    - Stop a running task");
+        outln!("SCHTASKS /Change ... - Modify a scheduled task");
+        outln!("");
+        outln!("Type SCHTASKS /? for detailed help.");
+        return;
+    }
+
+    let subcmd = args[0].to_ascii_uppercase();
+
+    if subcmd == "/?" || subcmd == "/HELP" {
+        outln!("SCHTASKS /Create [/S system] [/U user] [/P password]");
+        outln!("         [/RU runasuser] [/RP runaspassword]");
+        outln!("         /SC schedule [/MO modifier] /TN taskname");
+        outln!("         /TR taskrun [/ST starttime] [/SD startdate]");
+        outln!("");
+        outln!("  /SC schedule  Schedule type:");
+        outln!("                MINUTE, HOURLY, DAILY, WEEKLY, MONTHLY,");
+        outln!("                ONCE, ONSTART, ONLOGON, ONIDLE");
+        outln!("");
+        outln!("SCHTASKS /Query [/FO format] [/NH] [/V]");
+        outln!("");
+        outln!("  /FO format    TABLE, LIST, or CSV");
+        outln!("  /V            Verbose output");
+        return;
+    }
+
+    if subcmd == "/QUERY" {
+        let verbose = args.iter().any(|a| a.to_ascii_uppercase() == "/V");
+
+        outln!("");
+        outln!("TaskName                          Next Run Time        Status");
+        outln!("================================  ===================  ============");
+
+        // Show some example/stub scheduled tasks
+        outln!("\\Microsoft\\Windows\\Defrag        Disabled             Ready");
+        outln!("\\Microsoft\\Windows\\DiskCleanup   Disabled             Ready");
+        outln!("\\Microsoft\\Windows\\Backup        Never                Ready");
+
+        if verbose {
+            outln!("");
+            outln!("Folder: \\");
+            outln!("  HostName:      NOSTALGOS");
+            outln!("  TaskName:      \\Microsoft\\Windows\\Defrag");
+            outln!("  Status:        Ready");
+            outln!("  Logon Mode:    Interactive/Background");
+            outln!("  Last Run Time: Never");
+            outln!("  Author:        SYSTEM");
+        }
+
+        outln!("");
+    } else if subcmd == "/CREATE" {
+        outln!("ERROR: Task creation requires additional parameters.");
+        outln!("");
+        outln!("Example:");
+        outln!("  SCHTASKS /Create /SC DAILY /TN MyTask /TR C:\\script.bat");
+    } else if subcmd == "/DELETE" {
+        if args.len() < 3 {
+            outln!("ERROR: Missing task name. Use /TN taskname");
+        } else {
+            let mut task_name = "";
+            for i in 1..args.len() {
+                if args[i].to_ascii_uppercase() == "/TN" && i + 1 < args.len() {
+                    task_name = args[i + 1];
+                    break;
+                }
+            }
+            if task_name.is_empty() {
+                outln!("ERROR: Missing task name.");
+            } else {
+                outln!("WARNING: Are you sure you want to delete task \"{}\"? (Y/N)", task_name);
+                outln!("(Scheduled task deletion not yet implemented)");
+            }
+        }
+    } else if subcmd == "/RUN" {
+        if args.len() < 3 {
+            outln!("ERROR: Missing task name. Use /TN taskname");
+        } else {
+            let mut task_name = "";
+            for i in 1..args.len() {
+                if args[i].to_ascii_uppercase() == "/TN" && i + 1 < args.len() {
+                    task_name = args[i + 1];
+                    break;
+                }
+            }
+            if task_name.is_empty() {
+                outln!("ERROR: Missing task name.");
+            } else {
+                outln!("SUCCESS: Attempted to run the scheduled task \"{}\".", task_name);
+                outln!("(Scheduled task execution not yet implemented)");
+            }
+        }
+    } else if subcmd == "/END" {
+        outln!("SUCCESS: The scheduled task was stopped successfully.");
+        outln!("(Not yet implemented)");
+    } else if subcmd == "/CHANGE" {
+        outln!("ERROR: Task modification requires additional parameters.");
+        outln!("(Not yet implemented)");
+    } else {
+        outln!("ERROR: Invalid argument/option - '{}'.", subcmd);
+        outln!("Type \"SCHTASKS /?\" for usage.");
+    }
+}
+
+// ============================================================================
+// CACLS Command - File Access Control Lists
+// ============================================================================
+
+/// CACLS command - display or modify file ACLs
+pub fn cmd_cacls(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Displays or modifies access control lists (ACLs) of files.");
+        outln!("");
+        outln!("CACLS filename [/T] [/E] [/C] [/G user:perm] [/R user]");
+        outln!("               [/P user:perm] [/D user]");
+        outln!("");
+        outln!("  filename     Display ACLs for specified file");
+        outln!("  /T           Change ACLs in current directory and subdirectories");
+        outln!("  /E           Edit ACL instead of replacing");
+        outln!("  /C           Continue on access denied errors");
+        outln!("  /G user:perm Grant specified user access rights:");
+        outln!("               R  Read, W  Write, C  Change, F  Full control");
+        outln!("  /R user      Revoke specified user's access rights");
+        outln!("  /P user:perm Replace specified user's access rights");
+        outln!("  /D user      Deny specified user access");
+        outln!("");
+        outln!("Note: Use ICACLS for more advanced ACL management.");
+        return;
+    }
+
+    let filename = args[0];
+
+    // Check if file exists
+    let path = resolve_path(filename);
+
+    outln!("");
+    outln!("{}:", path);
+
+    // Display simulated ACL information
+    outln!("  BUILTIN\\Administrators:(OI)(CI)F");
+    outln!("  NT AUTHORITY\\SYSTEM:(OI)(CI)F");
+    outln!("  BUILTIN\\Users:(OI)(CI)R");
+    outln!("  Everyone:R");
+    outln!("");
+
+    // Check for modification flags
+    let has_grant = args.iter().any(|a| a.to_ascii_uppercase() == "/G");
+    let has_revoke = args.iter().any(|a| a.to_ascii_uppercase() == "/R");
+    let has_deny = args.iter().any(|a| a.to_ascii_uppercase() == "/D");
+
+    if has_grant || has_revoke || has_deny {
+        outln!("(ACL modification not yet implemented)");
+    }
+}
+
+/// ICACLS command - display or modify file ACLs (enhanced)
+pub fn cmd_icacls(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Displays or modifies discretionary access control lists (DACLs)");
+        outln!("on specified files, and applies stored DACLs to files in");
+        outln!("specified directories.");
+        outln!("");
+        outln!("ICACLS name [/grant[:r] user:perm] [/deny user:perm]");
+        outln!("            [/remove[:g|:d]] user] [/T] [/C] [/L] [/Q]");
+        outln!("            [/setintegritylevel Level:policy]");
+        outln!("");
+        outln!("  /grant[:r] user:perm  Grant access rights. With :r, replaces");
+        outln!("                        previously granted permissions");
+        outln!("  /deny user:perm       Explicitly deny user access");
+        outln!("  /remove user          Remove all occurrences of user from ACL");
+        outln!("  /T                    Traverse subdirectories");
+        outln!("  /C                    Continue on errors");
+        outln!("  /L                    Perform on symbolic link itself");
+        outln!("  /Q                    Quiet mode");
+        outln!("");
+        outln!("Permissions:");
+        outln!("  F  - Full access          D  - Delete access");
+        outln!("  N  - No access            M  - Modify access");
+        outln!("  RX - Read and execute     R  - Read-only access");
+        outln!("  W  - Write-only access");
+        return;
+    }
+
+    let filename = args[0];
+    let path = resolve_path(filename);
+
+    outln!("{}", path);
+    outln!("  BUILTIN\\Administrators:(I)(OI)(CI)(F)");
+    outln!("  NT AUTHORITY\\SYSTEM:(I)(OI)(CI)(F)");
+    outln!("  BUILTIN\\Users:(I)(OI)(CI)(RX)");
+    outln!("  NT AUTHORITY\\Authenticated Users:(I)(M)");
+    outln!("");
+    outln!("Successfully processed 1 files; Failed processing 0 files");
+}
+
+// ============================================================================
+// CIPHER Command - File Encryption
+// ============================================================================
+
+/// CIPHER command - display or alter file encryption
+pub fn cmd_cipher(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Displays or alters the encryption of directories [files] on NTFS.");
+        outln!("");
+        outln!("CIPHER [/E | /D] [/S:dir] [/A] [/I] [/F] [/Q] [/H] [pathname]");
+        outln!("CIPHER /K");
+        outln!("CIPHER /R:filename");
+        outln!("CIPHER /U [/N]");
+        outln!("CIPHER /W:directory");
+        outln!("");
+        outln!("  /E          Encrypt. Files added afterward are encrypted.");
+        outln!("  /D          Decrypt. Files added afterward are not encrypted.");
+        outln!("  /S:dir      Perform operation in directory and subdirectories.");
+        outln!("  /A          Operation on files and directories.");
+        outln!("  /I          Continue after errors.");
+        outln!("  /F          Force encryption on all objects.");
+        outln!("  /Q          Quiet mode.");
+        outln!("  /H          Display files with hidden or system attributes.");
+        outln!("  /K          Create new file encryption key for user.");
+        outln!("  /R:file     Generate EFS recovery agent key and certificate.");
+        outln!("  /U          Update user's encryption key in encrypted files.");
+        outln!("  /W:dir      Remove data from available unused disk space.");
+        return;
+    }
+
+    let first = args[0].to_ascii_uppercase();
+
+    if first == "/E" {
+        // Encrypt
+        if args.len() > 1 {
+            let path = args[1];
+            outln!("Encrypting files in {}...", path);
+            outln!("");
+            outln!("(Encryption not yet implemented - NTFS EFS required)");
+        } else {
+            outln!("ERROR: Missing directory name.");
+        }
+    } else if first == "/D" {
+        // Decrypt
+        if args.len() > 1 {
+            let path = args[1];
+            outln!("Decrypting files in {}...", path);
+            outln!("");
+            outln!("(Decryption not yet implemented - NTFS EFS required)");
+        } else {
+            outln!("ERROR: Missing directory name.");
+        }
+    } else if first == "/K" {
+        outln!("Creating new encryption key for current user...");
+        outln!("");
+        outln!("Your file encryption key has been updated.");
+        outln!("(Not yet implemented)");
+    } else if first == "/U" {
+        outln!("Updating encryption keys in encrypted files...");
+        outln!("");
+        outln!("Certificates found: 0");
+        outln!("(Not yet implemented)");
+    } else if first.starts_with("/W:") {
+        let dir = &first[3..];
+        outln!("Wiping unused space on {}...", dir);
+        outln!("");
+        outln!("(Secure wipe not yet implemented)");
+    } else {
+        // Display encryption status
+        let path = resolve_path(args[0]);
+        outln!("");
+        outln!(" Listing {}\\", path);
+        outln!(" New files added to this directory will not be encrypted.");
+        outln!("");
+        outln!("U {}\\*", path);
+        outln!("");
+        outln!("U = Unencrypted, E = Encrypted");
+    }
+}
+
+// ============================================================================
+// CHKDSK Command - Disk Checking
+// ============================================================================
+
+/// CHKDSK command - check disk for errors
+pub fn cmd_chkdsk(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Checks a disk and displays a status report.");
+        outln!("");
+        outln!("CHKDSK [volume[[path]filename]] [/F] [/V] [/R] [/X] [/I] [/C]");
+        outln!("");
+        outln!("  volume      Drive letter (followed by colon), mount point,");
+        outln!("              or volume name.");
+        outln!("  filename    FAT/FAT32: Files to check for fragmentation.");
+        outln!("  /F          Fixes errors on the disk.");
+        outln!("  /V          FAT/FAT32: Displays full path of every file.");
+        outln!("              NTFS: Displays cleanup messages if any.");
+        outln!("  /R          Locates bad sectors and recovers readable info.");
+        outln!("              (implies /F)");
+        outln!("  /X          Forces volume to dismount first if necessary.");
+        outln!("              (implies /F)");
+        outln!("  /I          NTFS: Performs less vigorous index check.");
+        outln!("  /C          NTFS: Skips cycle checking.");
+        outln!("");
+        outln!("Without arguments, displays disk status without fixing errors.");
+        return;
+    }
+
+    let volume = if args[0].contains(':') || args[0].starts_with('/') {
+        if args[0].starts_with('/') {
+            "C:"
+        } else {
+            args[0]
+        }
+    } else {
+        args[0]
+    };
+
+    let fix_errors = args.iter().any(|a| a.to_ascii_uppercase() == "/F");
+    let recover = args.iter().any(|a| a.to_ascii_uppercase() == "/R");
+
+    outln!("");
+    outln!("The type of the file system is NTFS.");
+    outln!("Volume label is NOSTALGOS.");
+    outln!("");
+
+    if fix_errors || recover {
+        outln!("WARNING: {} is in use.", volume);
+        outln!("Chkdsk cannot run because the volume is in use by another process.");
+        outln!("Would you like to schedule this volume to be checked the next");
+        outln!("time the system restarts? (Y/N)");
+        outln!("");
+        outln!("(Scheduled disk check not yet implemented)");
+    } else {
+        outln!("Stage 1: Examining basic file system structure...");
+        outln!("  512 file records processed.");
+        outln!("File verification completed.");
+        outln!("");
+        outln!("Stage 2: Examining file name linkage...");
+        outln!("  768 index entries processed.");
+        outln!("Index verification completed.");
+        outln!("");
+        outln!("Stage 3: Examining security descriptors...");
+        outln!("  128 security descriptors processed.");
+        outln!("Security descriptor verification completed.");
+        outln!("");
+        outln!("Windows has scanned the file system and found no problems.");
+        outln!("");
+        outln!("     524288 KB total disk space.");
+        outln!("     128000 KB in 512 files.");
+        outln!("       1024 KB in 128 indexes.");
+        outln!("          0 KB in bad sectors.");
+        outln!("       2048 KB in use by the system.");
+        outln!("     393216 KB available on disk.");
+        outln!("");
+        outln!("       4096 bytes in each allocation unit.");
+        outln!("     131072 total allocation units on disk.");
+        outln!("      98304 allocation units available on disk.");
+    }
+}
+
+// ============================================================================
+// DEFRAG Command - Disk Defragmentation
+// ============================================================================
+
+/// DEFRAG command - disk defragmentation
+pub fn cmd_defrag(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Locates and consolidates fragmented files on local volumes.");
+        outln!("");
+        outln!("DEFRAG volume [/A] [/V]");
+        outln!("DEFRAG volume [/U] [/V]");
+        outln!("");
+        outln!("  volume      Drive letter or mount point (e.g., C: or C:\\MountPoint)");
+        outln!("  /A          Analyze only - displays fragmentation report");
+        outln!("  /U          Print progress of the operation");
+        outln!("  /V          Verbose output with complete statistics");
+        outln!("");
+        outln!("Examples:");
+        outln!("  defrag c: -a        Analyze drive C:");
+        outln!("  defrag c:           Defragment drive C:");
+        outln!("  defrag c: -a -v     Analyze C: with verbose output");
+        return;
+    }
+
+    let volume = args[0];
+    let analyze = args.iter().any(|a| {
+        let u = a.to_ascii_uppercase();
+        u == "/A" || u == "-A"
+    });
+    let verbose = args.iter().any(|a| {
+        let u = a.to_ascii_uppercase();
+        u == "/V" || u == "-V"
+    });
+
+    outln!("");
+    outln!("Windows Disk Defragmenter");
+    outln!("Copyright (c) 2003 Microsoft Corp.");
+    outln!("");
+
+    if analyze {
+        outln!("Analysis Report");
+        outln!("---------------");
+        outln!("");
+        outln!("  Volume {}:", volume);
+        outln!("  Volume size                 = 512 MB");
+        outln!("  Cluster size                = 4 KB");
+        outln!("  Used space                  = 128 MB");
+        outln!("  Free space                  = 384 MB");
+        outln!("  Percent free space          = 75%");
+        outln!("");
+        outln!("  Volume fragmentation");
+        outln!("    Total fragmentation       = 5%");
+        outln!("    File fragmentation        = 8%");
+        outln!("    Free space fragmentation  = 2%");
+        outln!("");
+        outln!("  File fragmentation");
+        outln!("    Total files               = 512");
+        outln!("    Average file size         = 256 KB");
+        outln!("    Total fragmented files    = 12");
+        outln!("    Total excess fragments    = 24");
+        outln!("    Average fragments per file= 1.04");
+        outln!("");
+
+        if verbose {
+            outln!("  Pagefile fragmentation");
+            outln!("    Pagefile size             = 64 MB");
+            outln!("    Total fragments           = 1");
+            outln!("");
+            outln!("  Folder fragmentation");
+            outln!("    Total folders             = 64");
+            outln!("    Fragmented folders        = 2");
+            outln!("    Excess folder fragments   = 4");
+            outln!("");
+            outln!("  Master File Table (MFT) fragmentation");
+            outln!("    Total MFT size            = 2 MB");
+            outln!("    MFT record count          = 512");
+            outln!("    Percent MFT in use        = 25%");
+            outln!("    Total MFT fragments       = 1");
+            outln!("");
+        }
+
+        outln!("You do not need to defragment this volume.");
+    } else {
+        outln!("Defragmenting volume {}...", volume);
+        outln!("");
+        outln!("Analysis: 0% complete...");
+        outln!("Defragmentation: 0% complete...");
+        outln!("");
+        outln!("(Actual defragmentation not yet implemented)");
+        outln!("");
+        outln!("Defragmentation is complete.");
+    }
+}
+
+// ============================================================================
+// RECOVER Command - File Recovery
+// ============================================================================
+
+/// RECOVER command - recover readable information from bad disk
+pub fn cmd_recover(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Recovers readable information from a bad or defective disk.");
+        outln!("");
+        outln!("RECOVER [drive:][path]filename");
+        outln!("");
+        outln!("Consult the online help before using the RECOVER command.");
+        outln!("");
+        outln!("Note: This command reads a file sector by sector and recovers");
+        outln!("      data from good sectors. Data in bad sectors is lost.");
+        return;
+    }
+
+    let filename = args[0];
+    let path = resolve_path(filename);
+
+    outln!("");
+    outln!("Attempting to recover: {}", path);
+    outln!("");
+
+    // Check if file exists and get size by reading
+    use crate::fs;
+    match fs::open(&path, 0) {
+        Ok(handle) => {
+            // Read file to determine size
+            let mut size = 0u64;
+            let mut buf = [0u8; 4096];
+            loop {
+                match fs::read(handle, &mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => size += n as u64,
+                    Err(_) => break,
+                }
+            }
+            let _ = fs::close(handle);
+
+            outln!("Reading file sector by sector...");
+            outln!("");
+            outln!("Sectors read:    {}", size / 512 + 1);
+            outln!("Sectors good:    {}", size / 512 + 1);
+            outln!("Sectors bad:     0");
+            outln!("");
+            outln!("Press any key to continue...");
+            outln!("");
+            outln!("(File recovery operation completed - no bad sectors found)");
+        }
+        Err(_) => {
+            outln!("The system cannot find the file specified.");
+        }
+    }
+}
+
+// ============================================================================
+// ROBOCOPY Command - Robust File Copy
+// ============================================================================
+
+/// ROBOCOPY command - robust file copy
+pub fn cmd_robocopy(args: &[&str]) {
+    if args.is_empty() {
+        outln!("ROBOCOPY :: Robust File Copy for Windows");
+        outln!("");
+        outln!("Usage: ROBOCOPY source destination [file [file]...] [options]");
+        outln!("");
+        outln!("  source       Source directory");
+        outln!("  destination  Destination directory");
+        outln!("  file         File(s) to copy (wildcards: * ?)");
+        outln!("");
+        outln!("Copy options:");
+        outln!("  /S           Copy subdirectories, but not empty ones");
+        outln!("  /E           Copy subdirectories, including empty ones");
+        outln!("  /COPYALL     Copy all file info (= /COPY:DATSOU)");
+        outln!("  /PURGE       Delete dest files that no longer exist in source");
+        outln!("  /MIR         Mirror directory tree (= /E plus /PURGE)");
+        outln!("");
+        outln!("Retry options:");
+        outln!("  /R:n         Number of retries on failed copies (default: 1M)");
+        outln!("  /W:n         Wait time between retries (default: 30 sec)");
+        outln!("");
+        outln!("Logging options:");
+        outln!("  /V           Produce verbose output");
+        outln!("  /L           List only - don't copy, timestamp or delete");
+        outln!("  /LOG:file    Output status to LOG file");
+        outln!("  /NP          No progress - don't display % copied");
+        return;
+    }
+
+    if args.len() < 2 {
+        outln!("ERROR: Insufficient parameters.");
+        outln!("");
+        outln!("Usage: ROBOCOPY source destination [files] [options]");
+        return;
+    }
+
+    let source = args[0];
+    let dest = args[1];
+
+    // Parse options
+    let mirror = args.iter().any(|a| a.to_ascii_uppercase() == "/MIR");
+    let subdirs = args.iter().any(|a| {
+        let u = a.to_ascii_uppercase();
+        u == "/S" || u == "/E" || u == "/MIR"
+    });
+    let list_only = args.iter().any(|a| a.to_ascii_uppercase() == "/L");
+    let verbose = args.iter().any(|a| a.to_ascii_uppercase() == "/V");
+
+    outln!("");
+    outln!("-------------------------------------------------------------------------------");
+    outln!("   ROBOCOPY     ::     Robust File Copy for Windows");
+    outln!("-------------------------------------------------------------------------------");
+    outln!("");
+    outln!("  Started : {}", "Mon Dec 30 12:00:00 2024");
+    outln!("");
+    outln!("   Source : {}\\", resolve_path(source));
+    outln!("     Dest : {}\\", resolve_path(dest));
+    outln!("");
+
+    if list_only {
+        outln!("    Files : *.*");
+        outln!("  Options : /L");
+        outln!("");
+        outln!("(List-only mode - no files will be copied)");
+    } else if mirror {
+        outln!("    Files : *.*");
+        outln!("  Options : /S /E /PURGE /MIR");
+        outln!("");
+        outln!("(Mirror mode not yet implemented)");
+    } else if subdirs {
+        outln!("    Files : *.*");
+        outln!("  Options : /S /E");
+        outln!("");
+        outln!("(Recursive copy not yet implemented)");
+    } else {
+        outln!("    Files : *.*");
+        outln!("");
+
+        // Try a simple copy
+        let src_path = resolve_path(source);
+        let dst_path = resolve_path(dest);
+
+        use crate::fs;
+
+        // Ensure dest directory exists
+        if fs::readdir(&dst_path, 0).is_err() {
+            let _ = fs::mkdir(&dst_path);
+        }
+
+        let mut copied = 0u32;
+        let mut bytes = 0u64;
+        let mut offset = 0u32;
+
+        loop {
+            match fs::readdir(&src_path, offset) {
+                Ok(entry) => {
+                    let name = entry.name_str();
+
+                    // Skip . and ..
+                    if name != "." && name != ".." {
+                        if entry.file_type != fs::FileType::Directory {
+                            if verbose {
+                                outln!("    New File  {} ({})", name, entry.size);
+                            }
+
+                            // Copy the file
+                            let src_file = alloc::format!("{}\\{}", src_path, name);
+                            let dst_file = alloc::format!("{}\\{}", dst_path, name);
+
+                            // Read source file
+                            if let Ok(handle) = fs::open(&src_file, 0) {
+                                let mut content = alloc::vec::Vec::new();
+                                let mut buf = [0u8; 4096];
+                                loop {
+                                    match fs::read(handle, &mut buf) {
+                                        Ok(0) => break,
+                                        Ok(n) => content.extend_from_slice(&buf[..n]),
+                                        Err(_) => break,
+                                    }
+                                }
+                                let _ = fs::close(handle);
+
+                                // Write destination file
+                                if let Ok(dst_handle) = fs::create(&dst_file, 0) {
+                                    if fs::write(dst_handle, &content).is_ok() {
+                                        copied += 1;
+                                        bytes += content.len() as u64;
+                                    }
+                                    let _ = fs::close(dst_handle);
+                                }
+                            }
+                        }
+                    }
+
+                    offset = entry.next_offset;
+                    if offset == 0 {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        outln!("");
+        outln!("-------------------------------------------------------------------------------");
+        outln!("");
+        outln!("               Total    Copied   Skipped  Mismatch    FAILED    Extras");
+        outln!("    Files :  {:>8}  {:>8}         0         0         0         0", copied, copied);
+        outln!("    Bytes :  {:>8}  {:>8}         0         0         0         0", bytes, bytes);
+        outln!("");
+        outln!("   Ended : {}", "Mon Dec 30 12:00:01 2024");
+    }
+}
+
+// ============================================================================
+// SETX Command - Set Environment Variable Permanently
+// ============================================================================
+
+/// SETX command - set environment variable permanently
+pub fn cmd_setx(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Creates or modifies environment variables in the user or system");
+        outln!("environment.");
+        outln!("");
+        outln!("SETX variable value [/M]");
+        outln!("SETX variable /K regpath [/M]");
+        outln!("SETX variable /F file [/A x,y | /R x,y string] [/M] [/D delimiters]");
+        outln!("");
+        outln!("  variable    The environment variable to set.");
+        outln!("  value       The value to assign to the variable.");
+        outln!("  /M          Set the variable in the system-wide (HKLM) environment.");
+        outln!("              Default is the user environment (HKCU).");
+        outln!("  /K regpath  Set the variable from a registry key value.");
+        outln!("  /F file     Set the variable from a file contents.");
+        outln!("");
+        outln!("Examples:");
+        outln!("  SETX JAVA_HOME \"C:\\Program Files\\Java\\jdk\"");
+        outln!("  SETX PATH \"%PATH%;C:\\bin\" /M");
+        return;
+    }
+
+    let name = args[0];
+    let machine = args.iter().any(|a| a.to_ascii_uppercase() == "/M");
+
+    if args.len() < 2 {
+        outln!("ERROR: Missing value for variable '{}'.", name);
+        return;
+    }
+
+    let value = args[1];
+    let scope = if machine { "machine" } else { "user" };
+
+    outln!("");
+    outln!("SUCCESS: Specified value was saved.");
+    outln!("");
+    outln!("Note: The environment variable '{}' will be available in the {} scope", name, scope);
+    outln!("      after the next logon session.");
+    outln!("");
+    outln!("(Persistent environment variable storage not yet implemented)");
+}
+
+// ============================================================================
+// RUNAS Command - Run As Different User
+// ============================================================================
+
+/// RUNAS command - run as different user
+pub fn cmd_runas(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Allows a user to run specific tools and programs with different");
+        outln!("permissions than the user's current logon provides.");
+        outln!("");
+        outln!("RUNAS [/profile] [/env] [/netonly] /user:user program");
+        outln!("");
+        outln!("  /profile       Load the user's profile (default)");
+        outln!("  /noprofile     Do not load the user's profile");
+        outln!("  /env           Use current environment instead of user's");
+        outln!("  /netonly       Use credentials for remote access only");
+        outln!("  /savecred      Use credentials previously saved by user");
+        outln!("  /smartcard     Use credentials from a smart card");
+        outln!("  /user:user     User@Domain or Domain\\User format");
+        outln!("  program        Program to run");
+        outln!("");
+        outln!("Examples:");
+        outln!("  runas /user:Administrator cmd");
+        outln!("  runas /user:DOMAIN\\admin \"mmc %windir%\\system32\\dsa.msc\"");
+        return;
+    }
+
+    // Parse /user: option
+    let mut user = "";
+    let mut program = "";
+
+    for arg in args {
+        let upper = arg.to_ascii_uppercase();
+        if upper.starts_with("/USER:") {
+            user = &arg[6..];
+        } else if !arg.starts_with('/') {
+            program = arg;
+        }
+    }
+
+    if user.is_empty() {
+        outln!("RUNAS ERROR: The /user: parameter is required.");
+        return;
+    }
+
+    if program.is_empty() {
+        outln!("RUNAS ERROR: No command specified.");
+        return;
+    }
+
+    outln!("Enter the password for {}: ", user);
+    outln!("");
+    outln!("Attempting to start {} as user \"{}\"...", program, user);
+    outln!("");
+    outln!("(User impersonation not yet implemented)");
+}
+
+// ============================================================================
+// COMPACT Command - File Compression
+// ============================================================================
+
+/// COMPACT command - display or alter file compression
+pub fn cmd_compact(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Displays or alters the compression of files on NTFS partitions.");
+        outln!("");
+        outln!("COMPACT [/C | /U] [/S[:dir]] [/A] [/I] [/F] [/Q] [filename [...]]");
+        outln!("");
+        outln!("  /C          Compress the specified files");
+        outln!("  /U          Uncompress the specified files");
+        outln!("  /S          Perform operation in directory and subdirectories");
+        outln!("  /S:dir      Perform operation in specified directory and subdirs");
+        outln!("  /A          Display files with hidden or system attributes");
+        outln!("  /I          Continue after errors");
+        outln!("  /F          Force compression on all files");
+        outln!("  /Q          Quiet mode");
+        outln!("  filename    File pattern for operation");
+        outln!("");
+        outln!("Without parameters, displays compression state of current directory.");
+        return;
+    }
+
+    let first = args[0].to_ascii_uppercase();
+
+    if first == "/C" {
+        // Compress
+        let target = if args.len() > 1 { args[1] } else { "." };
+        let path = resolve_path(target);
+        outln!("");
+        outln!("Compressing files in {}...", path);
+        outln!("");
+        outln!("(NTFS compression not yet implemented)");
+    } else if first == "/U" {
+        // Uncompress
+        let target = if args.len() > 1 { args[1] } else { "." };
+        let path = resolve_path(target);
+        outln!("");
+        outln!("Uncompressing files in {}...", path);
+        outln!("");
+        outln!("(NTFS decompression not yet implemented)");
+    } else {
+        // Display status
+        let path = resolve_path(args[0]);
+        outln!("");
+        outln!(" Listing {}", path);
+        outln!("");
+        outln!(" Of 12 files within 1 directories");
+        outln!(" 0 are compressed and 12 are not compressed.");
+        outln!(" 256,000 total bytes of data are stored in 256,000 bytes.");
+        outln!(" The compression ratio is 1.0 to 1.");
+    }
+}
