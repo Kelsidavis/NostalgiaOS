@@ -883,3 +883,404 @@ pub unsafe fn dbgk_post_unload_dll_event(
 pub fn init() {
     crate::serial_println!("[DEBUG] Debug subsystem initialized");
 }
+
+// ============================================================================
+// Hardware Breakpoint Support (DR0-DR7)
+// ============================================================================
+
+/// Maximum number of hardware breakpoints (DR0-DR3)
+pub const MAX_HW_BREAKPOINTS: usize = 4;
+
+/// Hardware breakpoint type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum HwBreakpointType {
+    /// Execution breakpoint (break on instruction fetch)
+    #[default]
+    Execute = 0b00,
+    /// Write breakpoint (break on data write)
+    Write = 0b01,
+    /// I/O breakpoint (requires CR4.DE = 1)
+    Io = 0b10,
+    /// Read/Write breakpoint (break on data read or write)
+    ReadWrite = 0b11,
+}
+
+/// Hardware breakpoint length
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
+pub enum HwBreakpointLength {
+    /// 1 byte
+    #[default]
+    Byte1 = 0b00,
+    /// 2 bytes
+    Byte2 = 0b01,
+    /// 8 bytes (only valid for addresses)
+    Byte8 = 0b10,
+    /// 4 bytes
+    Byte4 = 0b11,
+}
+
+/// Hardware breakpoint configuration
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HwBreakpoint {
+    /// Address for the breakpoint
+    pub address: u64,
+    /// Breakpoint type
+    pub bp_type: HwBreakpointType,
+    /// Breakpoint length
+    pub length: HwBreakpointLength,
+    /// Is this breakpoint enabled?
+    pub enabled: bool,
+    /// Is this a global breakpoint (applies to all tasks)?
+    pub global: bool,
+}
+
+/// Per-thread hardware breakpoint state
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HwBreakpointState {
+    /// Breakpoints in DR0-DR3
+    pub breakpoints: [HwBreakpoint; MAX_HW_BREAKPOINTS],
+    /// DR6 status register (read after debug exception)
+    pub dr6: u64,
+    /// DR7 control register
+    pub dr7: u64,
+}
+
+impl HwBreakpointState {
+    /// Create a new empty breakpoint state
+    pub const fn new() -> Self {
+        const DEFAULT_BP: HwBreakpoint = HwBreakpoint {
+            address: 0,
+            bp_type: HwBreakpointType::Execute,
+            length: HwBreakpointLength::Byte1,
+            enabled: false,
+            global: false,
+        };
+        Self {
+            breakpoints: [DEFAULT_BP; MAX_HW_BREAKPOINTS],
+            dr6: 0,
+            dr7: 0,
+        }
+    }
+
+    /// Set a hardware breakpoint
+    pub fn set_breakpoint(
+        &mut self,
+        index: usize,
+        address: u64,
+        bp_type: HwBreakpointType,
+        length: HwBreakpointLength,
+    ) -> bool {
+        if index >= MAX_HW_BREAKPOINTS {
+            return false;
+        }
+
+        // For execution breakpoints, length must be 1 byte
+        let actual_length = if bp_type == HwBreakpointType::Execute {
+            HwBreakpointLength::Byte1
+        } else {
+            length
+        };
+
+        self.breakpoints[index] = HwBreakpoint {
+            address,
+            bp_type,
+            length: actual_length,
+            enabled: true,
+            global: false,
+        };
+
+        self.update_dr7();
+        true
+    }
+
+    /// Clear a hardware breakpoint
+    pub fn clear_breakpoint(&mut self, index: usize) -> bool {
+        if index >= MAX_HW_BREAKPOINTS {
+            return false;
+        }
+
+        self.breakpoints[index].enabled = false;
+        self.update_dr7();
+        true
+    }
+
+    /// Update DR7 based on current breakpoint configuration
+    fn update_dr7(&mut self) {
+        let mut dr7: u64 = 0;
+
+        for (i, bp) in self.breakpoints.iter().enumerate() {
+            if bp.enabled {
+                // Set local enable bit (bits 0, 2, 4, 6)
+                dr7 |= 1 << (i * 2);
+
+                // Set type bits (bits 16-17, 20-21, 24-25, 28-29)
+                let type_bits = (bp.bp_type as u64) << (16 + i * 4);
+                dr7 |= type_bits;
+
+                // Set length bits (bits 18-19, 22-23, 26-27, 30-31)
+                let len_bits = (bp.length as u64) << (18 + i * 4);
+                dr7 |= len_bits;
+            }
+        }
+
+        self.dr7 = dr7;
+    }
+
+    /// Apply breakpoint state to CPU debug registers
+    ///
+    /// # Safety
+    /// Must be called with interrupts disabled or in a context
+    /// where the CPU state won't be modified by another thread.
+    pub unsafe fn apply_to_cpu(&self) {
+        use core::arch::asm;
+
+        // Load DR0-DR3 with breakpoint addresses
+        asm!("mov dr0, {}", in(reg) self.breakpoints[0].address);
+        asm!("mov dr1, {}", in(reg) self.breakpoints[1].address);
+        asm!("mov dr2, {}", in(reg) self.breakpoints[2].address);
+        asm!("mov dr3, {}", in(reg) self.breakpoints[3].address);
+
+        // Load DR7 with control bits
+        asm!("mov dr7, {}", in(reg) self.dr7);
+    }
+
+    /// Read current DR6 status from CPU
+    ///
+    /// # Safety
+    /// Must be called after a debug exception.
+    pub unsafe fn read_dr6(&mut self) {
+        use core::arch::asm;
+        let dr6: u64;
+        asm!("mov {}, dr6", out(reg) dr6);
+        self.dr6 = dr6;
+    }
+
+    /// Clear DR6 (after handling debug exception)
+    ///
+    /// # Safety
+    /// Must be called after reading DR6.
+    pub unsafe fn clear_dr6() {
+        use core::arch::asm;
+        // DR6 is set to all 1s except for the reserved bits
+        let clear_value: u64 = 0xFFFF0FF0;
+        asm!("mov dr6, {}", in(reg) clear_value);
+    }
+
+    /// Get which breakpoint triggered (from DR6)
+    pub fn get_triggered_breakpoint(&self) -> Option<usize> {
+        for i in 0..MAX_HW_BREAKPOINTS {
+            if self.dr6 & (1 << i) != 0 {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Check if single-step triggered (DR6.BS)
+    pub fn is_single_step(&self) -> bool {
+        (self.dr6 & (1 << 14)) != 0
+    }
+}
+
+// ============================================================================
+// Single-Stepping Support
+// ============================================================================
+
+/// EFLAGS bit for trap flag (single-step mode)
+pub const EFLAGS_TF: u64 = 0x100;
+
+/// EFLAGS bit for resume flag (prevent repeated debug exception)
+pub const EFLAGS_RF: u64 = 0x10000;
+
+/// Enable single-step mode for current thread
+///
+/// # Safety
+/// Modifies CPU EFLAGS register.
+pub unsafe fn enable_single_step() {
+    use core::arch::asm;
+    asm!(
+        "pushfq",
+        "or qword ptr [rsp], {tf}",
+        "popfq",
+        tf = const EFLAGS_TF,
+    );
+}
+
+/// Disable single-step mode for current thread
+///
+/// # Safety
+/// Modifies CPU EFLAGS register.
+pub unsafe fn disable_single_step() {
+    use core::arch::asm;
+    asm!(
+        "pushfq",
+        "and qword ptr [rsp], {mask}",
+        "popfq",
+        mask = const !EFLAGS_TF,
+    );
+}
+
+/// Check if single-step is enabled in EFLAGS
+pub fn is_single_step_enabled() -> bool {
+    let eflags: u64;
+    unsafe {
+        core::arch::asm!(
+            "pushfq",
+            "pop {}",
+            out(reg) eflags,
+        );
+    }
+    (eflags & EFLAGS_TF) != 0
+}
+
+/// Debug exception handler helper
+///
+/// Called from the #DB exception handler to process debug events.
+///
+/// # Arguments
+/// * `dr6` - Value of DR6 at exception time
+/// * `rip` - Instruction pointer at exception
+///
+/// # Returns
+/// `true` if the exception was handled, `false` if it should be passed on
+pub fn handle_debug_exception(dr6: u64, rip: u64) -> bool {
+    // Check for single-step
+    if dr6 & (1 << 14) != 0 {
+        crate::serial_println!("[DEBUG] Single-step at RIP={:#x}", rip);
+        // TODO: Notify debugger
+        return true;
+    }
+
+    // Check for hardware breakpoints
+    for i in 0..MAX_HW_BREAKPOINTS {
+        if dr6 & (1 << i) != 0 {
+            crate::serial_println!("[DEBUG] Hardware breakpoint {} hit at RIP={:#x}", i, rip);
+            // TODO: Notify debugger
+            return true;
+        }
+    }
+
+    // Check for task switch (bit 15)
+    if dr6 & (1 << 15) != 0 {
+        crate::serial_println!("[DEBUG] Task switch debug trap");
+        return true;
+    }
+
+    false
+}
+
+// ============================================================================
+// Thread Context for Debugging
+// ============================================================================
+
+/// CPU context for debugging (matches CONTEXT structure)
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub struct DebugContext {
+    /// Context flags indicating which fields are valid
+    pub context_flags: u32,
+
+    /// Debug registers (DR0-DR3, DR6, DR7)
+    pub dr0: u64,
+    pub dr1: u64,
+    pub dr2: u64,
+    pub dr3: u64,
+    pub dr6: u64,
+    pub dr7: u64,
+
+    /// Segment registers
+    pub seg_gs: u16,
+    pub seg_fs: u16,
+    pub seg_es: u16,
+    pub seg_ds: u16,
+    pub seg_cs: u16,
+    pub seg_ss: u16,
+
+    /// EFLAGS
+    pub eflags: u64,
+
+    /// General purpose registers
+    pub rax: u64,
+    pub rbx: u64,
+    pub rcx: u64,
+    pub rdx: u64,
+    pub rsi: u64,
+    pub rdi: u64,
+    pub rbp: u64,
+    pub rsp: u64,
+    pub r8: u64,
+    pub r9: u64,
+    pub r10: u64,
+    pub r11: u64,
+    pub r12: u64,
+    pub r13: u64,
+    pub r14: u64,
+    pub r15: u64,
+
+    /// Instruction pointer
+    pub rip: u64,
+}
+
+/// Context flags
+pub mod context_flags {
+    /// Include control registers (RIP, RSP, EFLAGS, segments)
+    pub const CONTEXT_CONTROL: u32 = 0x00100001;
+    /// Include integer registers (RAX-R15)
+    pub const CONTEXT_INTEGER: u32 = 0x00100002;
+    /// Include segment registers
+    pub const CONTEXT_SEGMENTS: u32 = 0x00100004;
+    /// Include floating point registers
+    pub const CONTEXT_FLOATING_POINT: u32 = 0x00100008;
+    /// Include debug registers (DR0-DR7)
+    pub const CONTEXT_DEBUG_REGISTERS: u32 = 0x00100010;
+    /// Full context
+    pub const CONTEXT_FULL: u32 = CONTEXT_CONTROL | CONTEXT_INTEGER | CONTEXT_SEGMENTS;
+    /// All context including debug registers
+    pub const CONTEXT_ALL: u32 = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS;
+}
+
+impl DebugContext {
+    /// Create an empty context
+    pub const fn empty() -> Self {
+        Self {
+            context_flags: 0,
+            dr0: 0, dr1: 0, dr2: 0, dr3: 0, dr6: 0, dr7: 0,
+            seg_gs: 0, seg_fs: 0, seg_es: 0, seg_ds: 0, seg_cs: 0, seg_ss: 0,
+            eflags: 0,
+            rax: 0, rbx: 0, rcx: 0, rdx: 0, rsi: 0, rdi: 0, rbp: 0, rsp: 0,
+            r8: 0, r9: 0, r10: 0, r11: 0, r12: 0, r13: 0, r14: 0, r15: 0,
+            rip: 0,
+        }
+    }
+
+    /// Capture current CPU context
+    ///
+    /// # Safety
+    /// Must be called from a known stack frame position.
+    pub unsafe fn capture_current(flags: u32) -> Self {
+        use core::arch::asm;
+
+        let mut ctx = Self::empty();
+        ctx.context_flags = flags;
+
+        if flags & context_flags::CONTEXT_DEBUG_REGISTERS != 0 {
+            asm!("mov {}, dr0", out(reg) ctx.dr0);
+            asm!("mov {}, dr1", out(reg) ctx.dr1);
+            asm!("mov {}, dr2", out(reg) ctx.dr2);
+            asm!("mov {}, dr3", out(reg) ctx.dr3);
+            asm!("mov {}, dr6", out(reg) ctx.dr6);
+            asm!("mov {}, dr7", out(reg) ctx.dr7);
+        }
+
+        if flags & context_flags::CONTEXT_CONTROL != 0 {
+            let eflags: u64;
+            asm!("pushfq", "pop {}", out(reg) eflags);
+            ctx.eflags = eflags;
+            // RSP and RIP would need to be captured from the trap frame
+        }
+
+        ctx
+    }
+}

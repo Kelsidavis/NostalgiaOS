@@ -54,6 +54,7 @@ pub mod path;
 pub mod vfs;
 pub mod mount;
 pub mod fat32;
+pub mod ntfs;
 pub mod volume;
 
 // Re-export common types
@@ -549,6 +550,7 @@ pub fn init() {
 
     // Initialize file system drivers
     fat32::init();
+    ntfs::init();
 
     // Initialize volume integration (auto-mounts detected volumes)
     volume::init();

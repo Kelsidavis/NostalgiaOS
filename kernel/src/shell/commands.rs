@@ -14764,6 +14764,176 @@ fn show_reg_enum(path: &str) {
     }
 }
 
+/// NTFS file system command
+pub fn cmd_ntfs(args: &[&str]) {
+    use crate::fs::ntfs;
+
+    if args.is_empty() {
+        show_ntfs_info();
+        return;
+    }
+
+    match args[0] {
+        "help" | "-h" | "--help" | "?" => {
+            outln!("NTFS File System Diagnostic Commands");
+            outln!("=====================================");
+            outln!("");
+            outln!("Usage: ntfs <command>");
+            outln!("");
+            outln!("Commands:");
+            outln!("  (none)        - Show NTFS driver information");
+            outln!("  mounts        - List NTFS mounts");
+            outln!("  boot <dev>    - Show boot sector for device");
+            outln!("  mft <dev>     - Show MFT entries for device");
+            outln!("  attrs         - Show attribute types");
+            outln!("  help          - Show this help");
+            outln!("");
+            outln!("Examples:");
+            outln!("  ntfs          - Show driver info");
+            outln!("  ntfs mounts   - List mounted NTFS volumes");
+            outln!("  ntfs attrs    - Show NTFS attribute types");
+        }
+        "mounts" => show_ntfs_mounts(),
+        "boot" => {
+            if args.len() > 1 {
+                show_ntfs_boot(args[1]);
+            } else {
+                outln!("Usage: ntfs boot <device_index>");
+            }
+        }
+        "mft" => {
+            if args.len() > 1 {
+                show_ntfs_mft(args[1]);
+            } else {
+                outln!("Usage: ntfs mft <device_index>");
+            }
+        }
+        "attrs" | "attributes" => show_ntfs_attrs(),
+        _ => {
+            outln!("Unknown ntfs command: '{}'", args[0]);
+            outln!("Type 'ntfs help' for usage.");
+        }
+    }
+}
+
+fn show_ntfs_info() {
+    use crate::fs::ntfs;
+
+    outln!("NTFS File System Driver");
+    outln!("=======================");
+    outln!("");
+    outln!("Driver Version: 1.0");
+    outln!("Status:         Active");
+    outln!("");
+    outln!("Features:");
+    outln!("  Boot Sector:  Supported");
+    outln!("  MFT Parsing:  Supported");
+    outln!("  Attributes:   Read-only");
+    outln!("  Data Runs:    Supported");
+    outln!("  Compression:  Not yet supported");
+    outln!("  Encryption:   Not yet supported");
+    outln!("");
+    outln!("Use 'ntfs help' for available commands.");
+}
+
+fn show_ntfs_mounts() {
+    use crate::fs::ntfs;
+
+    outln!("NTFS Mounted Volumes");
+    outln!("====================");
+    outln!("");
+
+    let mounts = ntfs::file::get_active_mounts();
+    if mounts.is_empty() {
+        outln!("No NTFS volumes currently mounted.");
+        return;
+    }
+
+    outln!("{:<4} {:<8} {:>12} {:>10} {:>10}",
+        "Idx", "Device", "Total Clus", "Clus Size", "MFT Rec");
+    outln!("{}", "-".repeat(50));
+
+    for mount in mounts {
+        outln!("{:<4} {:<8} {:>12} {:>10} {:>10}",
+            mount.fs_index, mount.device_index, mount.total_clusters,
+            mount.bytes_per_cluster, mount.file_record_size);
+    }
+}
+
+fn show_ntfs_boot(dev_arg: &str) {
+    outln!("NTFS Boot Sector Analysis");
+    outln!("=========================");
+    outln!("");
+    outln!("Device: {}", dev_arg);
+    outln!("");
+    outln!("Note: Boot sector reading requires block device access.");
+    outln!("This is a placeholder for future functionality.");
+    outln!("");
+    outln!("Expected Information:");
+    outln!("  OEM ID:             NTFS");
+    outln!("  Bytes per Sector:   512");
+    outln!("  Sectors per Cluster: Varies");
+    outln!("  MFT Cluster:        Varies");
+    outln!("  MFT Mirror Cluster: Varies");
+    outln!("  File Record Size:   1024");
+}
+
+fn show_ntfs_mft(dev_arg: &str) {
+    use crate::fs::ntfs::mft;
+
+    outln!("NTFS Master File Table");
+    outln!("======================");
+    outln!("");
+    outln!("Device: {}", dev_arg);
+    outln!("");
+    outln!("Well-Known MFT Entries:");
+    outln!("{:<6} {:<12} {}", "Index", "Name", "Description");
+    outln!("{}", "-".repeat(50));
+
+    outln!("{:<6} {:<12} {}", 0, mft::mft_entry_name(0), "Master File Table");
+    outln!("{:<6} {:<12} {}", 1, mft::mft_entry_name(1), "MFT Mirror (first 4 entries)");
+    outln!("{:<6} {:<12} {}", 2, mft::mft_entry_name(2), "Transaction log");
+    outln!("{:<6} {:<12} {}", 3, mft::mft_entry_name(3), "Volume information");
+    outln!("{:<6} {:<12} {}", 4, mft::mft_entry_name(4), "Attribute definitions");
+    outln!("{:<6} {:<12} {}", 5, mft::mft_entry_name(5), "Root directory");
+    outln!("{:<6} {:<12} {}", 6, mft::mft_entry_name(6), "Cluster allocation bitmap");
+    outln!("{:<6} {:<12} {}", 7, mft::mft_entry_name(7), "Boot sector");
+    outln!("{:<6} {:<12} {}", 8, mft::mft_entry_name(8), "Bad cluster list");
+    outln!("{:<6} {:<12} {}", 9, mft::mft_entry_name(9), "Security descriptors");
+    outln!("{:<6} {:<12} {}", 10, mft::mft_entry_name(10), "Uppercase table");
+    outln!("{:<6} {:<12} {}", 11, mft::mft_entry_name(11), "Extended metadata directory");
+    outln!("");
+    outln!("First user file at index: {}", mft::well_known_mft::FIRST_USER_FILE);
+}
+
+fn show_ntfs_attrs() {
+    use crate::fs::ntfs::attr::attr_types;
+
+    outln!("NTFS Attribute Types");
+    outln!("====================");
+    outln!("");
+    outln!("{:<10} {:<28} {}", "Type ID", "Name", "Description");
+    outln!("{}", "-".repeat(60));
+
+    outln!("{:#010x} {:<28} {}", attr_types::STANDARD_INFORMATION, "$STANDARD_INFORMATION", "File timestamps, flags");
+    outln!("{:#010x} {:<28} {}", attr_types::ATTRIBUTE_LIST, "$ATTRIBUTE_LIST", "List of attribute records");
+    outln!("{:#010x} {:<28} {}", attr_types::FILE_NAME, "$FILE_NAME", "File name (Unicode)");
+    outln!("{:#010x} {:<28} {}", attr_types::OBJECT_ID, "$OBJECT_ID", "Unique object identifier");
+    outln!("{:#010x} {:<28} {}", attr_types::SECURITY_DESCRIPTOR, "$SECURITY_DESCRIPTOR", "Security information");
+    outln!("{:#010x} {:<28} {}", attr_types::VOLUME_NAME, "$VOLUME_NAME", "Volume label");
+    outln!("{:#010x} {:<28} {}", attr_types::VOLUME_INFORMATION, "$VOLUME_INFORMATION", "Volume version, flags");
+    outln!("{:#010x} {:<28} {}", attr_types::DATA, "$DATA", "File data content");
+    outln!("{:#010x} {:<28} {}", attr_types::INDEX_ROOT, "$INDEX_ROOT", "Index B-tree root");
+    outln!("{:#010x} {:<28} {}", attr_types::INDEX_ALLOCATION, "$INDEX_ALLOCATION", "Index B-tree nodes");
+    outln!("{:#010x} {:<28} {}", attr_types::BITMAP, "$BITMAP", "Bitmap for index/MFT");
+    outln!("{:#010x} {:<28} {}", attr_types::REPARSE_POINT, "$REPARSE_POINT", "Symbolic links, junctions");
+    outln!("{:#010x} {:<28} {}", attr_types::EA_INFORMATION, "$EA_INFORMATION", "Extended attr info");
+    outln!("{:#010x} {:<28} {}", attr_types::EA, "$EA", "Extended attributes");
+    outln!("{:#010x} {:<28} {}", attr_types::LOGGED_UTILITY_STREAM, "$LOGGED_UTILITY_STREAM", "EFS data");
+    outln!("");
+    outln!("End Marker: {:#010x}", 0xFFFFFFFFu32);
+}
+
 fn show_reg_info(path: &str) {
     use crate::cm;
 

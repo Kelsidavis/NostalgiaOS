@@ -156,7 +156,7 @@ const COMMANDS: &[&str] = &[
     "job", "ke", "keyedev",
     "ldr", "lookaside", "ls", "luid",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
-    "net",
+    "net", "ntfs",
     "ob", "obdir",
     "pagetable", "partition", "pci", "pe", "peb", "pfn", "pipes", "pool", "pooltag", "port", "prcb", "prefetch", "ps", "pwd",
     "quit",
@@ -1262,6 +1262,9 @@ impl Shell {
         // Disk/Partition viewer
         } else if eq_ignore_case(cmd, "disk") || eq_ignore_case(cmd, "partition") {
             commands::cmd_disk(&args[1..argc]);
+        // NTFS file system
+        } else if eq_ignore_case(cmd, "ntfs") {
+            commands::cmd_ntfs(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

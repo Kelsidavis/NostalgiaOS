@@ -735,6 +735,333 @@ pub unsafe fn find_export_by_ordinal(image_base: *const u8, ordinal: u16) -> Opt
     Some(image_base.add(function_rva as usize) as u64)
 }
 
+/// Module resolver callback for forwarder resolution
+/// Takes (module_name, function_name or ordinal) and returns the function address
+pub type ModuleResolver = unsafe fn(&str, ForwarderTarget<'_>) -> Option<u64>;
+
+/// Maximum length for forwarder function names
+pub const MAX_FORWARDER_NAME_LEN: usize = 128;
+
+/// Forwarder target - either a name or ordinal
+#[derive(Debug, Clone)]
+pub enum ForwarderTarget<'a> {
+    Name(&'a str),
+    Ordinal(u16),
+}
+
+/// Parse a forwarder string (e.g., "NTDLL.RtlGetVersion" or "NTDLL.#42")
+fn parse_forwarder(forwarder: &str) -> Option<(&str, ForwarderTarget<'_>)> {
+    let dot_pos = forwarder.find('.')?;
+    let module_name = &forwarder[..dot_pos];
+    let target_str = &forwarder[dot_pos + 1..];
+
+    if target_str.starts_with('#') {
+        // Ordinal forwarder
+        let ordinal = target_str[1..].parse::<u16>().ok()?;
+        Some((module_name, ForwarderTarget::Ordinal(ordinal)))
+    } else {
+        // Name forwarder
+        Some((module_name, ForwarderTarget::Name(target_str)))
+    }
+}
+
+/// Find an exported function by name with forwarder resolution
+///
+/// # Arguments
+/// * `image_base` - Base address of the loaded DLL
+/// * `func_name` - Name of the function to find
+/// * `resolver` - Optional callback to resolve forwarders to other modules
+///
+/// # Safety
+/// The caller must ensure `image_base` points to a valid, mapped PE image.
+pub unsafe fn find_export_with_forwarder(
+    image_base: *const u8,
+    func_name: &str,
+    resolver: Option<ModuleResolver>,
+) -> Option<u64> {
+    let export_dir = get_data_directory(image_base, directory_entry::IMAGE_DIRECTORY_ENTRY_EXPORT)?;
+    if !export_dir.is_present() {
+        return None;
+    }
+
+    let exports = &*(image_base.add(export_dir.virtual_address as usize) as *const ImageExportDirectory);
+
+    let name_table = image_base.add(exports.address_of_names as usize) as *const u32;
+    let ordinal_table = image_base.add(exports.address_of_name_ordinals as usize) as *const u16;
+    let function_table = image_base.add(exports.address_of_functions as usize) as *const u32;
+
+    // Binary search through name table
+    for i in 0..exports.number_of_names as usize {
+        let name_rva = *name_table.add(i);
+        let name_ptr = image_base.add(name_rva as usize);
+        let export_name = cstr_to_str(name_ptr);
+
+        if export_name == func_name {
+            let ordinal = *ordinal_table.add(i);
+            let function_rva = *function_table.add(ordinal as usize);
+
+            // Check for forwarder
+            let function_va = image_base.add(function_rva as usize);
+            let export_start = export_dir.virtual_address;
+            let export_end = export_start + export_dir.size;
+
+            if function_rva >= export_start && function_rva < export_end {
+                // This is a forwarder string
+                let forwarder_str = cstr_to_str(function_va);
+
+                if let Some(resolver_fn) = resolver {
+                    if let Some((module_name, target)) = parse_forwarder(forwarder_str) {
+                        return resolver_fn(module_name, target);
+                    }
+                }
+                // No resolver or couldn't parse
+                return None;
+            }
+
+            return Some(function_va as u64);
+        }
+    }
+
+    None
+}
+
+// ============================================================================
+// TLS (Thread Local Storage) Support
+// ============================================================================
+
+/// TLS callback function signature
+pub type TlsCallback = unsafe extern "C" fn(dll_handle: *mut u8, reason: u32, reserved: *mut u8);
+
+/// TLS callback reasons
+pub mod tls_reason {
+    pub const DLL_PROCESS_ATTACH: u32 = 1;
+    pub const DLL_THREAD_ATTACH: u32 = 2;
+    pub const DLL_THREAD_DETACH: u32 = 3;
+    pub const DLL_PROCESS_DETACH: u32 = 0;
+}
+
+/// TLS Directory (32-bit)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ImageTlsDirectory32 {
+    /// Starting address of TLS data template
+    pub start_address_of_raw_data: u32,
+    /// Ending address of TLS data template
+    pub end_address_of_raw_data: u32,
+    /// Address of TLS index
+    pub address_of_index: u32,
+    /// Address of TLS callbacks array (null-terminated)
+    pub address_of_callbacks: u32,
+    /// Size of zero-fill
+    pub size_of_zero_fill: u32,
+    /// Characteristics (reserved)
+    pub characteristics: u32,
+}
+
+/// TLS Directory (64-bit)
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ImageTlsDirectory64 {
+    /// Starting address of TLS data template
+    pub start_address_of_raw_data: u64,
+    /// Ending address of TLS data template
+    pub end_address_of_raw_data: u64,
+    /// Address of TLS index
+    pub address_of_index: u64,
+    /// Address of TLS callbacks array (null-terminated)
+    pub address_of_callbacks: u64,
+    /// Size of zero-fill
+    pub size_of_zero_fill: u32,
+    /// Characteristics (reserved)
+    pub characteristics: u32,
+}
+
+/// Process TLS initialization for a loaded image
+///
+/// # Arguments
+/// * `image_base` - Base address of the loaded image
+/// * `is_64bit` - Whether this is a 64-bit PE
+/// * `reason` - TLS callback reason (DLL_PROCESS_ATTACH, etc.)
+///
+/// # Safety
+/// The caller must ensure `image_base` points to a valid, mapped PE image.
+pub unsafe fn process_tls_callbacks(image_base: *mut u8, is_64bit: bool, reason: u32) -> bool {
+    let tls_dir = match get_data_directory(
+        image_base as *const u8,
+        directory_entry::IMAGE_DIRECTORY_ENTRY_TLS,
+    ) {
+        Some(dir) if dir.is_present() => dir,
+        _ => return true, // No TLS directory is OK
+    };
+
+    if is_64bit {
+        let tls = &*(image_base.add(tls_dir.virtual_address as usize) as *const ImageTlsDirectory64);
+
+        // Initialize TLS index if present
+        if tls.address_of_index != 0 {
+            // For now, just set to 0 - would need proper TLS slot allocation
+            let index_ptr = tls.address_of_index as *mut u32;
+            *index_ptr = 0;
+        }
+
+        // Call TLS callbacks
+        if tls.address_of_callbacks != 0 {
+            let callbacks = tls.address_of_callbacks as *const u64;
+            let mut i = 0;
+            while *callbacks.add(i) != 0 {
+                let callback_addr = *callbacks.add(i) as usize;
+                let callback: TlsCallback = core::mem::transmute(callback_addr);
+                callback(image_base, reason, core::ptr::null_mut());
+                i += 1;
+            }
+        }
+    } else {
+        let tls = &*(image_base.add(tls_dir.virtual_address as usize) as *const ImageTlsDirectory32);
+
+        // Initialize TLS index
+        if tls.address_of_index != 0 {
+            let index_ptr = tls.address_of_index as *mut u32;
+            *index_ptr = 0;
+        }
+
+        // Call TLS callbacks
+        if tls.address_of_callbacks != 0 {
+            let callbacks = tls.address_of_callbacks as *const u32;
+            let mut i = 0;
+            while *callbacks.add(i) != 0 {
+                let callback_addr = *callbacks.add(i) as usize;
+                let callback: TlsCallback = core::mem::transmute(callback_addr);
+                callback(image_base, reason, core::ptr::null_mut());
+                i += 1;
+            }
+        }
+    }
+
+    true
+}
+
+/// Copy TLS data template to thread-specific storage
+///
+/// # Safety
+/// Caller must ensure valid pointers.
+pub unsafe fn copy_tls_data(image_base: *const u8, tls_data_ptr: *mut u8, is_64bit: bool) -> bool {
+    let tls_dir = match get_data_directory(image_base, directory_entry::IMAGE_DIRECTORY_ENTRY_TLS) {
+        Some(dir) if dir.is_present() => dir,
+        _ => return true,
+    };
+
+    if is_64bit {
+        let tls = &*(image_base.add(tls_dir.virtual_address as usize) as *const ImageTlsDirectory64);
+        let start = tls.start_address_of_raw_data;
+        let end = tls.end_address_of_raw_data;
+        let size = (end - start) as usize;
+        let zero_fill = tls.size_of_zero_fill as usize;
+
+        if size > 0 {
+            ptr::copy_nonoverlapping(start as *const u8, tls_data_ptr, size);
+        }
+        if zero_fill > 0 {
+            ptr::write_bytes(tls_data_ptr.add(size), 0, zero_fill);
+        }
+    } else {
+        let tls = &*(image_base.add(tls_dir.virtual_address as usize) as *const ImageTlsDirectory32);
+        let start = tls.start_address_of_raw_data;
+        let end = tls.end_address_of_raw_data;
+        let size = (end - start) as usize;
+        let zero_fill = tls.size_of_zero_fill as usize;
+
+        if size > 0 {
+            ptr::copy_nonoverlapping(start as *const u8, tls_data_ptr, size);
+        }
+        if zero_fill > 0 {
+            ptr::write_bytes(tls_data_ptr.add(size), 0, zero_fill);
+        }
+    }
+
+    true
+}
+
+// ============================================================================
+// Delay-Load Import Support
+// ============================================================================
+
+/// Delay-load descriptor
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ImageDelayloadDescriptor {
+    /// Must be zero
+    pub attributes: u32,
+    /// RVA of DLL name
+    pub dll_name_rva: u32,
+    /// RVA of module handle
+    pub module_handle_rva: u32,
+    /// RVA of delay IAT
+    pub import_address_table_rva: u32,
+    /// RVA of delay INT
+    pub import_name_table_rva: u32,
+    /// RVA of bound delay IAT
+    pub bound_import_address_table_rva: u32,
+    /// RVA of unload delay IAT
+    pub unload_import_address_table_rva: u32,
+    /// Timestamp of binding
+    pub time_date_stamp: u32,
+}
+
+impl ImageDelayloadDescriptor {
+    /// Check if this is the terminating null entry
+    pub fn is_null(&self) -> bool {
+        self.dll_name_rva == 0 && self.import_address_table_rva == 0
+    }
+}
+
+/// Get delay-load descriptors from a PE image
+///
+/// # Safety
+/// The caller must ensure `image_base` points to a valid PE image.
+pub unsafe fn get_delay_load_descriptors(image_base: *const u8) -> Option<&'static [ImageDelayloadDescriptor]> {
+    let delay_dir = get_data_directory(image_base, directory_entry::IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT)?;
+    if !delay_dir.is_present() {
+        return None;
+    }
+
+    let desc_ptr = image_base.add(delay_dir.virtual_address as usize) as *const ImageDelayloadDescriptor;
+
+    // Count entries
+    let mut count = 0;
+    while !(*desc_ptr.add(count)).is_null() {
+        count += 1;
+    }
+
+    if count == 0 {
+        return None;
+    }
+
+    Some(core::slice::from_raw_parts(desc_ptr, count))
+}
+
+/// Process delay-load imports for a module
+///
+/// This snapshots the delay-load IAT entries so they can be resolved on first call
+///
+/// # Safety
+/// Caller must ensure valid image base.
+pub unsafe fn snapshot_delay_load_iat(image_base: *mut u8, is_64bit: bool) -> bool {
+    let descriptors = match get_delay_load_descriptors(image_base as *const u8) {
+        Some(d) => d,
+        None => return true, // No delay loads is OK
+    };
+
+    for desc in descriptors {
+        // The delay IAT initially contains thunks to the delay-load helper
+        // For proper implementation, we'd need to set up the helper routine
+        // For now, just log that delay loads are present
+        let dll_name = cstr_to_str(image_base.add(desc.dll_name_rva as usize) as *const u8);
+        crate::serial_println!("[LDR] Delay-load DLL: {}", dll_name);
+    }
+
+    true
+}
+
 // ============================================================================
 // Image Loading
 // ============================================================================
