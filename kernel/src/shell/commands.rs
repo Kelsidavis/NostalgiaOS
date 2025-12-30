@@ -2180,13 +2180,12 @@ pub fn cmd_net(args: &[&str]) {
     use crate::svc;
 
     if args.is_empty() {
-        outln!("Usage: net <command> [options]");
+        outln!("The syntax of this command is:");
         outln!("");
-        outln!("Commands:");
-        outln!("  start [service]   Start a service (or list running)");
-        outln!("  stop <service>    Stop a service");
-        outln!("  pause <service>   Pause a service");
-        outln!("  continue <service> Continue a paused service");
+        outln!("NET [ ACCOUNTS | COMPUTER | CONFIG | CONTINUE | FILE | GROUP |");
+        outln!("      HELP | HELPMSG | LOCALGROUP | NAME | PAUSE | PRINT | SEND |");
+        outln!("      SESSION | SHARE | START | STATISTICS | STOP | TIME | USE |");
+        outln!("      USER | VIEW ]");
         return;
     }
 
@@ -2246,8 +2245,321 @@ pub fn cmd_net(args: &[&str]) {
         } else {
             outln!("The {} service could not be continued.", args[1]);
         }
+    } else if eq_ignore_case(cmd, "user") {
+        // User account management
+        if args.len() < 2 {
+            outln!("");
+            outln!("User accounts for \\\\NOSTALGOS");
+            outln!("");
+            outln!("-------------------------------------------------------------------------------");
+            outln!("Administrator            Guest                    SYSTEM");
+            outln!("The command completed successfully.");
+        } else if eq_ignore_case(args[1], "/add") {
+            if args.len() < 3 {
+                outln!("The syntax of this command is:");
+                outln!("NET USER username [password | *] /ADD [options]");
+            } else {
+                outln!("The command completed successfully.");
+            }
+        } else if eq_ignore_case(args[1], "/delete") {
+            if args.len() < 3 {
+                outln!("The syntax of this command is:");
+                outln!("NET USER username /DELETE");
+            } else {
+                outln!("The command completed successfully.");
+            }
+        } else {
+            // Show user info
+            let username = args[1];
+            outln!("User name                    {}", username);
+            outln!("Full Name                    ");
+            outln!("Comment                      Built-in account");
+            outln!("User's comment               ");
+            outln!("Country code                 000 (System Default)");
+            outln!("Account active               Yes");
+            outln!("Account expires              Never");
+            outln!("");
+            outln!("Password last set            1/1/2003 12:00:00 AM");
+            outln!("Password expires             Never");
+            outln!("Password changeable          1/1/2003 12:00:00 AM");
+            outln!("Password required            Yes");
+            outln!("User may change password     Yes");
+            outln!("");
+            outln!("Workstations allowed         All");
+            outln!("Logon script                 ");
+            outln!("User profile                 ");
+            outln!("Home directory               ");
+            outln!("Last logon                   Never");
+            outln!("");
+            outln!("Logon hours allowed          All");
+            outln!("");
+            outln!("Local Group Memberships      *Administrators");
+            outln!("Global Group memberships     *None");
+            outln!("The command completed successfully.");
+        }
+    } else if eq_ignore_case(cmd, "share") {
+        // Share management
+        if args.len() < 2 {
+            outln!("");
+            outln!("Share name   Resource                        Remark");
+            outln!("");
+            outln!("-------------------------------------------------------------------------------");
+            outln!("C$           C:\\                             Default share");
+            outln!("ADMIN$       C:\\WINDOWS                      Remote Admin");
+            outln!("IPC$                                         Remote IPC");
+            outln!("The command completed successfully.");
+        } else if args[1].contains('=') {
+            // Create share: net share name=path
+            outln!("Share created successfully.");
+        } else if eq_ignore_case(args[1], "/delete") {
+            outln!("Share deleted successfully.");
+        } else {
+            // Show share info
+            outln!("Share name        {}", args[1]);
+            outln!("Path              C:\\");
+            outln!("Remark            Default share");
+            outln!("Maximum users     No limit");
+            outln!("Users             0");
+            outln!("The command completed successfully.");
+        }
+    } else if eq_ignore_case(cmd, "use") {
+        // Connect to network shares
+        if args.len() < 2 {
+            outln!("New connections will be remembered.");
+            outln!("");
+            outln!("There are no entries in the list.");
+        } else if args[1] == "*" {
+            // Delete all connections
+            outln!("You have these remote connections:");
+            outln!("    (none)");
+            outln!("Continuing will cancel the connections.");
+            outln!("Do you want to continue this operation? (Y/N) [N]: N");
+            outln!("The command completed successfully.");
+        } else {
+            // Connect to share
+            outln!("The command completed successfully.");
+        }
+    } else if eq_ignore_case(cmd, "view") {
+        // View network computers
+        if args.len() < 2 {
+            outln!("");
+            outln!("Server Name            Remark");
+            outln!("");
+            outln!("-------------------------------------------------------------------------------");
+            outln!("\\\\NOSTALGOS            Nostalgos Server");
+            outln!("The command completed successfully.");
+        } else {
+            // View specific computer
+            outln!("");
+            outln!("Shared resources at {}", args[1]);
+            outln!("");
+            outln!("Share name   Type   Used as  Comment");
+            outln!("");
+            outln!("-------------------------------------------------------------------------------");
+            outln!("C$           Disk            Default share");
+            outln!("ADMIN$       Disk            Remote Admin");
+            outln!("IPC$         IPC             Remote IPC");
+            outln!("The command completed successfully.");
+        }
+    } else if eq_ignore_case(cmd, "localgroup") {
+        // Local group management
+        if args.len() < 2 {
+            outln!("");
+            outln!("Aliases for \\\\NOSTALGOS");
+            outln!("");
+            outln!("-------------------------------------------------------------------------------");
+            outln!("*Administrators");
+            outln!("*Backup Operators");
+            outln!("*Guests");
+            outln!("*Network Configuration Operators");
+            outln!("*Power Users");
+            outln!("*Remote Desktop Users");
+            outln!("*Replicator");
+            outln!("*Users");
+            outln!("The command completed successfully.");
+        } else {
+            // Show group members
+            outln!("Alias name     {}", args[1]);
+            outln!("Comment        ");
+            outln!("");
+            outln!("Members");
+            outln!("");
+            outln!("-------------------------------------------------------------------------------");
+            outln!("Administrator");
+            outln!("The command completed successfully.");
+        }
+    } else if eq_ignore_case(cmd, "statistics") {
+        // Network statistics
+        if args.len() < 2 {
+            outln!("The syntax of this command is:");
+            outln!("NET STATISTICS [WORKSTATION | SERVER]");
+        } else if eq_ignore_case(args[1], "server") || eq_ignore_case(args[1], "srv") {
+            outln!("");
+            outln!("Server Statistics for \\\\NOSTALGOS");
+            outln!("");
+            outln!("Statistics since 1/1/2003 12:00 AM");
+            outln!("");
+            outln!("Sessions accepted                  0");
+            outln!("Sessions timed-out                 0");
+            outln!("Sessions errored-out               0");
+            outln!("");
+            outln!("Kilobytes sent                     0");
+            outln!("Kilobytes received                 0");
+            outln!("");
+            outln!("Files accessed                     0");
+            outln!("Communication devices accessed     0");
+            outln!("Print jobs spooled                 0");
+            outln!("");
+            outln!("The command completed successfully.");
+        } else if eq_ignore_case(args[1], "workstation") || eq_ignore_case(args[1], "work") {
+            outln!("");
+            outln!("Workstation Statistics for \\\\NOSTALGOS");
+            outln!("");
+            outln!("Statistics since 1/1/2003 12:00 AM");
+            outln!("");
+            outln!("  Bytes received                               0");
+            outln!("  Server Message Blocks (SMBs) received        0");
+            outln!("  Bytes transmitted                            0");
+            outln!("  Server Message Blocks (SMBs) transmitted     0");
+            outln!("  Read operations                              0");
+            outln!("  Write operations                             0");
+            outln!("  Raw reads denied                             0");
+            outln!("  Raw writes denied                            0");
+            outln!("");
+            outln!("The command completed successfully.");
+        }
+    } else if eq_ignore_case(cmd, "session") {
+        // Session management
+        if args.len() < 2 {
+            outln!("");
+            outln!("There are no entries in the list.");
+        } else if eq_ignore_case(args[1], "/delete") {
+            outln!("The command completed successfully.");
+        } else {
+            outln!("Computer               User name         Client Type    Opens  Idle time");
+            outln!("-------------------------------------------------------------------------------");
+            outln!("");
+            outln!("The command completed successfully.");
+        }
+    } else if eq_ignore_case(cmd, "time") {
+        // Time synchronization
+        if args.len() < 2 {
+            outln!("Current time at \\\\NOSTALGOS is 1/1/2003 12:00:00 AM");
+            outln!("The command completed successfully.");
+        } else if eq_ignore_case(args[1], "/set") {
+            outln!("The current time has been synchronized.");
+            outln!("The command completed successfully.");
+        } else {
+            // Show remote time
+            outln!("Current time at {} is 1/1/2003 12:00:00 AM", args[1]);
+            outln!("The command completed successfully.");
+        }
+    } else if eq_ignore_case(cmd, "config") {
+        // Configuration
+        if args.len() < 2 {
+            outln!("The syntax of this command is:");
+            outln!("NET CONFIG [SERVER | WORKSTATION]");
+        } else if eq_ignore_case(args[1], "server") || eq_ignore_case(args[1], "srv") {
+            outln!("");
+            outln!("Server Name                     \\\\NOSTALGOS");
+            outln!("Server Comment                  Nostalgos Server");
+            outln!("");
+            outln!("Software version                Windows Server 2003");
+            outln!("");
+            outln!("Server is active on");
+            outln!("        NetbiosSmb (000000000000)");
+            outln!("");
+            outln!("Server hidden                   No");
+            outln!("Maximum Logged On Users         16777216");
+            outln!("Maximum open files per session  16384");
+            outln!("");
+            outln!("Idle session time (min)         15");
+            outln!("The command completed successfully.");
+        } else if eq_ignore_case(args[1], "workstation") || eq_ignore_case(args[1], "work") {
+            outln!("");
+            outln!("Computer name                    \\\\NOSTALGOS");
+            outln!("Full Computer name               NOSTALGOS");
+            outln!("User name                        Administrator");
+            outln!("");
+            outln!("Workstation active on");
+            outln!("        NetbiosSmb (000000000000)");
+            outln!("");
+            outln!("Software version                 Windows Server 2003");
+            outln!("");
+            outln!("Workstation domain               WORKGROUP");
+            outln!("Logon domain                     NOSTALGOS");
+            outln!("");
+            outln!("COM Open Timeout (sec)           0");
+            outln!("COM Send Count (byte)            16");
+            outln!("COM Send Timeout (msec)          250");
+            outln!("The command completed successfully.");
+        }
+    } else if eq_ignore_case(cmd, "accounts") {
+        // Account policy
+        outln!("");
+        outln!("Force user logoff how long after time expires?:    Never");
+        outln!("Minimum password age (days):                       0");
+        outln!("Maximum password age (days):                       42");
+        outln!("Minimum password length:                           0");
+        outln!("Length of password history maintained:             None");
+        outln!("Lockout threshold:                                 Never");
+        outln!("Lockout duration (minutes):                        30");
+        outln!("Lockout observation window (minutes):              30");
+        outln!("Computer role:                                     SERVER");
+        outln!("The command completed successfully.");
+    } else if eq_ignore_case(cmd, "file") {
+        // Open files
+        if args.len() < 2 {
+            outln!("ID         Path                                    User name            # Locks");
+            outln!("-------------------------------------------------------------------------------");
+            outln!("");
+            outln!("The command completed successfully.");
+        } else if eq_ignore_case(args[1], "/close") {
+            outln!("The command completed successfully.");
+        }
+    } else if eq_ignore_case(cmd, "helpmsg") {
+        // Help message for error code
+        if args.len() < 2 {
+            outln!("The syntax of this command is:");
+            outln!("NET HELPMSG message#");
+        } else {
+            let code = args[1];
+            match code {
+                "0" => outln!("The operation completed successfully."),
+                "5" => outln!("Access is denied."),
+                "53" => outln!("The network path was not found."),
+                "64" => outln!("The specified network name is no longer available."),
+                "67" => outln!("The network name cannot be found."),
+                "1326" => outln!("Logon failure: unknown user name or bad password."),
+                "2221" => outln!("The user name could not be found."),
+                _ => outln!("An error occurred for which no help message is available: {}", code),
+            }
+        }
+    } else if eq_ignore_case(cmd, "help") {
+        outln!("The syntax of this command is:");
+        outln!("");
+        outln!("NET HELP command");
+        outln!("     -or-");
+        outln!("NET command /HELP");
+        outln!("");
+        outln!("   Commands available are:");
+        outln!("");
+        outln!("   NET ACCOUNTS             NET HELP                NET SHARE");
+        outln!("   NET COMPUTER             NET HELPMSG             NET START");
+        outln!("   NET CONFIG               NET LOCALGROUP          NET STATISTICS");
+        outln!("   NET CONFIG SERVER        NET NAME                NET STOP");
+        outln!("   NET CONFIG WORKSTATION   NET PAUSE               NET TIME");
+        outln!("   NET CONTINUE             NET PRINT               NET USE");
+        outln!("   NET FILE                 NET SEND                NET USER");
+        outln!("   NET GROUP                NET SESSION             NET VIEW");
     } else {
         outln!("NET: unrecognized command '{}'", cmd);
+        outln!("The syntax of this command is:");
+        outln!("");
+        outln!("NET [ ACCOUNTS | COMPUTER | CONFIG | CONTINUE | FILE | GROUP |");
+        outln!("      HELP | HELPMSG | LOCALGROUP | NAME | PAUSE | PRINT | SEND |");
+        outln!("      SESSION | SHARE | START | STATISTICS | STOP | TIME | USE |");
+        outln!("      USER | VIEW ]");
     }
 }
 
