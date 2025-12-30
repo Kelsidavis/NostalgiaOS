@@ -146,23 +146,23 @@ const HISTORY_SIZE: usize = 32;
 
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
-    "acpi", "apic", "apcq", "arp",
+    "acpi", "apic", "apcq", "arp", "attrib",
     "blocks", "bt",
     "cache", "callback", "cat", "cc", "cd", "cid", "clear", "cls", "color", "copy", "cp", "cpufeatures", "cpuinfo",
     "date", "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
-    "files", "finger",
+    "files", "findstr", "finger",
     "hal", "handles", "heap", "help", "history", "hostname", "hpet",
     "ident", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
     "job", "ke", "keyedev",
     "ldr", "lookaside", "ls", "luid",
-    "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
+    "md", "mem", "memmap", "memory", "mkdir", "mm", "more", "msr", "mv",
     "net", "netinfo", "netserv", "netstat", "nslookup", "ntfs",
     "ob", "obdir",
     "pagetable", "partition", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "port", "power", "prcb", "prefetch", "prompt", "ps", "pwd",
     "qotd", "quit",
     "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "route", "rtl", "shutdown",
     "sc", "sched", "se", "section", "services", "set", "smbios", "stack", "suspend", "sysinfo", "systeminfo",
-    "tasklist", "tasks", "teb", "time", "timer", "timerq", "timeserv", "title", "touch", "tracert", "type",
+    "tasklist", "tasks", "teb", "time", "timer", "timerq", "timeserv", "title", "touch", "tracert", "tree", "type",
     "userproc", "usertest",
     "vad", "veh", "ver", "verifier", "version", "volumes",
     "waitq", "whois", "whoami", "worker", "wset",
@@ -1351,6 +1351,18 @@ impl Shell {
         // Prompt format
         } else if eq_ignore_case(cmd, "prompt") {
             commands::cmd_prompt(&args[1..argc]);
+        // Tree - display directory structure
+        } else if eq_ignore_case(cmd, "tree") {
+            commands::cmd_tree(&args[1..argc]);
+        // Findstr - search for strings in files
+        } else if eq_ignore_case(cmd, "findstr") {
+            commands::cmd_findstr(&args[1..argc]);
+        // More - display output one screen at a time
+        } else if eq_ignore_case(cmd, "more") {
+            commands::cmd_more(&args[1..argc]);
+        // Attrib - display or change file attributes
+        } else if eq_ignore_case(cmd, "attrib") {
+            commands::cmd_attrib(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

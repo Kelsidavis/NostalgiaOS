@@ -18626,3 +18626,463 @@ pub fn cmd_prompt(args: &[&str]) {
         outln!("Prompt set to: {}", fmt);
     }
 }
+
+/// Tree command - display directory tree structure
+pub fn cmd_tree(args: &[&str]) {
+    let path = if args.is_empty() {
+        get_current_dir()
+    } else {
+        args[0]
+    };
+
+    let full_path = resolve_path(path);
+
+    outln!("Folder PATH listing for {}", full_path);
+    outln!("{}", full_path);
+
+    // Track statistics
+    let mut dir_count = 0u32;
+    let mut file_count = 0u32;
+
+    // Recursive tree display
+    tree_display(&full_path, "", &mut dir_count, &mut file_count);
+
+    outln!("");
+    outln!("{} directories, {} files", dir_count, file_count);
+}
+
+/// Helper function to display tree recursively
+fn tree_display(path: &str, prefix: &str, dir_count: &mut u32, file_count: &mut u32) {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    // Collect entries first
+    let mut entries: Vec<(String, bool)> = Vec::new(); // (name, is_dir)
+    let mut offset = 0u32;
+
+    loop {
+        match fs::readdir(path, offset) {
+            Ok(entry) => {
+                let name = entry.name_str();
+                if name != "." && name != ".." {
+                    let is_dir = entry.file_type == fs::FileType::Directory;
+                    entries.push((String::from(name), is_dir));
+                    if is_dir {
+                        *dir_count += 1;
+                    } else {
+                        *file_count += 1;
+                    }
+                }
+                offset = entry.next_offset;
+            }
+            Err(fs::FsStatus::NoMoreEntries) => break,
+            Err(_) => break,
+        }
+    }
+
+    // Sort entries (directories first, then alphabetically)
+    entries.sort_by(|a, b| {
+        match (a.1, b.1) {
+            (true, false) => core::cmp::Ordering::Less,
+            (false, true) => core::cmp::Ordering::Greater,
+            _ => a.0.cmp(&b.0),
+        }
+    });
+
+    let count = entries.len();
+    for (i, (name, is_dir)) in entries.iter().enumerate() {
+        let is_last = i == count - 1;
+        let connector = if is_last { "└───" } else { "├───" };
+
+        outln!("{}{}{}", prefix, connector, name);
+
+        if *is_dir {
+            // Build path for subdirectory
+            let mut sub_path = String::from(path);
+            if !sub_path.ends_with('\\') && !sub_path.ends_with('/') {
+                sub_path.push('\\');
+            }
+            sub_path.push_str(name);
+
+            // Recurse with updated prefix
+            let new_prefix = if is_last {
+                alloc::format!("{}    ", prefix)
+            } else {
+                alloc::format!("{}│   ", prefix)
+            };
+
+            tree_display(&sub_path, &new_prefix, dir_count, file_count);
+        }
+    }
+}
+
+/// Findstr command - search for strings in files
+pub fn cmd_findstr(args: &[&str]) {
+    if args.len() < 2 {
+        outln!("Searches for strings in files.");
+        outln!("");
+        outln!("FINDSTR [/I] [/N] [/V] string filename");
+        outln!("");
+        outln!("  /I       Case-insensitive search");
+        outln!("  /N       Print line numbers");
+        outln!("  /V       Print only lines that do NOT contain the string");
+        outln!("  string   Text to search for");
+        outln!("  filename File(s) to search");
+        return;
+    }
+
+    // Parse options
+    let mut case_insensitive = false;
+    let mut show_line_numbers = false;
+    let mut invert_match = false;
+    let mut arg_start = 0;
+
+    for (i, arg) in args.iter().enumerate() {
+        if arg.starts_with('/') || arg.starts_with('-') {
+            let opt = arg.to_ascii_uppercase();
+            if opt == "/I" || opt == "-I" {
+                case_insensitive = true;
+            } else if opt == "/N" || opt == "-N" {
+                show_line_numbers = true;
+            } else if opt == "/V" || opt == "-V" {
+                invert_match = true;
+            }
+            arg_start = i + 1;
+        } else {
+            break;
+        }
+    }
+
+    if args.len() - arg_start < 2 {
+        outln!("FINDSTR: Missing pattern or filename");
+        return;
+    }
+
+    let pattern = args[arg_start];
+    let filename = args[arg_start + 1];
+    let full_path = resolve_path(filename);
+
+    // Open the file
+    let handle = match fs::open(&full_path, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            outln!("Error opening file: {:?}", e);
+            return;
+        }
+    };
+
+    // Read file content
+    let mut buf = [0u8; 4096];
+    let mut line_buf = alloc::vec::Vec::new();
+    let mut line_num = 1u32;
+    let mut match_count = 0u32;
+
+    let search_pattern = if case_insensitive {
+        pattern.to_ascii_lowercase()
+    } else {
+        alloc::string::String::from(pattern)
+    };
+
+    loop {
+        match fs::read(handle, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                for &b in &buf[..n] {
+                    if b == b'\n' {
+                        // Process line
+                        if let Ok(line) = core::str::from_utf8(&line_buf) {
+                            let search_line = if case_insensitive {
+                                line.to_ascii_lowercase()
+                            } else {
+                                alloc::string::String::from(line)
+                            };
+
+                            let contains = search_line.contains(&search_pattern);
+                            let should_print = if invert_match { !contains } else { contains };
+
+                            if should_print {
+                                match_count += 1;
+                                if show_line_numbers {
+                                    outln!("{}:{}", line_num, line);
+                                } else {
+                                    outln!("{}", line);
+                                }
+                            }
+                        }
+                        line_buf.clear();
+                        line_num += 1;
+                    } else if b != b'\r' {
+                        line_buf.push(b);
+                    }
+                }
+            }
+            Err(e) => {
+                outln!("Error reading file: {:?}", e);
+                break;
+            }
+        }
+    }
+
+    // Process last line if no trailing newline
+    if !line_buf.is_empty() {
+        if let Ok(line) = core::str::from_utf8(&line_buf) {
+            let search_line = if case_insensitive {
+                line.to_ascii_lowercase()
+            } else {
+                alloc::string::String::from(line)
+            };
+
+            let contains = search_line.contains(&search_pattern);
+            let should_print = if invert_match { !contains } else { contains };
+
+            if should_print {
+                match_count += 1;
+                if show_line_numbers {
+                    outln!("{}:{}", line_num, line);
+                } else {
+                    outln!("{}", line);
+                }
+            }
+        }
+    }
+
+    let _ = fs::close(handle);
+
+    if match_count == 0 && !invert_match {
+        outln!("FINDSTR: No matches found");
+    }
+}
+
+/// More command - display output one screen at a time
+pub fn cmd_more(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Displays output one screen at a time.");
+        outln!("");
+        outln!("MORE [filename]");
+        outln!("");
+        outln!("  filename  File to display");
+        outln!("");
+        outln!("Note: Pagination not fully supported in serial console.");
+        return;
+    }
+
+    let filename = args[0];
+    let full_path = resolve_path(filename);
+
+    // Open the file
+    let handle = match fs::open(&full_path, 0) {
+        Ok(h) => h,
+        Err(e) => {
+            outln!("Cannot open file: {:?}", e);
+            return;
+        }
+    };
+
+    // Display file with basic pagination
+    let mut buf = [0u8; 4096];
+    let mut line_count = 0u32;
+    let lines_per_page = 24u32; // Standard terminal height
+    let mut line_buf = alloc::vec::Vec::new();
+
+    outln!("");
+
+    loop {
+        match fs::read(handle, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                for &b in &buf[..n] {
+                    if b == b'\n' {
+                        if let Ok(line) = core::str::from_utf8(&line_buf) {
+                            outln!("{}", line);
+                        }
+                        line_buf.clear();
+                        line_count += 1;
+
+                        // In a real implementation, we'd pause here
+                        if line_count % lines_per_page == 0 {
+                            outln!("-- More -- ({} lines)", line_count);
+                        }
+                    } else if b != b'\r' {
+                        line_buf.push(b);
+                    }
+                }
+            }
+            Err(e) => {
+                outln!("Error reading file: {:?}", e);
+                break;
+            }
+        }
+    }
+
+    // Display last line if no trailing newline
+    if !line_buf.is_empty() {
+        if let Ok(line) = core::str::from_utf8(&line_buf) {
+            outln!("{}", line);
+            line_count += 1;
+        }
+    }
+
+    let _ = fs::close(handle);
+    outln!("");
+    outln!("({} lines total)", line_count);
+}
+
+/// Attrib command - display or change file attributes
+pub fn cmd_attrib(args: &[&str]) {
+    if args.is_empty() {
+        // Display help
+        outln!("Displays or changes file attributes.");
+        outln!("");
+        outln!("ATTRIB [+R|-R] [+A|-A] [+S|-S] [+H|-H] [filename]");
+        outln!("");
+        outln!("  +   Sets an attribute");
+        outln!("  -   Clears an attribute");
+        outln!("  R   Read-only file attribute");
+        outln!("  A   Archive file attribute");
+        outln!("  S   System file attribute");
+        outln!("  H   Hidden file attribute");
+        outln!("");
+        outln!("Note: Attribute modification not implemented.");
+        return;
+    }
+
+    // Find filename (last non-option argument)
+    let mut filename = None;
+    let mut modifications = alloc::vec::Vec::new();
+
+    for arg in args {
+        if arg.starts_with('+') || arg.starts_with('-') {
+            modifications.push(*arg);
+        } else {
+            filename = Some(*arg);
+        }
+    }
+
+    // If no filename, show attributes for current directory
+    let path = match filename {
+        Some(f) => resolve_path(f),
+        None => {
+            // Display all files in current directory
+            attrib_display_dir(get_current_dir());
+            return;
+        }
+    };
+
+    // Check if path has wildcards
+    if has_wildcards(&path) {
+        // Handle wildcards
+        let (dir_path, pattern) = split_path_pattern(&path);
+        attrib_display_with_pattern(&dir_path, pattern);
+    } else {
+        // Single file
+        if modifications.is_empty() {
+            // Display attributes
+            attrib_display_file(&path);
+        } else {
+            // Modify attributes (not implemented)
+            outln!("Attribute modification not implemented.");
+            outln!("Would set: {:?} on {}", modifications, path);
+        }
+    }
+}
+
+/// Display file attributes for a single file
+fn attrib_display_file(path: &str) {
+    let mut offset = 0u32;
+
+    // Get parent directory and filename
+    let (parent, filename) = if let Some(last_sep) = path.rfind(|c| c == '\\' || c == '/') {
+        (&path[..last_sep + 1], &path[last_sep + 1..])
+    } else {
+        (get_current_dir(), path)
+    };
+
+    loop {
+        match fs::readdir(parent, offset) {
+            Ok(entry) => {
+                let name = entry.name_str();
+                if eq_ignore_case(name, filename) {
+                    display_attributes(entry.attributes, &alloc::format!("{}\\{}", parent.trim_end_matches('\\'), name));
+                    return;
+                }
+                offset = entry.next_offset;
+            }
+            Err(fs::FsStatus::NoMoreEntries) => break,
+            Err(_) => break,
+        }
+    }
+
+    outln!("File not found - {}", path);
+}
+
+/// Display attributes for all files in a directory
+fn attrib_display_dir(path: &str) {
+    let full_path = resolve_path(path);
+    let mut offset = 0u32;
+
+    outln!("");
+
+    loop {
+        match fs::readdir(&full_path, offset) {
+            Ok(entry) => {
+                let name = entry.name_str();
+                if name != "." && name != ".." {
+                    let file_path = alloc::format!("{}\\{}", full_path.trim_end_matches('\\'), name);
+                    display_attributes(entry.attributes, &file_path);
+                }
+                offset = entry.next_offset;
+            }
+            Err(fs::FsStatus::NoMoreEntries) => break,
+            Err(e) => {
+                outln!("Error: {:?}", e);
+                break;
+            }
+        }
+    }
+}
+
+/// Display attributes with wildcard pattern
+fn attrib_display_with_pattern(dir_path: &str, pattern: &str) {
+    let full_path = resolve_path(dir_path);
+    let mut offset = 0u32;
+
+    outln!("");
+
+    loop {
+        match fs::readdir(&full_path, offset) {
+            Ok(entry) => {
+                let name = entry.name_str();
+                if name != "." && name != ".." && wildcard_match(pattern, name) {
+                    let file_path = alloc::format!("{}\\{}", full_path.trim_end_matches('\\'), name);
+                    display_attributes(entry.attributes, &file_path);
+                }
+                offset = entry.next_offset;
+            }
+            Err(fs::FsStatus::NoMoreEntries) => break,
+            Err(_) => break,
+        }
+    }
+}
+
+/// Display file attributes in Windows format
+fn display_attributes(attrs: u32, path: &str) {
+    use fs::vfs::file_attrs;
+
+    let r = if attrs & file_attrs::ATTR_READONLY != 0 { 'R' } else { ' ' };
+    let a = if attrs & file_attrs::ATTR_ARCHIVE != 0 { 'A' } else { ' ' };
+    let s = if attrs & file_attrs::ATTR_SYSTEM != 0 { 'S' } else { ' ' };
+    let h = if attrs & file_attrs::ATTR_HIDDEN != 0 { 'H' } else { ' ' };
+
+    outln!("{}  {}{}{}{}   {}", ' ', a, s, h, r, path);
+}
+
+/// Split path into directory and pattern components
+fn split_path_pattern(path: &str) -> (alloc::string::String, &str) {
+    use alloc::string::String;
+
+    if let Some(last_sep) = path.rfind(|c| c == '\\' || c == '/') {
+        (String::from(&path[..last_sep + 1]), &path[last_sep + 1..])
+    } else {
+        (String::from(get_current_dir()), path)
+    }
+}
