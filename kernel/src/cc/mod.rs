@@ -787,6 +787,408 @@ pub unsafe fn cc_lazy_writer_tick() {
 }
 
 // ============================================================================
+// MDL Support
+// ============================================================================
+
+/// Buffer Control Block (BCB)
+///
+/// Returned from pin/map operations to track mapped data
+#[repr(C)]
+pub struct Bcb {
+    /// Type marker
+    pub node_type: u16,
+    /// Size of this structure
+    pub node_size: u16,
+    /// Owning shared cache map
+    pub shared_cache_map: *mut SharedCacheMap,
+    /// VACB index
+    pub vacb_index: usize,
+    /// Mapped address
+    pub mapped_address: usize,
+    /// Length of mapped region
+    pub length: u32,
+    /// Is this a pin (vs map)?
+    pub pinned: bool,
+    /// Is this dirty?
+    pub dirty: bool,
+}
+
+impl Default for Bcb {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Bcb {
+    pub const fn new() -> Self {
+        Self {
+            node_type: 0x2FD, // CACHE_NTC_BCB
+            node_size: core::mem::size_of::<Bcb>() as u16,
+            shared_cache_map: ptr::null_mut(),
+            vacb_index: 0,
+            mapped_address: 0,
+            length: 0,
+            pinned: false,
+            dirty: false,
+        }
+    }
+}
+
+/// BCB pool
+const MAX_BCBS: usize = 256;
+static mut BCB_POOL: [Bcb; MAX_BCBS] = {
+    const INIT: Bcb = Bcb::new();
+    [INIT; MAX_BCBS]
+};
+static mut BCB_BITMAP: [u64; 4] = [0; 4]; // 256 bits
+
+/// Allocate a BCB
+unsafe fn allocate_bcb() -> Option<*mut Bcb> {
+    for i in 0..4 {
+        if BCB_BITMAP[i] != !0u64 {
+            for bit in 0..64 {
+                if BCB_BITMAP[i] & (1 << bit) == 0 {
+                    BCB_BITMAP[i] |= 1 << bit;
+                    let idx = i * 64 + bit;
+                    return Some(&mut BCB_POOL[idx] as *mut Bcb);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Free a BCB
+unsafe fn free_bcb(bcb: *mut Bcb) {
+    let base = BCB_POOL.as_ptr() as usize;
+    let bcb_addr = bcb as usize;
+    let bcb_size = core::mem::size_of::<Bcb>();
+
+    if bcb_addr >= base && bcb_addr < base + MAX_BCBS * bcb_size {
+        let idx = (bcb_addr - base) / bcb_size;
+        let bitmap_idx = idx / 64;
+        let bit = idx % 64;
+        BCB_BITMAP[bitmap_idx] &= !(1 << bit);
+    }
+}
+
+/// Pin data for exclusive write access
+///
+/// Pins the data in memory and returns a BCB for later release.
+pub unsafe fn cc_pin_read(
+    cache_map: *mut SharedCacheMap,
+    file_offset: u64,
+    length: u32,
+    flags: u32,
+    bcb: *mut *mut Bcb,
+    buffer: *mut *mut u8,
+) -> bool {
+    if cache_map.is_null() || bcb.is_null() || buffer.is_null() {
+        return false;
+    }
+
+    let map = &mut *cache_map;
+    let _wait = (flags & 1) != 0; // PIN_WAIT flag
+
+    // Get VACB
+    let vacb_idx = match map.get_vacb_index(file_offset) {
+        Some(idx) => idx,
+        None => return false,
+    };
+
+    let vacb = &map.vacbs[vacb_idx];
+    if vacb.base_address == 0 {
+        return false;
+    }
+
+    // Allocate BCB
+    let new_bcb = match allocate_bcb() {
+        Some(b) => b,
+        None => return false,
+    };
+
+    let vacb_offset = (file_offset - vacb.file_offset) as usize;
+
+    (*new_bcb).shared_cache_map = cache_map;
+    (*new_bcb).vacb_index = vacb_idx;
+    (*new_bcb).mapped_address = vacb.base_address + vacb_offset;
+    (*new_bcb).length = length;
+    (*new_bcb).pinned = true;
+    (*new_bcb).dirty = false;
+
+    *bcb = new_bcb;
+    *buffer = (*new_bcb).mapped_address as *mut u8;
+
+    true
+}
+
+/// Set dirty flag on a pinned BCB
+pub unsafe fn cc_set_dirty_pinned_data(bcb: *mut Bcb, _lsn: Option<u64>) {
+    if !bcb.is_null() {
+        (*bcb).dirty = true;
+
+        // Also mark the VACB as dirty
+        if !(*bcb).shared_cache_map.is_null() {
+            let map = &mut *(*bcb).shared_cache_map;
+            if let Some(vacb) = map.vacb_mut((*bcb).vacb_index) {
+                let start_offset = (*bcb).mapped_address - vacb.base_address;
+                let start_page = start_offset / CACHE_PAGE_SIZE;
+                let end_page = (start_offset + (*bcb).length as usize - 1) / CACHE_PAGE_SIZE;
+
+                for page in start_page..=end_page {
+                    vacb.mark_dirty(page);
+                    vacb.mark_valid(page);
+                }
+            }
+        }
+    }
+}
+
+/// Unpin data previously pinned with cc_pin_read
+pub unsafe fn cc_unpin_data_ex(bcb: *mut Bcb, release_from_lazy_write: bool) {
+    if bcb.is_null() {
+        return;
+    }
+
+    // Release the VACB reference
+    if !(*bcb).shared_cache_map.is_null() {
+        let map = &mut *(*bcb).shared_cache_map;
+        map.release_vacb((*bcb).vacb_index);
+    }
+
+    let _ = release_from_lazy_write;
+
+    // Free the BCB
+    free_bcb(bcb);
+}
+
+/// Map data for read-only access (doesn't pin)
+pub unsafe fn cc_map_data_ex(
+    cache_map: *mut SharedCacheMap,
+    file_offset: u64,
+    length: u32,
+    flags: u32,
+    bcb: *mut *mut Bcb,
+    buffer: *mut *mut u8,
+) -> bool {
+    if cache_map.is_null() || bcb.is_null() || buffer.is_null() {
+        return false;
+    }
+
+    let map = &mut *cache_map;
+    let _wait = (flags & 1) != 0;
+
+    // Get VACB
+    let vacb_idx = match map.get_vacb_index(file_offset) {
+        Some(idx) => idx,
+        None => return false,
+    };
+
+    let vacb = &map.vacbs[vacb_idx];
+    if vacb.base_address == 0 {
+        return false;
+    }
+
+    // Allocate BCB
+    let new_bcb = match allocate_bcb() {
+        Some(b) => b,
+        None => return false,
+    };
+
+    let vacb_offset = (file_offset - vacb.file_offset) as usize;
+
+    (*new_bcb).shared_cache_map = cache_map;
+    (*new_bcb).vacb_index = vacb_idx;
+    (*new_bcb).mapped_address = vacb.base_address + vacb_offset;
+    (*new_bcb).length = length;
+    (*new_bcb).pinned = false;
+    (*new_bcb).dirty = false;
+
+    *bcb = new_bcb;
+    *buffer = (*new_bcb).mapped_address as *mut u8;
+
+    true
+}
+
+/// Prepare MDL for cached write
+pub unsafe fn cc_prepare_mdl_write(
+    cache_map: *mut SharedCacheMap,
+    file_offset: u64,
+    length: u32,
+) -> bool {
+    if cache_map.is_null() || length == 0 {
+        return false;
+    }
+
+    let map = &mut *cache_map;
+
+    // Ensure we have VACBs for the entire range
+    let mut offset = file_offset;
+    let end_offset = file_offset + length as u64;
+
+    while offset < end_offset {
+        if map.get_vacb_index(offset).is_none() {
+            return false;
+        }
+        offset += VACB_MAPPING_SIZE as u64;
+    }
+
+    true
+}
+
+/// Complete MDL write
+pub unsafe fn cc_mdl_write_complete(
+    cache_map: *mut SharedCacheMap,
+    file_offset: u64,
+    length: u32,
+) {
+    if cache_map.is_null() || length == 0 {
+        return;
+    }
+
+    let map = &mut *cache_map;
+
+    // Mark all pages in range as dirty
+    let mut offset = file_offset;
+    let end_offset = file_offset + length as u64;
+
+    while offset < end_offset {
+        if let Some(vacb_idx) = map.get_vacb_index(offset) {
+            let vacb = &mut map.vacbs[vacb_idx];
+            let vacb_offset = (offset - vacb.file_offset) as usize;
+            let page_idx = vacb_offset / CACHE_PAGE_SIZE;
+            vacb.mark_dirty(page_idx);
+            vacb.mark_valid(page_idx);
+            map.release_vacb(vacb_idx);
+        }
+        offset += CACHE_PAGE_SIZE as u64;
+    }
+}
+
+// ============================================================================
+// Zero Data Support
+// ============================================================================
+
+/// Zero a range of cached data
+pub unsafe fn cc_zero_data(
+    cache_map: *mut SharedCacheMap,
+    start_offset: u64,
+    end_offset: u64,
+) -> bool {
+    if cache_map.is_null() || end_offset <= start_offset {
+        return false;
+    }
+
+    let map = &mut *cache_map;
+    let mut offset = start_offset;
+
+    while offset < end_offset {
+        if let Some(vacb_idx) = map.get_vacb_index(offset) {
+            let vacb = &mut map.vacbs[vacb_idx];
+
+            if vacb.base_address != 0 {
+                let vacb_start = vacb.file_offset;
+                let range_start = offset.saturating_sub(vacb_start) as usize;
+                let range_end = ((end_offset - vacb_start) as usize).min(VACB_MAPPING_SIZE);
+
+                let zero_len = range_end.saturating_sub(range_start);
+                let dst = (vacb.base_address + range_start) as *mut u8;
+                core::ptr::write_bytes(dst, 0, zero_len);
+
+                // Mark pages as dirty
+                let start_page = range_start / CACHE_PAGE_SIZE;
+                let end_page = (range_end - 1) / CACHE_PAGE_SIZE;
+                for page in start_page..=end_page {
+                    vacb.mark_dirty(page);
+                    vacb.mark_valid(page);
+                }
+            }
+
+            map.release_vacb(vacb_idx);
+        }
+
+        offset = (offset + VACB_MAPPING_SIZE as u64) & !(VACB_MAPPING_SIZE as u64 - 1);
+    }
+
+    true
+}
+
+// ============================================================================
+// Deferred Write Support
+// ============================================================================
+
+/// Check if there's enough memory for a cached write
+pub fn cc_can_i_write(
+    _cache_map: *mut SharedCacheMap,
+    bytes_to_write: u32,
+    _wait: bool,
+    _retrying: bool,
+) -> bool {
+    // Simple check - allow writes under 1MB
+    bytes_to_write <= 1024 * 1024
+}
+
+/// Schedule a deferred write callback
+pub fn cc_defer_write(
+    _cache_map: *mut SharedCacheMap,
+    _bytes_to_write: u32,
+    _retrying: bool,
+    _post_routine: fn(),
+    _context: *mut u8,
+) {
+    // Stub - would queue a work item in full implementation
+}
+
+// ============================================================================
+// Inspection Support
+// ============================================================================
+
+/// Cache Manager snapshot for diagnostics
+#[derive(Debug, Clone, Copy)]
+pub struct CacheSnapshot {
+    pub index: usize,
+    pub file_size: u64,
+    pub active_vacbs: u32,
+    pub dirty_pages: u32,
+}
+
+/// Get snapshots of active cache maps
+pub fn cc_get_cache_snapshots(max_count: usize) -> ([CacheSnapshot; 32], usize) {
+    let mut snapshots = [CacheSnapshot {
+        index: 0,
+        file_size: 0,
+        active_vacbs: 0,
+        dirty_pages: 0,
+    }; 32];
+    let mut count = 0;
+
+    unsafe {
+        let _guard = CACHE_LOCK.lock();
+
+        for i in 0..MAX_CACHED_FILES {
+            if count >= max_count || count >= 32 {
+                break;
+            }
+
+            if CACHE_MAP_BITMAP & (1 << i) != 0 {
+                let map = &CACHE_MAP_POOL[i];
+                let stats = map.get_stats();
+
+                snapshots[count] = CacheSnapshot {
+                    index: i,
+                    file_size: stats.file_size,
+                    active_vacbs: stats.active_vacbs,
+                    dirty_pages: stats.dirty_pages,
+                };
+                count += 1;
+            }
+        }
+    }
+
+    (snapshots, count)
+}
+
+// ============================================================================
 // Initialization
 // ============================================================================
 
@@ -799,6 +1201,11 @@ pub fn init() {
 
         for map in CACHE_MAP_POOL.iter_mut() {
             map.valid = false;
+        }
+
+        // Initialize BCB pool
+        for i in 0..4 {
+            BCB_BITMAP[i] = 0;
         }
     }
 

@@ -591,3 +591,396 @@ pub fn device_busy(_handle: u32) {
 pub fn device_idle(_handle: u32) {
     // TODO: Implement
 }
+
+// ============================================================================
+// Power Notifications
+// ============================================================================
+
+/// Power broadcast event types
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PowerBroadcast {
+    /// Query for permission to suspend
+    QuerySuspend = 0,
+    /// Query for permission to suspend denied
+    QuerySuspendFailed = 2,
+    /// Resume from suspend (automatic)
+    ResumeAutomatic = 18,
+    /// Resume from suspend (user input)
+    ResumeSuspend = 7,
+    /// Resume from critical suspend
+    ResumeCritical = 6,
+    /// Suspend initiated
+    Suspend = 4,
+    /// AC/DC power source change
+    PowerStatusChange = 10,
+    /// Battery status change
+    BatteryLow = 9,
+    /// Power setting change
+    PowerSettingChange = 32787,
+}
+
+/// Maximum number of power notification callbacks
+const MAX_POWER_CALLBACKS: usize = 32;
+
+/// Power notification callback type
+pub type PowerNotificationCallback = fn(event: PowerBroadcast, data: usize);
+
+/// Power notification registrations
+static mut POWER_CALLBACKS: [Option<PowerNotificationCallback>; MAX_POWER_CALLBACKS] = [None; MAX_POWER_CALLBACKS];
+static POWER_CALLBACK_LOCK: Mutex<()> = Mutex::new(());
+
+/// Register for power notifications
+///
+/// Returns a handle to unregister, or None if registration fails
+pub fn register_power_notification(callback: PowerNotificationCallback) -> Option<usize> {
+    let _guard = POWER_CALLBACK_LOCK.lock();
+
+    unsafe {
+        for (i, slot) in POWER_CALLBACKS.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(callback);
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+/// Unregister power notification
+pub fn unregister_power_notification(handle: usize) {
+    let _guard = POWER_CALLBACK_LOCK.lock();
+
+    if handle < MAX_POWER_CALLBACKS {
+        unsafe {
+            POWER_CALLBACKS[handle] = None;
+        }
+    }
+}
+
+/// Broadcast power event to registered callbacks
+fn broadcast_power_event(event: PowerBroadcast, data: usize) {
+    let _guard = POWER_CALLBACK_LOCK.lock();
+
+    unsafe {
+        for callback in POWER_CALLBACKS.iter().flatten() {
+            callback(event, data);
+        }
+    }
+}
+
+// ============================================================================
+// Battery Status
+// ============================================================================
+
+/// Battery status information
+#[derive(Debug, Clone, Copy)]
+pub struct BatteryStatus {
+    /// Battery present
+    pub present: bool,
+    /// Battery charging
+    pub charging: bool,
+    /// Battery discharging
+    pub discharging: bool,
+    /// Battery level (0-100%)
+    pub level: u8,
+    /// Estimated remaining time in minutes (0 = unknown)
+    pub remaining_time: u32,
+    /// Full charge capacity (mWh)
+    pub full_capacity: u32,
+    /// Current capacity (mWh)
+    pub current_capacity: u32,
+    /// Voltage (mV)
+    pub voltage: u32,
+    /// Current draw (mA)
+    pub current: i32,
+}
+
+impl Default for BatteryStatus {
+    fn default() -> Self {
+        Self {
+            present: false,
+            charging: false,
+            discharging: false,
+            level: 100,
+            remaining_time: 0,
+            full_capacity: 0,
+            current_capacity: 0,
+            voltage: 0,
+            current: 0,
+        }
+    }
+}
+
+/// Current battery status
+static BATTERY_STATUS: Mutex<BatteryStatus> = Mutex::new(BatteryStatus {
+    present: false,
+    charging: false,
+    discharging: false,
+    level: 100,
+    remaining_time: 0,
+    full_capacity: 0,
+    current_capacity: 0,
+    voltage: 0,
+    current: 0,
+});
+
+/// Get current battery status
+pub fn get_battery_status() -> BatteryStatus {
+    *BATTERY_STATUS.lock()
+}
+
+/// Update battery status (called by ACPI/battery driver)
+pub fn update_battery_status(status: BatteryStatus) {
+    let old_level = BATTERY_STATUS.lock().level;
+    *BATTERY_STATUS.lock() = status;
+
+    // Check for low battery and broadcast if needed
+    if status.level <= 10 && old_level > 10 {
+        broadcast_power_event(PowerBroadcast::BatteryLow, status.level as usize);
+    }
+}
+
+// ============================================================================
+// Power Statistics
+// ============================================================================
+
+/// Power manager statistics
+#[derive(Debug, Clone, Copy)]
+pub struct PowerStats {
+    /// Total sleep events
+    pub sleep_count: u32,
+    /// Total wake events
+    pub wake_count: u32,
+    /// Total hibernate events
+    pub hibernate_count: u32,
+    /// Total shutdown events
+    pub shutdown_count: u32,
+    /// Current uptime in seconds
+    pub uptime_seconds: u64,
+    /// Total S1 time in seconds
+    pub s1_time: u64,
+    /// Total S3 time in seconds
+    pub s3_time: u64,
+    /// Total S4 time in seconds
+    pub s4_time: u64,
+    /// Last sleep timestamp
+    pub last_sleep_time: u64,
+    /// Last wake timestamp
+    pub last_wake_time: u64,
+}
+
+impl Default for PowerStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PowerStats {
+    pub const fn new() -> Self {
+        Self {
+            sleep_count: 0,
+            wake_count: 0,
+            hibernate_count: 0,
+            shutdown_count: 0,
+            uptime_seconds: 0,
+            s1_time: 0,
+            s3_time: 0,
+            s4_time: 0,
+            last_sleep_time: 0,
+            last_wake_time: 0,
+        }
+    }
+}
+
+/// Global power statistics
+static POWER_STATS: Mutex<PowerStats> = Mutex::new(PowerStats::new());
+
+/// Get power statistics
+pub fn get_power_stats() -> PowerStats {
+    *POWER_STATS.lock()
+}
+
+/// Record a power event for statistics
+fn record_power_event(state: SystemPowerState) {
+    let mut stats = POWER_STATS.lock();
+
+    match state {
+        SystemPowerState::Sleeping1 |
+        SystemPowerState::Sleeping2 |
+        SystemPowerState::Sleeping3 => {
+            stats.sleep_count += 1;
+            stats.last_sleep_time = crate::rtl::rtl_get_system_time() as u64;
+        }
+        SystemPowerState::Hibernate => {
+            stats.hibernate_count += 1;
+        }
+        SystemPowerState::Shutdown => {
+            stats.shutdown_count += 1;
+        }
+        SystemPowerState::Working => {
+            // Resume from sleep
+            stats.wake_count += 1;
+            stats.last_wake_time = crate::rtl::rtl_get_system_time() as u64;
+        }
+        _ => {}
+    }
+}
+
+// ============================================================================
+// Device Power State Management
+// ============================================================================
+
+/// Device power state entry
+#[derive(Debug, Clone, Copy)]
+pub struct DevicePowerEntry {
+    /// Device object pointer
+    pub device: usize,
+    /// Current power state
+    pub state: DevicePowerState,
+    /// Target power state (during transition)
+    pub target_state: DevicePowerState,
+    /// Device is in transition
+    pub transitioning: bool,
+}
+
+impl DevicePowerEntry {
+    pub const fn new() -> Self {
+        Self {
+            device: 0,
+            state: DevicePowerState::D0,
+            target_state: DevicePowerState::D0,
+            transitioning: false,
+        }
+    }
+}
+
+/// Maximum tracked devices
+const MAX_POWER_DEVICES: usize = 64;
+
+/// Device power state tracking
+static mut DEVICE_POWER_STATES: [DevicePowerEntry; MAX_POWER_DEVICES] = [DevicePowerEntry::new(); MAX_POWER_DEVICES];
+static DEVICE_POWER_LOCK: Mutex<()> = Mutex::new(());
+
+/// Register a device for power management
+pub fn register_device_power(device: usize) -> Option<usize> {
+    let _guard = DEVICE_POWER_LOCK.lock();
+
+    unsafe {
+        for (i, entry) in DEVICE_POWER_STATES.iter_mut().enumerate() {
+            if entry.device == 0 {
+                entry.device = device;
+                entry.state = DevicePowerState::D0;
+                entry.target_state = DevicePowerState::D0;
+                entry.transitioning = false;
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+/// Unregister a device from power management
+pub fn unregister_device_power(device: usize) {
+    let _guard = DEVICE_POWER_LOCK.lock();
+
+    unsafe {
+        for entry in DEVICE_POWER_STATES.iter_mut() {
+            if entry.device == device {
+                entry.device = 0;
+                break;
+            }
+        }
+    }
+}
+
+/// Set device power state
+pub fn set_device_power_state(device: usize, state: DevicePowerState) -> bool {
+    let _guard = DEVICE_POWER_LOCK.lock();
+
+    unsafe {
+        for entry in DEVICE_POWER_STATES.iter_mut() {
+            if entry.device == device {
+                entry.target_state = state;
+                entry.transitioning = true;
+                // In a full implementation, this would send a power IRP
+                entry.state = state;
+                entry.transitioning = false;
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Get device power state
+pub fn get_device_power_state(device: usize) -> Option<DevicePowerState> {
+    let _guard = DEVICE_POWER_LOCK.lock();
+
+    unsafe {
+        for entry in DEVICE_POWER_STATES.iter() {
+            if entry.device == device {
+                return Some(entry.state);
+            }
+        }
+    }
+    None
+}
+
+/// Get count of devices in each power state
+pub fn get_device_power_state_counts() -> [u32; 5] {
+    let mut counts = [0u32; 5];
+    let _guard = DEVICE_POWER_LOCK.lock();
+
+    unsafe {
+        for entry in DEVICE_POWER_STATES.iter() {
+            if entry.device != 0 {
+                let idx = entry.state as usize;
+                if idx < 5 {
+                    counts[idx] += 1;
+                }
+            }
+        }
+    }
+
+    counts
+}
+
+// ============================================================================
+// Power Snapshot for Diagnostics
+// ============================================================================
+
+/// Power manager snapshot for shell diagnostics
+#[derive(Debug, Clone, Copy)]
+pub struct PowerSnapshot {
+    /// Current system power state
+    pub system_state: SystemPowerState,
+    /// Power flags
+    pub flags: u32,
+    /// Processor throttle level
+    pub throttle: u8,
+    /// Battery level
+    pub battery_level: u8,
+    /// Battery present
+    pub battery_present: bool,
+    /// AC power
+    pub ac_power: bool,
+    /// Device power state counts [Unspec, D0, D1, D2, D3]
+    pub device_counts: [u32; 5],
+}
+
+/// Get power manager snapshot
+pub fn get_power_snapshot() -> PowerSnapshot {
+    let battery = get_battery_status();
+    let device_counts = get_device_power_state_counts();
+
+    PowerSnapshot {
+        system_state: get_system_power_state(),
+        flags: PO_FLAGS.load(Ordering::SeqCst),
+        throttle: get_processor_throttle(),
+        battery_level: battery.level,
+        battery_present: battery.present,
+        ac_power: is_ac_power(),
+        device_counts,
+    }
+}

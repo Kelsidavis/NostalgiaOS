@@ -33,6 +33,7 @@
 pub mod avl;
 pub mod bitmap;
 pub mod checksum;
+pub mod compress;
 pub mod image;
 pub mod memory;
 pub mod random;
@@ -45,6 +46,7 @@ pub mod time;
 pub use avl::*;
 pub use bitmap::*;
 pub use checksum::*;
+pub use compress::*;
 pub use image::*;
 pub use memory::*;
 pub use random::*;
