@@ -30,10 +30,12 @@
 //! }
 //! ```
 
+pub mod atom;
 pub mod avl;
 pub mod bitmap;
 pub mod checksum;
 pub mod compress;
+pub mod gen8dot3;
 pub mod image;
 pub mod memory;
 pub mod random;
@@ -43,10 +45,12 @@ pub mod time;
 // pub mod splay;  // TODO: Splay trees
 
 // Re-exports for convenience
+pub use atom::*;
 pub use avl::*;
 pub use bitmap::*;
 pub use checksum::*;
 pub use compress::*;
+pub use gen8dot3::*;
 pub use image::*;
 pub use memory::*;
 pub use random::*;
