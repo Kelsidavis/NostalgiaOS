@@ -15268,6 +15268,7 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  tftp       Download file via TFTP");
         outln!("  ftp        FTP file transfer");
         outln!("  syslog     Configure syslog client");
+        outln!("  smtp       SMTP email notifications");
         return;
     }
 
@@ -16617,6 +16618,107 @@ pub fn cmd_netinfo(args: &[&str]) {
         } else {
             outln!("Unknown syslog command: {}", args[1]);
             outln!("Use 'netinfo syslog' for help");
+        }
+    } else if eq_ignore_case(args[0], "smtp") {
+        // SMTP email notifications
+        if args.len() < 2 {
+            outln!("Usage: netinfo smtp <command> [args]");
+            outln!("");
+            outln!("Commands:");
+            outln!("  stats                Show SMTP statistics");
+            outln!("  test <ip> <to>       Send test email");
+            return;
+        }
+
+        if eq_ignore_case(args[1], "stats") {
+            let stats = net::smtp::get_stats();
+            outln!("SMTP Statistics:");
+            outln!("  Connections: {}", stats.connections);
+            outln!("  Messages sent: {}", stats.messages_sent);
+            outln!("  Bytes sent: {}", stats.bytes_sent);
+            outln!("  Errors: {}", stats.errors);
+            outln!("");
+            if net::smtp::is_configured() {
+                outln!("  Status: Configured");
+            } else {
+                outln!("  Status: Not configured");
+            }
+        } else if eq_ignore_case(args[1], "test") {
+            if args.len() < 4 {
+                outln!("Usage: netinfo smtp test <server_ip> <to_address>");
+                return;
+            }
+
+            // Find a device with IP
+            let device_idx = (0..net::get_device_count())
+                .find(|&i| net::get_device(i).map(|d| d.ip_address.is_some()).unwrap_or(false))
+                .unwrap_or(0);
+
+            // Parse IP address
+            let ip_str = args[2];
+            let mut octets = [0u8; 4];
+            let mut octet_idx = 0;
+            let mut current: u16 = 0;
+            let mut valid = true;
+
+            for c in ip_str.chars() {
+                if c == '.' {
+                    if current > 255 || octet_idx >= 3 {
+                        valid = false;
+                        break;
+                    }
+                    octets[octet_idx] = current as u8;
+                    octet_idx += 1;
+                    current = 0;
+                } else if let Some(digit) = c.to_digit(10) {
+                    current = current * 10 + digit as u16;
+                } else {
+                    valid = false;
+                    break;
+                }
+            }
+
+            if valid && octet_idx == 3 && current <= 255 {
+                octets[3] = current as u8;
+            } else {
+                outln!("Invalid IP address: {}", args[2]);
+                return;
+            }
+
+            let server_ip = net::ip::Ipv4Address::new(octets);
+            let to_address = args[3];
+
+            outln!("Sending test email via {:?}...", server_ip);
+
+            let mut session = net::smtp::SmtpSession::new(device_idx, server_ip);
+            match session.connect() {
+                Ok(_) => outln!("  Connected to SMTP server"),
+                Err(e) => {
+                    outln!("  Connection failed: {}", e);
+                    return;
+                }
+            }
+
+            match session.hello() {
+                Ok(_) => outln!("  EHLO/HELO successful"),
+                Err(e) => {
+                    outln!("  HELO failed: {}", e);
+                    return;
+                }
+            }
+
+            match session.send_mail(
+                "nostalgos@localhost",
+                to_address,
+                "Test from Nostalgos",
+                "This is a test email from Nostalgos kernel.",
+            ) {
+                Ok(_) => outln!("  Email sent successfully!"),
+                Err(e) => outln!("  Send failed: {}", e),
+            }
+        } else {
+            outln!("Unknown SMTP command: {}", args[1]);
+            outln!("Use 'netinfo smtp' for help");
         }
     } else {
         outln!("Unknown command: {}", args[0]);
