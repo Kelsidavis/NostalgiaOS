@@ -14,6 +14,7 @@ pub mod ethernet;
 pub mod arp;
 pub mod ip;
 pub mod icmp;
+pub mod udp;
 pub mod loopback;
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -94,6 +95,7 @@ pub fn init() {
     // Initialize sub-modules
     arp::init();
     icmp::init();
+    udp::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 
@@ -263,10 +265,9 @@ fn handle_ip_packet(
             );
         }
         IpProtocol::Udp => {
-            crate::serial_println!(
-                "[NET] UDP packet from {:?} (not yet handled)",
-                ip_header.source_addr
-            );
+            if let Some(udp_header) = udp::parse_udp_packet(ip_payload) {
+                udp::handle_udp_packet(device_index, ip_header, &udp_header, ip_payload);
+            }
         }
         _ => {
             crate::serial_println!(

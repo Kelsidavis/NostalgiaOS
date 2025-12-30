@@ -15227,6 +15227,8 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  arp        Show ARP cache");
         outln!("  ping <ip>  Send ICMP echo request");
         outln!("  loopback   Process loopback queue");
+        outln!("  udp        Show UDP socket status");
+        outln!("  udpsend    Send UDP test packet");
         return;
     }
 
@@ -15245,6 +15247,10 @@ pub fn cmd_netinfo(args: &[&str]) {
             let (queued, _) = net::loopback::get_queue_stats();
             outln!("  Loopback: Device {} ({} packets queued)", idx, queued);
         }
+
+        // Show UDP info
+        let (udp_active, udp_max) = net::udp::get_socket_stats();
+        outln!("  UDP Sockets: {}/{}", udp_active, udp_max);
         outln!("");
 
         // Show global stats summary
@@ -15406,6 +15412,93 @@ pub fn cmd_netinfo(args: &[&str]) {
         } else {
             outln!("  Loopback device not initialized");
         }
+    } else if eq_ignore_case(args[0], "udp") {
+        outln!("UDP Socket Status:");
+        outln!("");
+
+        let (active, max) = net::udp::get_socket_stats();
+        outln!("  Active Sockets: {}/{}", active, max);
+        outln!("");
+
+        if active > 0 {
+            outln!("  ID  State   Port   Pending");
+            outln!("  --  -----   ----   -------");
+            for i in 0..max {
+                if let Some((state, port, pending)) = net::udp::get_socket_info(i) {
+                    if state != net::udp::UdpSocketState::Closed {
+                        outln!("  {:2}  {:?}  {:5}  {}", i, state, port, pending);
+                    }
+                }
+            }
+        }
+    } else if eq_ignore_case(args[0], "udpsend") {
+        // Usage: netinfo udpsend <dst_ip> <dst_port> <message>
+        if args.len() < 4 {
+            outln!("Usage: netinfo udpsend <ip> <port> <message>");
+            outln!("  Example: netinfo udpsend 127.0.0.1 5000 hello");
+            return;
+        }
+
+        // Parse IP address
+        let ip_str = args[1];
+        let mut octets = [0u8; 4];
+        let mut octet_idx = 0;
+        let mut current = 0u32;
+
+        for c in ip_str.chars() {
+            if c == '.' {
+                if octet_idx >= 3 || current > 255 {
+                    outln!("Invalid IP address format");
+                    return;
+                }
+                octets[octet_idx] = current as u8;
+                octet_idx += 1;
+                current = 0;
+            } else if let Some(d) = c.to_digit(10) {
+                current = current * 10 + d;
+            } else {
+                outln!("Invalid IP address format");
+                return;
+            }
+        }
+        if octet_idx != 3 || current > 255 {
+            outln!("Invalid IP address format");
+            return;
+        }
+        octets[3] = current as u8;
+        let dst_ip = net::Ipv4Address::new(octets);
+
+        // Parse port
+        let port: u16 = match args[2].parse() {
+            Ok(p) => p,
+            Err(_) => {
+                outln!("Invalid port number");
+                return;
+            }
+        };
+
+        // Get message
+        let message = args[3];
+
+        outln!("Sending UDP to {:?}:{}", dst_ip, port);
+
+        // Create socket
+        let socket = match net::udp::socket_create() {
+            Some(s) => s,
+            None => {
+                outln!("  Failed to create socket");
+                return;
+            }
+        };
+
+        // Send data
+        match net::udp::socket_sendto(socket, 0, dst_ip, port, message.as_bytes()) {
+            Ok(sent) => outln!("  Sent {} bytes", sent),
+            Err(e) => outln!("  Failed: {}", e),
+        }
+
+        // Close socket
+        let _ = net::udp::socket_close(socket);
     } else {
         outln!("Unknown command: {}", args[0]);
         outln!("Use 'netinfo' for help");
