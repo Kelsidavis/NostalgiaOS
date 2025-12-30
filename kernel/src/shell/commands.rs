@@ -3930,6 +3930,7 @@ pub fn cmd_io(args: &[&str]) {
         outln!("  ramdisk            Show RAM disk status");
         outln!("  pipes              Show named pipe status");
         outln!("  iocp               Show I/O completion ports");
+        outln!("  pnp                Show Plug and Play device tree");
         return;
     }
 
@@ -4025,6 +4026,29 @@ pub fn cmd_io(args: &[&str]) {
         outln!("Max queued completions: {}", io::MAX_QUEUED_COMPLETIONS);
         outln!("");
         outln!("(Detailed IOCP status not yet implemented)");
+    } else if eq_ignore_case(cmd, "pnp") {
+        outln!("Plug and Play Manager");
+        outln!("");
+
+        let (enumerated, started, removed) = io::pnp_get_stats();
+        outln!("PnP Statistics:");
+        outln!("  Devices enumerated:  {}", enumerated);
+        outln!("  Devices started:     {}", started);
+        outln!("  Devices removed:     {}", removed);
+        outln!("");
+
+        let count = io::device_node_count();
+        outln!("Device Tree: {} nodes", count);
+        outln!("");
+
+        if count > 0 {
+            outln!("{:<5} {:<30} {:<12}", "Idx", "Instance ID", "State");
+            outln!("--------------------------------------------------");
+            for snap in io::get_device_node_snapshots() {
+                let state = io::device_state_name(snap.state);
+                outln!("{:<5} {:<30} {:<12}", snap.index, snap.instance_id, state);
+            }
+        }
     } else {
         outln!("Unknown io command: {}", cmd);
     }

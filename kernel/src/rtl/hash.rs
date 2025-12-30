@@ -628,6 +628,121 @@ pub fn sha256(data: &[u8]) -> [u8; SHA256_DIGEST_SIZE] {
     ctx.finalize()
 }
 
+// ============================================================================
+// HMAC - Hash-based Message Authentication Code (RFC 2104)
+// ============================================================================
+
+/// HMAC block size (same for MD5, SHA-1, SHA-256)
+const HMAC_BLOCK_SIZE: usize = 64;
+
+/// HMAC inner pad byte
+const HMAC_IPAD: u8 = 0x36;
+
+/// HMAC outer pad byte
+const HMAC_OPAD: u8 = 0x5c;
+
+/// Compute HMAC-MD5
+pub fn hmac_md5(key: &[u8], data: &[u8]) -> [u8; MD5_DIGEST_SIZE] {
+    let mut k_ipad = [0u8; HMAC_BLOCK_SIZE];
+    let mut k_opad = [0u8; HMAC_BLOCK_SIZE];
+
+    // If key > block size, hash it first
+    if key.len() > HMAC_BLOCK_SIZE {
+        let hashed_key = md5(key);
+        k_ipad[..MD5_DIGEST_SIZE].copy_from_slice(&hashed_key);
+        k_opad[..MD5_DIGEST_SIZE].copy_from_slice(&hashed_key);
+    } else {
+        k_ipad[..key.len()].copy_from_slice(key);
+        k_opad[..key.len()].copy_from_slice(key);
+    }
+
+    // XOR with pads
+    for i in 0..HMAC_BLOCK_SIZE {
+        k_ipad[i] ^= HMAC_IPAD;
+        k_opad[i] ^= HMAC_OPAD;
+    }
+
+    // Inner hash: H(K ^ ipad || message)
+    let mut inner_ctx = Md5Context::new();
+    inner_ctx.update(&k_ipad);
+    inner_ctx.update(data);
+    let inner_hash = inner_ctx.finalize();
+
+    // Outer hash: H(K ^ opad || inner_hash)
+    let mut outer_ctx = Md5Context::new();
+    outer_ctx.update(&k_opad);
+    outer_ctx.update(&inner_hash);
+    outer_ctx.finalize()
+}
+
+/// Compute HMAC-SHA1
+pub fn hmac_sha1(key: &[u8], data: &[u8]) -> [u8; SHA1_DIGEST_SIZE] {
+    let mut k_ipad = [0u8; HMAC_BLOCK_SIZE];
+    let mut k_opad = [0u8; HMAC_BLOCK_SIZE];
+
+    // If key > block size, hash it first
+    if key.len() > HMAC_BLOCK_SIZE {
+        let hashed_key = sha1(key);
+        k_ipad[..SHA1_DIGEST_SIZE].copy_from_slice(&hashed_key);
+        k_opad[..SHA1_DIGEST_SIZE].copy_from_slice(&hashed_key);
+    } else {
+        k_ipad[..key.len()].copy_from_slice(key);
+        k_opad[..key.len()].copy_from_slice(key);
+    }
+
+    // XOR with pads
+    for i in 0..HMAC_BLOCK_SIZE {
+        k_ipad[i] ^= HMAC_IPAD;
+        k_opad[i] ^= HMAC_OPAD;
+    }
+
+    // Inner hash: H(K ^ ipad || message)
+    let mut inner_ctx = Sha1Context::new();
+    inner_ctx.update(&k_ipad);
+    inner_ctx.update(data);
+    let inner_hash = inner_ctx.finalize();
+
+    // Outer hash: H(K ^ opad || inner_hash)
+    let mut outer_ctx = Sha1Context::new();
+    outer_ctx.update(&k_opad);
+    outer_ctx.update(&inner_hash);
+    outer_ctx.finalize()
+}
+
+/// Compute HMAC-SHA256
+pub fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; SHA256_DIGEST_SIZE] {
+    let mut k_ipad = [0u8; HMAC_BLOCK_SIZE];
+    let mut k_opad = [0u8; HMAC_BLOCK_SIZE];
+
+    // If key > block size, hash it first
+    if key.len() > HMAC_BLOCK_SIZE {
+        let hashed_key = sha256(key);
+        k_ipad[..SHA256_DIGEST_SIZE].copy_from_slice(&hashed_key);
+        k_opad[..SHA256_DIGEST_SIZE].copy_from_slice(&hashed_key);
+    } else {
+        k_ipad[..key.len()].copy_from_slice(key);
+        k_opad[..key.len()].copy_from_slice(key);
+    }
+
+    // XOR with pads
+    for i in 0..HMAC_BLOCK_SIZE {
+        k_ipad[i] ^= HMAC_IPAD;
+        k_opad[i] ^= HMAC_OPAD;
+    }
+
+    // Inner hash: H(K ^ ipad || message)
+    let mut inner_ctx = Sha256Context::new();
+    inner_ctx.update(&k_ipad);
+    inner_ctx.update(data);
+    let inner_hash = inner_ctx.finalize();
+
+    // Outer hash: H(K ^ opad || inner_hash)
+    let mut outer_ctx = Sha256Context::new();
+    outer_ctx.update(&k_opad);
+    outer_ctx.update(&inner_hash);
+    outer_ctx.finalize()
+}
+
 /// Format hash as hexadecimal string
 pub fn hash_to_hex(hash: &[u8], buf: &mut [u8]) -> usize {
     const HEX: &[u8; 16] = b"0123456789abcdef";
@@ -700,6 +815,45 @@ mod tests {
             0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
             0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
             0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+        ]);
+    }
+
+    #[test]
+    fn test_hmac_md5() {
+        // RFC 2104 test vector
+        let key = [0x0bu8; 16];
+        let data = b"Hi There";
+        let hash = hmac_md5(&key, data);
+        assert_eq!(hash, [
+            0x92, 0x94, 0x72, 0x7a, 0x36, 0x38, 0xbb, 0x1c,
+            0x13, 0xf4, 0x8e, 0xf8, 0x15, 0x8b, 0xfc, 0x9d,
+        ]);
+    }
+
+    #[test]
+    fn test_hmac_sha1() {
+        // RFC 2202 test vector
+        let key = [0x0bu8; 20];
+        let data = b"Hi There";
+        let hash = hmac_sha1(&key, data);
+        assert_eq!(hash, [
+            0xb6, 0x17, 0x31, 0x86, 0x55, 0x05, 0x72, 0x64,
+            0xe2, 0x8b, 0xc0, 0xb6, 0xfb, 0x37, 0x8c, 0x8e,
+            0xf1, 0x46, 0xbe, 0x00,
+        ]);
+    }
+
+    #[test]
+    fn test_hmac_sha256() {
+        // RFC 4231 test vector
+        let key = [0x0bu8; 20];
+        let data = b"Hi There";
+        let hash = hmac_sha256(&key, data);
+        assert_eq!(hash, [
+            0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53,
+            0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b, 0xf1, 0x2b,
+            0x88, 0x1d, 0xc2, 0x00, 0xc9, 0x83, 0x3d, 0xa7,
+            0x26, 0xe9, 0x37, 0x6c, 0x2e, 0x32, 0xcf, 0xf7,
         ]);
     }
 }

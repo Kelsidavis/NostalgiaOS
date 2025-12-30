@@ -35,6 +35,7 @@ pub mod disk;
 pub mod iocp;
 pub mod pipe;
 pub mod ramdisk;
+pub mod pnp;
 
 // Re-export main structures and types
 pub use irp::{
@@ -211,6 +212,35 @@ pub use ramdisk::{
     MAX_RAM_DISKS,
 };
 
+pub use pnp::{
+    PnpMinorFunction,
+    PnpDeviceState,
+    DeviceRelationType,
+    BusQueryIdType,
+    DeviceCapabilities,
+    DevicePowerState,
+    ResourceType,
+    ResourceDescriptor,
+    ResourceList,
+    IoPortResource,
+    MemoryResource,
+    InterruptResource,
+    DmaResource,
+    DeviceNode,
+    DeviceNodeSnapshot,
+    create_device_node,
+    start_device as pnp_start_device,
+    stop_device as pnp_stop_device,
+    remove_device as pnp_remove_device,
+    set_device_capabilities,
+    assign_resources,
+    device_node_count,
+    get_device_node_snapshots,
+    device_state_name,
+    get_stats as pnp_get_stats,
+    MAX_DEVICE_NODES,
+};
+
 /// Initialize the I/O Manager
 ///
 /// This initializes all I/O subsystems in the correct order:
@@ -244,6 +274,9 @@ pub fn init() {
 
     // Initialize named pipe subsystem
     pipe::init();
+
+    // Initialize PnP manager
+    pnp::init();
 
     crate::serial_println!("[IO] I/O Manager initialized");
 }
