@@ -15231,6 +15231,8 @@ pub fn cmd_netinfo(args: &[&str]) {
         outln!("  udpsend    Send UDP test packet");
         outln!("  dns        Show DNS configuration");
         outln!("  resolve    Resolve hostname to IP");
+        outln!("  ipconfig   Configure static IP address");
+        outln!("  dhcp       Run DHCP discovery");
         return;
     }
 
@@ -15561,6 +15563,175 @@ pub fn cmd_netinfo(args: &[&str]) {
         match net::dns::resolve(0, hostname) {
             Some(ip) => outln!("  {} -> {:?}", hostname, ip),
             None => outln!("  Resolution failed"),
+        }
+    } else if eq_ignore_case(args[0], "ipconfig") {
+        // Usage: netinfo ipconfig <device> <ip> <mask> [gateway]
+        if args.len() < 4 {
+            outln!("Configure static IP address");
+            outln!("");
+            outln!("Usage: netinfo ipconfig <device> <ip> <mask> [gateway]");
+            outln!("");
+            outln!("Examples:");
+            outln!("  netinfo ipconfig 0 192.168.1.100 255.255.255.0");
+            outln!("  netinfo ipconfig 0 192.168.1.100 255.255.255.0 192.168.1.1");
+            outln!("");
+            outln!("Current device configurations:");
+
+            let count = net::get_device_count();
+            for i in 0..count {
+                if let Some(device) = net::get_device(i) {
+                    out!("  {}: {}", i, device.info.name);
+                    if let Some(ip) = device.ip_address {
+                        out!(" IP={:?}", ip);
+                    } else {
+                        out!(" IP=none");
+                    }
+                    if let Some(mask) = device.subnet_mask {
+                        out!(" Mask={:?}", mask);
+                    } else {
+                        out!(" Mask=none");
+                    }
+                    if let Some(gw) = device.gateway {
+                        outln!(" GW={:?}", gw);
+                    } else {
+                        outln!(" GW=none");
+                    }
+                }
+            }
+            return;
+        }
+
+        // Parse device index
+        let device_idx: usize = match args[1].parse() {
+            Ok(d) => d,
+            Err(_) => {
+                outln!("Invalid device index");
+                return;
+            }
+        };
+
+        // Helper closure to parse IP
+        let parse_ip = |s: &str| -> Option<net::Ipv4Address> {
+            let mut octets = [0u8; 4];
+            let mut octet_idx = 0;
+            let mut current = 0u32;
+
+            for c in s.chars() {
+                if c == '.' {
+                    if octet_idx >= 3 || current > 255 {
+                        return None;
+                    }
+                    octets[octet_idx] = current as u8;
+                    octet_idx += 1;
+                    current = 0;
+                } else if let Some(d) = c.to_digit(10) {
+                    current = current * 10 + d;
+                } else {
+                    return None;
+                }
+            }
+            if octet_idx != 3 || current > 255 {
+                return None;
+            }
+            octets[3] = current as u8;
+            Some(net::Ipv4Address::new(octets))
+        };
+
+        // Parse IP address
+        let ip = match parse_ip(args[2]) {
+            Some(ip) => ip,
+            None => {
+                outln!("Invalid IP address format");
+                return;
+            }
+        };
+
+        // Parse subnet mask
+        let mask = match parse_ip(args[3]) {
+            Some(m) => m,
+            None => {
+                outln!("Invalid subnet mask format");
+                return;
+            }
+        };
+
+        // Parse gateway (optional)
+        let gateway = if args.len() >= 5 {
+            match parse_ip(args[4]) {
+                Some(g) => Some(g),
+                None => {
+                    outln!("Invalid gateway address format");
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
+        outln!("Configuring device {}:", device_idx);
+        outln!("  IP:      {:?}", ip);
+        outln!("  Mask:    {:?}", mask);
+        if let Some(gw) = gateway {
+            outln!("  Gateway: {:?}", gw);
+        }
+
+        match net::dhcp::configure_static(device_idx, ip, mask, gateway) {
+            Ok(()) => outln!("Configuration applied successfully"),
+            Err(e) => outln!("Configuration failed: {}", e),
+        }
+    } else if eq_ignore_case(args[0], "dhcp") {
+        // Usage: netinfo dhcp [device]
+        let device_idx: usize = if args.len() >= 2 {
+            match args[1].parse() {
+                Ok(d) => d,
+                Err(_) => {
+                    outln!("Invalid device index");
+                    return;
+                }
+            }
+        } else {
+            // Default to first non-loopback device
+            let mut found = None;
+            for i in 0..net::get_device_count() {
+                if let Some(device) = net::get_device(i) {
+                    // Skip loopback
+                    if device.info.name != "lo0" {
+                        found = Some(i);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(i) => i,
+                None => {
+                    outln!("No non-loopback network device found");
+                    return;
+                }
+            }
+        };
+
+        outln!("Running DHCP discovery on device {}...", device_idx);
+
+        match net::dhcp::discover(device_idx) {
+            Ok(lease) => {
+                outln!("");
+                outln!("DHCP Lease Obtained:");
+                outln!("  IP Address:  {:?}", lease.ip_address);
+                outln!("  Subnet Mask: {:?}", lease.subnet_mask);
+                if let Some(gw) = lease.gateway {
+                    outln!("  Gateway:     {:?}", gw);
+                }
+                if let Some(dns) = lease.dns_server {
+                    outln!("  DNS Server:  {:?}", dns);
+                }
+                outln!("  DHCP Server: {:?}", lease.server_id);
+                outln!("  Lease Time:  {} seconds", lease.lease_time);
+            }
+            Err(e) => {
+                outln!("  DHCP failed: {}", e);
+                outln!("");
+                outln!("Note: Use 'netinfo ipconfig' for manual IP configuration");
+            }
         }
     } else {
         outln!("Unknown command: {}", args[0]);

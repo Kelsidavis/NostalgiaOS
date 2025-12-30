@@ -16,6 +16,7 @@ pub mod ip;
 pub mod icmp;
 pub mod udp;
 pub mod dns;
+pub mod dhcp;
 pub mod loopback;
 
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -98,12 +99,23 @@ pub fn init() {
     icmp::init();
     udp::init();
     dns::init();
+    dhcp::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 
     // Initialize loopback device
     if let Err(e) = loopback::init() {
         crate::serial_println!("[NET] Warning: Failed to initialize loopback: {}", e);
+    }
+
+    // Try to initialize VirtIO-NET driver (if available)
+    match crate::drivers::virtio::net::init() {
+        Ok(idx) => {
+            crate::serial_println!("[NET] VirtIO-NET initialized as device {}", idx);
+        }
+        Err(e) => {
+            crate::serial_println!("[NET] VirtIO-NET not available: {}", e);
+        }
     }
 
     crate::serial_println!("[NET] Network subsystem initialized");
