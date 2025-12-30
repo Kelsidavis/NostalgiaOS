@@ -561,3 +561,467 @@ pub fn get_services_by_state(state: ServiceState) -> u32 {
 
     count
 }
+
+// ============================================================================
+// Service Dependency Management
+// ============================================================================
+
+/// Maximum depth for dependency resolution (prevents infinite loops)
+const MAX_DEPENDENCY_DEPTH: usize = 16;
+
+/// Result of dependency check
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependencyCheckResult {
+    /// All dependencies are satisfied (running)
+    Satisfied,
+    /// One or more dependencies are not running
+    NotSatisfied,
+    /// Dependency not found in database
+    NotFound,
+    /// Circular dependency detected
+    Circular,
+}
+
+/// Check if all dependencies for a service are satisfied
+pub fn check_dependencies(service_name: &str) -> DependencyCheckResult {
+    let _guard = DATABASE_LOCK.lock();
+
+    unsafe {
+        check_dependencies_internal(service_name, 0, &mut [false; MAX_SERVICES])
+    }
+}
+
+/// Internal dependency checking with cycle detection
+unsafe fn check_dependencies_internal(
+    service_name: &str,
+    depth: usize,
+    visited: &mut [bool; MAX_SERVICES],
+) -> DependencyCheckResult {
+    if depth >= MAX_DEPENDENCY_DEPTH {
+        return DependencyCheckResult::Circular;
+    }
+
+    // Find the service
+    let idx = match find_service_index(service_name) {
+        Some(i) => i,
+        None => return DependencyCheckResult::NotFound,
+    };
+
+    // Check for circular dependency
+    if visited[idx] {
+        return DependencyCheckResult::Circular;
+    }
+    visited[idx] = true;
+
+    let record = &SERVICE_DATABASE[idx];
+
+    // Check each dependency
+    for i in 0..record.dependency_count {
+        if let Some(dep_name) = record.get_dependency(i) {
+            // Find the dependency
+            let dep_idx = match find_service_index(dep_name) {
+                Some(i) => i,
+                None => {
+                    crate::serial_println!("[SVC] Dependency not found: {}", dep_name);
+                    return DependencyCheckResult::NotFound;
+                }
+            };
+
+            let dep_record = &SERVICE_DATABASE[dep_idx];
+
+            // Check if dependency is running
+            if dep_record.state() != ServiceState::Running {
+                return DependencyCheckResult::NotSatisfied;
+            }
+
+            // Recursively check dependency's dependencies
+            match check_dependencies_internal(dep_name, depth + 1, visited) {
+                DependencyCheckResult::Satisfied => {}
+                other => return other,
+            }
+        }
+    }
+
+    DependencyCheckResult::Satisfied
+}
+
+/// Find service index by name
+unsafe fn find_service_index(name: &str) -> Option<usize> {
+    let count = SERVICE_COUNT.load(Ordering::SeqCst) as usize;
+    for i in 0..count {
+        if SERVICE_DATABASE[i].registered && SERVICE_DATABASE[i].name_str() == name {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Get dependency order for starting services
+///
+/// Returns a list of service indices in the order they should be started
+/// (dependencies first).
+pub fn get_dependency_order(start_type: ServiceStartType) -> [usize; MAX_SERVICES] {
+    let _guard = DATABASE_LOCK.lock();
+
+    let mut order = [0usize; MAX_SERVICES];
+    let mut order_count = 0usize;
+    let mut added = [false; MAX_SERVICES];
+
+    unsafe {
+        let count = SERVICE_COUNT.load(Ordering::SeqCst) as usize;
+
+        // Keep adding services until we've processed all eligible services
+        let mut changed = true;
+        while changed {
+            changed = false;
+
+            for i in 0..count {
+                if added[i] {
+                    continue;
+                }
+
+                let record = &SERVICE_DATABASE[i];
+                if !record.registered || record.start_type != start_type {
+                    added[i] = true; // Mark as processed (not eligible)
+                    continue;
+                }
+
+                // Check if all dependencies are already in the order list
+                let mut deps_satisfied = true;
+                for j in 0..record.dependency_count {
+                    if let Some(dep_name) = record.get_dependency(j) {
+                        if let Some(dep_idx) = find_service_index(dep_name) {
+                            if !added[dep_idx] {
+                                // If dependency is eligible and not yet added
+                                let dep_record = &SERVICE_DATABASE[dep_idx];
+                                if dep_record.registered && dep_record.start_type == start_type {
+                                    deps_satisfied = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if deps_satisfied {
+                    order[order_count] = i;
+                    order_count += 1;
+                    added[i] = true;
+                    changed = true;
+                }
+            }
+        }
+
+        // Add any remaining services (circular dependencies or missing deps)
+        for i in 0..count {
+            if !added[i] {
+                let record = &SERVICE_DATABASE[i];
+                if record.registered && record.start_type == start_type {
+                    order[order_count] = i;
+                    order_count += 1;
+                }
+            }
+        }
+    }
+
+    order
+}
+
+// ============================================================================
+// Service Control Operations
+// ============================================================================
+
+/// Stop a service by name
+pub fn stop_service(name: &str) -> bool {
+    let _guard = DATABASE_LOCK.lock();
+
+    unsafe {
+        if let Some(idx) = find_service_index(name) {
+            stop_service_internal(idx)
+        } else {
+            false
+        }
+    }
+}
+
+/// Stop a service by index (internal)
+unsafe fn stop_service_internal(index: usize) -> bool {
+    if index >= MAX_SERVICES {
+        return false;
+    }
+
+    let record = &mut SERVICE_DATABASE[index];
+    if !record.registered {
+        return false;
+    }
+
+    // Check current state
+    if record.state() == ServiceState::Stopped {
+        return true; // Already stopped
+    }
+
+    if record.state() != ServiceState::Running && record.state() != ServiceState::Paused {
+        return false; // Can't stop from this state
+    }
+
+    // Transition to StopPending
+    record.set_state(ServiceState::StopPending);
+
+    let name = record.name_str();
+    crate::serial_println!("[SVC] Stopping service: {}", name);
+
+    // Handle based on service type
+    if record.is_driver() {
+        // Driver: would unload the driver
+        record.set_state(ServiceState::Stopped);
+        return true;
+    } else if record.is_win32_service() {
+        // Win32 service: would send control message and terminate process
+        if record.process_id != 0 {
+            // TODO: Send ServiceControl::Stop to service
+            // TODO: Terminate process if needed
+        }
+        record.set_state(ServiceState::Stopped);
+        record.process_id = 0;
+        return true;
+    }
+
+    record.set_state(ServiceState::Stopped);
+    true
+}
+
+/// Pause a service by name
+pub fn pause_service(name: &str) -> bool {
+    let _guard = DATABASE_LOCK.lock();
+
+    unsafe {
+        if let Some(idx) = find_service_index(name) {
+            pause_service_internal(idx)
+        } else {
+            false
+        }
+    }
+}
+
+/// Pause a service by index (internal)
+unsafe fn pause_service_internal(index: usize) -> bool {
+    if index >= MAX_SERVICES {
+        return false;
+    }
+
+    let record = &mut SERVICE_DATABASE[index];
+    if !record.registered {
+        return false;
+    }
+
+    // Check if service accepts pause
+    if (record.controls_accepted & super::types::service_accept::PAUSE_CONTINUE) == 0 {
+        return false;
+    }
+
+    // Check current state
+    if record.state() != ServiceState::Running {
+        return false;
+    }
+
+    // Transition to PausePending
+    record.set_state(ServiceState::PausePending);
+
+    let name = record.name_str();
+    crate::serial_println!("[SVC] Pausing service: {}", name);
+
+    // TODO: Send ServiceControl::Pause to service
+
+    record.set_state(ServiceState::Paused);
+    true
+}
+
+/// Continue a paused service by name
+pub fn continue_service(name: &str) -> bool {
+    let _guard = DATABASE_LOCK.lock();
+
+    unsafe {
+        if let Some(idx) = find_service_index(name) {
+            continue_service_internal(idx)
+        } else {
+            false
+        }
+    }
+}
+
+/// Continue a service by index (internal)
+unsafe fn continue_service_internal(index: usize) -> bool {
+    if index >= MAX_SERVICES {
+        return false;
+    }
+
+    let record = &mut SERVICE_DATABASE[index];
+    if !record.registered {
+        return false;
+    }
+
+    // Check if service accepts continue
+    if (record.controls_accepted & super::types::service_accept::PAUSE_CONTINUE) == 0 {
+        return false;
+    }
+
+    // Check current state
+    if record.state() != ServiceState::Paused {
+        return false;
+    }
+
+    // Transition to ContinuePending
+    record.set_state(ServiceState::ContinuePending);
+
+    let name = record.name_str();
+    crate::serial_println!("[SVC] Continuing service: {}", name);
+
+    // TODO: Send ServiceControl::Continue to service
+
+    record.set_state(ServiceState::Running);
+    true
+}
+
+/// Send a control code to a service
+pub fn control_service(name: &str, control: super::types::ServiceControl) -> bool {
+    match control {
+        super::types::ServiceControl::Stop => stop_service(name),
+        super::types::ServiceControl::Pause => pause_service(name),
+        super::types::ServiceControl::Continue => continue_service(name),
+        super::types::ServiceControl::Interrogate => {
+            // Just return current status - success if service exists
+            let _guard = DATABASE_LOCK.lock();
+            unsafe { find_service_index(name).is_some() }
+        }
+        _ => {
+            // Other controls are not yet implemented
+            false
+        }
+    }
+}
+
+/// Get service status by name
+pub fn get_service_status(name: &str) -> Option<ServiceStatus> {
+    let _guard = DATABASE_LOCK.lock();
+
+    unsafe {
+        if let Some(idx) = find_service_index(name) {
+            let record = &SERVICE_DATABASE[idx];
+            Some(ServiceStatus {
+                service_type: record.service_type,
+                current_state: record.state(),
+                controls_accepted: record.controls_accepted,
+                win32_exit_code: record.exit_code,
+                service_specific_exit_code: record.service_exit_code,
+                check_point: record.check_point,
+                wait_hint: record.wait_hint,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+/// Service status structure
+#[derive(Debug, Clone, Copy)]
+pub struct ServiceStatus {
+    /// Service type
+    pub service_type: u32,
+    /// Current state
+    pub current_state: ServiceState,
+    /// Controls accepted
+    pub controls_accepted: u32,
+    /// Win32 exit code
+    pub win32_exit_code: u32,
+    /// Service-specific exit code
+    pub service_specific_exit_code: u32,
+    /// Check point for pending operations
+    pub check_point: u32,
+    /// Wait hint for pending operations
+    pub wait_hint: u32,
+}
+
+/// Stop all running services in reverse dependency order
+pub fn stop_all_services() -> u32 {
+    let _guard = DATABASE_LOCK.lock();
+
+    let mut stopped = 0u32;
+
+    unsafe {
+        // Get services in start order, then reverse for stop order
+        let order = get_dependency_order_all();
+        let count = SERVICE_COUNT.load(Ordering::SeqCst) as usize;
+
+        // Iterate in reverse order
+        for i in (0..count).rev() {
+            let idx = order[i];
+            if idx < MAX_SERVICES && SERVICE_DATABASE[idx].registered {
+                if SERVICE_DATABASE[idx].state() == ServiceState::Running {
+                    if stop_service_internal(idx) {
+                        stopped += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    crate::serial_println!("[SVC] Stopped {} services", stopped);
+    stopped
+}
+
+/// Get dependency order for all running services
+unsafe fn get_dependency_order_all() -> [usize; MAX_SERVICES] {
+    let mut order = [0usize; MAX_SERVICES];
+    let mut order_count = 0usize;
+    let mut added = [false; MAX_SERVICES];
+
+    let count = SERVICE_COUNT.load(Ordering::SeqCst) as usize;
+
+    // Keep adding services until we've processed all
+    let mut changed = true;
+    while changed {
+        changed = false;
+
+        for i in 0..count {
+            if added[i] {
+                continue;
+            }
+
+            let record = &SERVICE_DATABASE[i];
+            if !record.registered {
+                added[i] = true;
+                continue;
+            }
+
+            // Check if all dependencies are already in the order list
+            let mut deps_satisfied = true;
+            for j in 0..record.dependency_count {
+                if let Some(dep_name) = record.get_dependency(j) {
+                    if let Some(dep_idx) = find_service_index(dep_name) {
+                        if !added[dep_idx] && SERVICE_DATABASE[dep_idx].registered {
+                            deps_satisfied = false;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if deps_satisfied {
+                order[order_count] = i;
+                order_count += 1;
+                added[i] = true;
+                changed = true;
+            }
+        }
+    }
+
+    // Add any remaining services
+    for i in 0..count {
+        if !added[i] && SERVICE_DATABASE[i].registered {
+            order[order_count] = i;
+            order_count += 1;
+        }
+    }
+
+    order
+}
