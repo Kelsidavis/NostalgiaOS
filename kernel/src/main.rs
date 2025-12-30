@@ -77,6 +77,7 @@ pub mod ke;
 pub mod ldr;
 pub mod lpc;
 pub mod mm;
+pub mod net;
 pub mod ob;
 pub mod pnp;
 pub mod po;
