@@ -148,24 +148,25 @@ const HISTORY_SIZE: usize = 32;
 const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq", "arp", "assoc", "attrib",
     "blocks", "bt",
-    "cache", "callback", "cat", "cc", "cd", "chcp", "cid", "clear", "cls", "color", "comp", "copy", "cp", "cpufeatures", "cpuinfo",
-    "date", "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "doskey", "dpcq", "dump", "echo", "echoserv", "erase", "eventlog", "ex", "exception", "exit",
-    "fc", "files", "find", "findstr", "finger", "ftype",
+    "cache", "call", "callback", "cat", "cc", "cd", "chcp", "choice", "cid", "clear", "clip", "cls", "color", "comp", "copy", "cp", "cpufeatures", "cpuinfo",
+    "date", "daytime", "debug", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "dmi", "doskey", "dpcq", "dump", "echo", "echoserv", "endlocal", "erase", "eventlog", "ex", "exception", "exit",
+    "fc", "files", "find", "findstr", "finger", "for", "ftype",
+    "getmac", "goto", "gpresult", "gpupdate",
     "hal", "handles", "head", "heap", "help", "history", "hostname", "hpet",
-    "ident", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
+    "ident", "if", "int", "io", "iocp", "ioq", "ipconfig", "irql", "irqstat",
     "job", "ke", "keyedev",
     "label", "ldr", "lookaside", "ls", "luid",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "mode", "more", "msr", "mv",
     "net", "netinfo", "netserv", "netstat", "nslookup", "ntfs",
     "ob", "obdir",
-    "pagetable", "partition", "path", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "popd", "port", "power", "prcb", "prefetch", "prompt", "ps", "pushd", "pwd",
+    "pagetable", "partition", "path", "pause", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "popd", "port", "power", "prcb", "prefetch", "prompt", "ps", "pushd", "pwd",
     "qotd", "quit",
     "ramdisk", "rd", "reboot", "reg", "ren", "rename", "replace", "resume", "rm", "rmdir", "route", "rtl", "shutdown",
-    "sc", "sched", "se", "section", "services", "set", "smbios", "sort", "stack", "start", "subst", "suspend", "sysinfo", "systeminfo",
-    "tail", "tasklist", "tasks", "teb", "time", "timer", "timerq", "timeserv", "title", "touch", "tracert", "tree", "type",
+    "sc", "sched", "se", "section", "services", "set", "setlocal", "smbios", "sort", "stack", "start", "subst", "suspend", "sysinfo", "systeminfo",
+    "tail", "taskkill", "tasklist", "tasks", "teb", "time", "timeout", "timer", "timerq", "timeserv", "title", "touch", "tracert", "tree", "type",
     "userproc", "usertest",
-    "vad", "veh", "ver", "verifier", "version", "volumes",
-    "waitq", "wc", "whois", "whoami", "worker", "wset", "xcopy",
+    "vad", "veh", "ver", "verifier", "verify", "version", "volumes",
+    "waitq", "wc", "where", "whois", "whoami", "worker", "wset", "xcopy",
 ];
 
 /// Current working directory
@@ -1423,6 +1424,54 @@ impl Shell {
         // START - start program
         } else if eq_ignore_case(cmd, "start") {
             commands::cmd_start(&args[1..argc]);
+        // CHOICE - user selection
+        } else if eq_ignore_case(cmd, "choice") {
+            commands::cmd_choice(&args[1..argc]);
+        // TIMEOUT - wait for time
+        } else if eq_ignore_case(cmd, "timeout") {
+            commands::cmd_timeout(&args[1..argc]);
+        // PAUSE - wait for keypress
+        } else if eq_ignore_case(cmd, "pause") {
+            commands::cmd_pause(&args[1..argc]);
+        // VERIFY - verify writes
+        } else if eq_ignore_case(cmd, "verify") {
+            commands::cmd_verify(&args[1..argc]);
+        // SETLOCAL - local environment
+        } else if eq_ignore_case(cmd, "setlocal") {
+            commands::cmd_setlocal(&args[1..argc]);
+        // ENDLOCAL - end local environment
+        } else if eq_ignore_case(cmd, "endlocal") {
+            commands::cmd_endlocal(&args[1..argc]);
+        // CALL - call batch file
+        } else if eq_ignore_case(cmd, "call") {
+            commands::cmd_call(&args[1..argc]);
+        // IF - conditional
+        } else if eq_ignore_case(cmd, "if") {
+            commands::cmd_if(&args[1..argc]);
+        // FOR - loop
+        } else if eq_ignore_case(cmd, "for") {
+            commands::cmd_for(&args[1..argc]);
+        // GOTO - jump to label
+        } else if eq_ignore_case(cmd, "goto") {
+            commands::cmd_goto(&args[1..argc]);
+        // TASKKILL - terminate process
+        } else if eq_ignore_case(cmd, "taskkill") {
+            commands::cmd_taskkill(&args[1..argc]);
+        // GPRESULT - group policy result
+        } else if eq_ignore_case(cmd, "gpresult") {
+            commands::cmd_gpresult(&args[1..argc]);
+        // GPUPDATE - group policy update
+        } else if eq_ignore_case(cmd, "gpupdate") {
+            commands::cmd_gpupdate(&args[1..argc]);
+        // CLIP - clipboard
+        } else if eq_ignore_case(cmd, "clip") {
+            commands::cmd_clip(&args[1..argc]);
+        // WHERE - find files
+        } else if eq_ignore_case(cmd, "where") {
+            commands::cmd_where(&args[1..argc]);
+        // GETMAC - display MAC addresses
+        } else if eq_ignore_case(cmd, "getmac") {
+            commands::cmd_getmac(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

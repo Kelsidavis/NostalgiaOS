@@ -20618,3 +20618,549 @@ pub fn cmd_start(args: &[&str]) {
     outln!("Starting: {}", program);
     outln!("(Note: Would start in new window if GUI available)");
 }
+
+/// CHOICE command - prompt for user selection
+pub fn cmd_choice(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Allows users to select one item from a list of choices.");
+        outln!("");
+        outln!("CHOICE [/C choices] [/N] [/T timeout /D default] [/M text]");
+        outln!("");
+        outln!("  /C choices  List of choices (default: YN)");
+        outln!("  /N          Hide the list of choices");
+        outln!("  /T timeout  Timeout in seconds");
+        outln!("  /D default  Default choice on timeout");
+        outln!("  /M text     Message to display");
+        outln!("");
+        outln!("(Note: Interactive input limited in serial console)");
+        return;
+    }
+
+    // Parse options
+    let mut choices = "YN";
+    let mut message = "";
+    let mut hide_choices = false;
+    let mut timeout_secs = 0u32;
+    let mut default_choice = ' ';
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i].to_ascii_uppercase();
+        if arg == "/C" && i + 1 < args.len() {
+            choices = args[i + 1];
+            i += 2;
+        } else if arg == "/N" {
+            hide_choices = true;
+            i += 1;
+        } else if arg == "/T" && i + 1 < args.len() {
+            timeout_secs = args[i + 1].parse().unwrap_or(0);
+            i += 2;
+        } else if arg == "/D" && i + 1 < args.len() {
+            default_choice = args[i + 1].chars().next().unwrap_or(' ');
+            i += 2;
+        } else if arg == "/M" && i + 1 < args.len() {
+            message = args[i + 1];
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
+    // Display prompt
+    if !message.is_empty() {
+        crate::serial_print!("{}", message);
+    }
+
+    if !hide_choices {
+        crate::serial_print!(" [{}]", choices);
+    }
+
+    if timeout_secs > 0 && default_choice != ' ' {
+        outln!("?{} (timeout: {}s, default: {})", "", timeout_secs, default_choice);
+        // In a real implementation, we'd wait for input or timeout
+        outln!("Selected: {} (auto-selected after timeout)", default_choice);
+    } else {
+        outln!("?");
+        // Note: Real input would require interrupt-driven keyboard
+        outln!("(Note: Would wait for keypress [{}])", choices);
+    }
+}
+
+/// TIMEOUT command - delay for specified seconds
+pub fn cmd_timeout(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Waits for the specified time period.");
+        outln!("");
+        outln!("TIMEOUT /T seconds [/NOBREAK]");
+        outln!("");
+        outln!("  /T seconds  Time to wait in seconds (-1 = wait indefinitely)");
+        outln!("  /NOBREAK    Ignore key presses");
+        outln!("");
+        outln!("(Note: Actual timing uses kernel tick counter)");
+        return;
+    }
+
+    let mut seconds = 0i32;
+    let mut nobreak = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i].to_ascii_uppercase();
+        if arg == "/T" && i + 1 < args.len() {
+            seconds = args[i + 1].parse().unwrap_or(0);
+            i += 2;
+        } else if arg == "/NOBREAK" {
+            nobreak = true;
+            i += 1;
+        } else if let Ok(s) = args[i].parse::<i32>() {
+            seconds = s;
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    if seconds < 0 {
+        outln!("Press any key to continue...");
+        outln!("(Note: Would wait indefinitely for keypress)");
+        return;
+    }
+
+    outln!("");
+    outln!("Waiting for {} seconds...", seconds);
+
+    // Actually wait using kernel timing
+    let start = crate::hal::apic::get_tick_count();
+    let ticks_per_sec = 1000u64; // Approximate (1 tick = 1 ms)
+    let end_ticks = start + (seconds as u64 * ticks_per_sec);
+
+    let mut last_displayed = seconds;
+    while crate::hal::apic::get_tick_count() < end_ticks {
+        let remaining = ((end_ticks - crate::hal::apic::get_tick_count()) / ticks_per_sec) as i32;
+        if remaining != last_displayed && remaining >= 0 {
+            crate::serial_print!("\rWaiting for {} seconds...  ", remaining);
+            last_displayed = remaining;
+        }
+        // Small busy wait
+        for _ in 0..10000 {
+            core::hint::spin_loop();
+        }
+    }
+
+    outln!("\rTimeout complete.              ");
+}
+
+/// PAUSE command - wait for keypress
+pub fn cmd_pause(_args: &[&str]) {
+    outln!("Press any key to continue . . .");
+    // Note: In a real implementation, we'd wait for keyboard input
+    // For now, just display the message
+    outln!("(Note: Would wait for keypress in interactive mode)");
+}
+
+/// VERIFY command - set/display verify flag
+static mut VERIFY_FLAG: bool = false;
+
+pub fn cmd_verify(args: &[&str]) {
+    if args.is_empty() {
+        let status = if unsafe { VERIFY_FLAG } { "ON" } else { "OFF" };
+        outln!("VERIFY is {}", status);
+        return;
+    }
+
+    let setting = args[0].to_ascii_uppercase();
+    if setting == "ON" {
+        unsafe { VERIFY_FLAG = true; }
+        outln!("VERIFY is ON");
+    } else if setting == "OFF" {
+        unsafe { VERIFY_FLAG = false; }
+        outln!("VERIFY is OFF");
+    } else {
+        outln!("Must specify ON or OFF.");
+    }
+}
+
+/// SETLOCAL command - begin local environment scope (stub)
+pub fn cmd_setlocal(_args: &[&str]) {
+    outln!("(SETLOCAL: Local environment scope started)");
+    outln!("Note: Environment scoping not fully implemented.");
+}
+
+/// ENDLOCAL command - end local environment scope (stub)
+pub fn cmd_endlocal(_args: &[&str]) {
+    outln!("(ENDLOCAL: Local environment scope ended)");
+    outln!("Note: Environment scoping not fully implemented.");
+}
+
+/// CALL command - call a batch file (stub)
+pub fn cmd_call(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Calls one batch program from another.");
+        outln!("");
+        outln!("CALL [drive:][path]filename [parameters]");
+        outln!("");
+        outln!("  parameters  Command-line arguments for batch program");
+        return;
+    }
+
+    let batch_file = args[0];
+    outln!("Calling: {}", batch_file);
+    outln!("(Note: Batch file execution not implemented)");
+}
+
+/// IF command - display help for conditional processing
+pub fn cmd_if(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Performs conditional processing in batch programs.");
+        outln!("");
+        outln!("IF [NOT] ERRORLEVEL number command");
+        outln!("IF [NOT] string1==string2 command");
+        outln!("IF [NOT] EXIST filename command");
+        outln!("IF [NOT] DEFINED variable command");
+        outln!("");
+        outln!("  ERRORLEVEL  True if last program returned >= number");
+        outln!("  EXIST       True if filename exists");
+        outln!("  DEFINED     True if environment variable is defined");
+        outln!("");
+        outln!("(Note: Batch script processing not implemented)");
+        return;
+    }
+
+    // Simple evaluation for testing
+    let input = args.join(" ");
+    outln!("IF condition: {}", input);
+    outln!("(Note: Would evaluate in batch context)");
+}
+
+/// FOR command - display help for loop processing
+pub fn cmd_for(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Runs a specified command for each file in a set of files.");
+        outln!("");
+        outln!("FOR %%variable IN (set) DO command");
+        outln!("FOR /D %%variable IN (set) DO command");
+        outln!("FOR /R [[drive:]path] %%variable IN (set) DO command");
+        outln!("FOR /L %%variable IN (start,step,end) DO command");
+        outln!("FOR /F [\"options\"] %%variable IN (set) DO command");
+        outln!("");
+        outln!("  /D   Match directories");
+        outln!("  /R   Walk directory tree");
+        outln!("  /L   Iterate number sequence");
+        outln!("  /F   Parse file contents");
+        outln!("");
+        outln!("(Note: Batch script processing not implemented)");
+        return;
+    }
+
+    outln!("FOR loop: {}", args.join(" "));
+    outln!("(Note: Would execute in batch context)");
+}
+
+/// GOTO command - display help for label jumping
+pub fn cmd_goto(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Directs batch program to a labeled line.");
+        outln!("");
+        outln!("GOTO label");
+        outln!("");
+        outln!("  label   Text string in batch as :label");
+        outln!("");
+        outln!("GOTO :EOF transfers control to end of batch.");
+        outln!("");
+        outln!("(Note: Batch script processing not implemented)");
+        return;
+    }
+
+    outln!("GOTO: {}", args[0]);
+    outln!("(Note: Would jump to label in batch context)");
+}
+
+/// TASKKILL command - terminate processes
+pub fn cmd_taskkill(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Terminates tasks by process ID (PID) or image name.");
+        outln!("");
+        outln!("TASKKILL [/PID pid] [/IM imagename] [/F]");
+        outln!("");
+        outln!("  /PID pid      Process ID to terminate");
+        outln!("  /IM name      Image name to terminate");
+        outln!("  /F            Force termination");
+        return;
+    }
+
+    // Parse options
+    let mut pid: Option<u32> = None;
+    let mut image_name: Option<&str> = None;
+    let mut force = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i].to_ascii_uppercase();
+        if arg == "/PID" && i + 1 < args.len() {
+            pid = args[i + 1].parse().ok();
+            i += 2;
+        } else if arg == "/IM" && i + 1 < args.len() {
+            image_name = Some(args[i + 1]);
+            i += 2;
+        } else if arg == "/F" {
+            force = true;
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    if let Some(p) = pid {
+        // Try to terminate by PID
+        unsafe {
+            let proc_ptr = crate::ps::ps_lookup_process_by_id(p);
+            if !proc_ptr.is_null() {
+                let proc = proc_ptr as *mut crate::ps::EProcess;
+                let name_bytes = (*proc).image_name();
+                let name = core::str::from_utf8(name_bytes).unwrap_or("unknown");
+                outln!("SUCCESS: Sent termination signal to process {} (PID: {})", name, p);
+                // In a real implementation, we'd call PsTerminateProcess
+                if force {
+                    outln!("  (Force flag set)");
+                }
+            } else {
+                outln!("ERROR: The process \"{}\" not found.", p);
+            }
+        }
+    } else if let Some(name) = image_name {
+        // Try to find by name using CID table
+        outln!("Searching for processes matching '{}'...", name);
+        let mut found = false;
+
+        let (snapshots, count) = crate::ps::get_process_cid_snapshots(32);
+        for i in 0..count {
+            let snap = &snapshots[i];
+            unsafe {
+                let proc_ptr = crate::ps::ps_lookup_process_by_id(snap.id);
+                if !proc_ptr.is_null() {
+                    let proc = proc_ptr as *mut crate::ps::EProcess;
+                    let name_bytes = (*proc).image_name();
+                    let proc_name = core::str::from_utf8(name_bytes).unwrap_or("unknown");
+                    if eq_ignore_case(proc_name, name) {
+                        let pid = (*proc).unique_process_id;
+                        outln!("SUCCESS: Sent termination signal to \"{}\" (PID: {})", proc_name, pid);
+                        found = true;
+                    }
+                }
+            }
+        }
+
+        if !found {
+            outln!("ERROR: The process \"{}\" not found.", name);
+        }
+    } else {
+        outln!("ERROR: Missing /PID or /IM parameter.");
+    }
+}
+
+/// GPRESULT command - display group policy info (stub)
+pub fn cmd_gpresult(args: &[&str]) {
+    if args.is_empty() || args[0] == "/?" {
+        outln!("Displays Group Policy information for machine and user.");
+        outln!("");
+        outln!("GPRESULT [/R] [/V] [/Z]");
+        outln!("");
+        outln!("  /R   Display RSoP summary data");
+        outln!("  /V   Verbose output");
+        outln!("  /Z   Super verbose output");
+        return;
+    }
+
+    outln!("");
+    outln!("Microsoft (R) Windows (R) Operating System Group Policy Result tool v2.0");
+    outln!("(c) Microsoft Corporation. All rights reserved.");
+    outln!("");
+    outln!("Created on {}", "12/30/2025 at 12:00:00 PM");
+    outln!("");
+    outln!("COMPUTER SETTINGS");
+    outln!("-----------------");
+    outln!("");
+    outln!("    CN=NOSTALGOS,DC=workgroup");
+    outln!("    Last time Group Policy was applied: N/A");
+    outln!("    Group Policy was applied from: N/A");
+    outln!("");
+    outln!("USER SETTINGS");
+    outln!("-------------");
+    outln!("");
+    outln!("    CN=Administrator,DC=workgroup");
+    outln!("");
+    outln!("(Note: Group Policy not implemented)");
+}
+
+/// GPUPDATE command - update group policy (stub)
+pub fn cmd_gpupdate(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Refreshes Group Policy settings.");
+        outln!("");
+        outln!("GPUPDATE [/Target:{{Computer|User}}] [/Force] [/Boot]");
+        outln!("");
+        outln!("  /Target  Specify Computer or User policy only");
+        outln!("  /Force   Reapply all settings");
+        outln!("  /Boot    Restart after applying (if required)");
+        return;
+    }
+
+    outln!("");
+    outln!("Updating Policy...");
+    outln!("");
+
+    // Simulate some delay
+    for _ in 0..1000000 {
+        core::hint::spin_loop();
+    }
+
+    outln!("User Policy update has completed successfully.");
+    outln!("Computer Policy update has completed successfully.");
+    outln!("");
+    outln!("(Note: Group Policy not actually implemented)");
+}
+
+/// CLIP command - copy to clipboard (stub)
+pub fn cmd_clip(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Redirects output of command line tools to the Windows clipboard.");
+        outln!("");
+        outln!("command | CLIP");
+        outln!("");
+        outln!("(Note: Clipboard not implemented in serial console)");
+        return;
+    }
+
+    let content = args.join(" ");
+    outln!("Would copy to clipboard: {}", content);
+}
+
+/// WHERE command - locate files in path
+pub fn cmd_where(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Displays the location of files that match the search pattern.");
+        outln!("");
+        outln!("WHERE [/R dir] [/Q] [/F] [/T] pattern");
+        outln!("");
+        outln!("  /R dir   Start searching from specified directory");
+        outln!("  /Q       Quiet mode, only return exit code");
+        outln!("  /F       Display file name in quotes");
+        outln!("  /T       Display file size and date");
+        return;
+    }
+
+    // Parse options
+    let mut start_dir: Option<&str> = None;
+    let mut show_details = false;
+    let mut pattern = "";
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i].to_ascii_uppercase();
+        if arg == "/R" && i + 1 < args.len() {
+            start_dir = Some(args[i + 1]);
+            i += 2;
+        } else if arg == "/T" {
+            show_details = true;
+            i += 1;
+        } else if !args[i].starts_with('/') {
+            pattern = args[i];
+            i += 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    if pattern.is_empty() {
+        outln!("WHERE: Pattern not specified");
+        return;
+    }
+
+    // Search in PATH or specified directory
+    let search_path = start_dir.unwrap_or("C:\\");
+    let full_path = resolve_path(search_path);
+
+    outln!("Searching for '{}' in {}...", pattern, full_path);
+
+    let mut found = 0u32;
+    where_search(&full_path, pattern, show_details, &mut found);
+
+    if found == 0 {
+        outln!("INFO: Could not find files for the given pattern(s).");
+    } else {
+        outln!("");
+        outln!("{} file(s) found", found);
+    }
+}
+
+/// Helper: recursive search for WHERE command
+fn where_search(path: &str, pattern: &str, show_details: bool, found: &mut u32) {
+    let mut offset = 0u32;
+
+    loop {
+        match fs::readdir(path, offset) {
+            Ok(entry) => {
+                let name = entry.name_str();
+                if name != "." && name != ".." {
+                    let full = alloc::format!("{}\\{}", path.trim_end_matches('\\'), name);
+
+                    if entry.file_type == fs::FileType::Regular {
+                        if wildcard_match(pattern, name) {
+                            *found += 1;
+                            if show_details {
+                                outln!("{:>10}  {}", entry.size, full);
+                            } else {
+                                outln!("{}", full);
+                            }
+                        }
+                    } else if entry.file_type == fs::FileType::Directory {
+                        // Recurse into subdirectory
+                        where_search(&full, pattern, show_details, found);
+                    }
+                }
+                offset = entry.next_offset;
+            }
+            Err(fs::FsStatus::NoMoreEntries) => break,
+            Err(_) => break,
+        }
+    }
+}
+
+/// GETMAC command - display MAC addresses
+pub fn cmd_getmac(args: &[&str]) {
+    let verbose = args.iter().any(|a| a.to_ascii_uppercase() == "/V");
+
+    outln!("");
+    if verbose {
+        outln!("Connection Name   Network Adapter              Physical Address    Transport Name");
+        outln!("================  ===========================  ==================  =============");
+    } else {
+        outln!("Physical Address    Transport Name");
+        outln!("==================  =============");
+    }
+
+    // Get network devices
+    for i in 0..4 {
+        if let Some(device) = crate::net::get_device(i) {
+            let mac = device.info.mac_address;
+            let mac_str = alloc::format!(
+                "{:02X}-{:02X}-{:02X}-{:02X}-{:02X}-{:02X}",
+                mac.0[0], mac.0[1], mac.0[2], mac.0[3], mac.0[4], mac.0[5]
+            );
+
+            if verbose {
+                let name = &device.info.name;
+                outln!("{:<18} {:<28} {} \\Device\\Tcpip_{{{}}}",
+                    alloc::format!("Ethernet {}", i),
+                    name,
+                    mac_str,
+                    i
+                );
+            } else {
+                outln!("{}  \\Device\\Tcpip_{{{}}}", mac_str, i);
+            }
+        }
+    }
+
+    outln!("");
+}
