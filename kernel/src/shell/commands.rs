@@ -155,6 +155,10 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    rtl <cmd>      Runtime Library (time, random, crc32)");
         outln!("    ldr <cmd>      Loader (info, modules, dll)");
         outln!("    pe <file>      Parse PE/DLL file headers");
+        outln!("    cc, cache      Cache Manager (stats, maps, prefetch)");
+        outln!("    prefetch       Prefetcher (stats, traces, enable/disable)");
+        outln!("    verifier       Driver Verifier (stats, irp, pool, deadlock)");
+        outln!("    disk,partition Disk/Partition info (mbr, gpt, geometry)");
         outln!("");
         outln!("  Use UP/DOWN arrows to navigate command history.");
     } else {
@@ -13839,4 +13843,970 @@ fn show_teb_list() {
 
     outln!("");
     outln!("Total: {} TEBs", count);
+}
+
+// ============================================================================
+// Cache Manager Commands
+// ============================================================================
+
+/// Cache Manager command
+pub fn cmd_cc(args: &[&str]) {
+    if args.is_empty() {
+        show_cc_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_cc_stats();
+    } else if eq_ignore_ascii_case(subcmd, "maps") {
+        show_cc_maps();
+    } else if eq_ignore_ascii_case(subcmd, "prefetch") {
+        show_cc_prefetch();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("cc - Cache Manager Viewer");
+        outln!("");
+        outln!("Usage: cc [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats    - Show cache statistics (default)");
+        outln!("  maps     - Show active cache maps");
+        outln!("  prefetch - Show prefetch statistics");
+        outln!("");
+        outln!("The Cache Manager provides unified file caching with");
+        outln!("VACB (256KB) mapping, lazy write, and prefetch support.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'cc help' for usage information");
+    }
+}
+
+fn show_cc_stats() {
+    use crate::cc;
+
+    let stats = cc::cc_get_stats();
+
+    outln!("Cache Manager Statistics");
+    outln!("========================");
+    outln!("");
+    outln!("Cache Operations:");
+    outln!("  Total Reads:      {}", stats.total_reads);
+    outln!("  Cache Hits:       {}", stats.cache_hits);
+    outln!("  Cache Misses:     {}", stats.cache_misses);
+    outln!("  Hit Rate:         {}%", stats.hit_rate_percent());
+    outln!("  Total Writes:     {}", stats.total_writes);
+    outln!("");
+    outln!("Cache State:");
+    outln!("  Active Maps:      {}", stats.active_cache_maps);
+    outln!("  Dirty Pages:      {}", stats.dirty_pages);
+}
+
+fn show_cc_maps() {
+    use crate::cc;
+
+    outln!("Active Cache Maps");
+    outln!("=================");
+    outln!("");
+
+    let (snapshots, count) = cc::cc_get_cache_snapshots(32);
+
+    if count == 0 {
+        outln!("No active cache maps");
+        return;
+    }
+
+    outln!("{:<6} {:<14} {:<8} {:<10}",
+        "Index", "FileSize", "VACBs", "DirtyPgs");
+    outln!("------------------------------------------");
+
+    for i in 0..count {
+        let snap = &snapshots[i];
+        outln!("{:<6} {:<14} {:<8} {:<10}",
+            snap.index,
+            format_cache_size(snap.file_size),
+            snap.active_vacbs,
+            snap.dirty_pages
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} cache maps", count);
+}
+
+fn show_cc_prefetch() {
+    use crate::cc;
+
+    let stats = cc::prefetch::pf_get_stats();
+
+    outln!("Prefetch Statistics");
+    outln!("===================");
+    outln!("");
+    outln!("Traces:");
+    outln!("  Started:          {}", stats.traces_started);
+    outln!("  Completed:        {}", stats.traces_completed);
+    outln!("  Aborted:          {}", stats.traces_aborted);
+    outln!("");
+    outln!("Prefetch:");
+    outln!("  Pages Prefetched: {}", stats.pages_prefetched);
+    outln!("  Hits:             {}", stats.prefetch_hits);
+    outln!("  Misses:           {}", stats.prefetch_misses);
+    outln!("  Hit Rate:         {}%", stats.hit_rate_percent());
+    outln!("");
+    outln!("Storage:");
+    outln!("  Scenarios Stored: {}", stats.scenarios_stored);
+    outln!("  Active Traces:    {}", cc::cc_pf_active_traces());
+}
+
+/// Prefetch command
+pub fn cmd_prefetch(args: &[&str]) {
+    use crate::cc;
+
+    if args.is_empty() {
+        show_cc_prefetch();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_cc_prefetch();
+    } else if eq_ignore_ascii_case(subcmd, "traces") {
+        show_prefetch_traces();
+    } else if eq_ignore_ascii_case(subcmd, "enable") {
+        cc::prefetch::pf_set_enabled(true);
+        outln!("Prefetcher enabled");
+    } else if eq_ignore_ascii_case(subcmd, "disable") {
+        cc::prefetch::pf_set_enabled(false);
+        outln!("Prefetcher disabled");
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("prefetch - Prefetcher Viewer");
+        outln!("");
+        outln!("Usage: prefetch [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats    - Show prefetch statistics (default)");
+        outln!("  traces   - Show active prefetch traces");
+        outln!("  enable   - Enable prefetcher");
+        outln!("  disable  - Disable prefetcher");
+        outln!("");
+        outln!("The prefetcher tracks application launch patterns to");
+        outln!("proactively load data for faster subsequent starts.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'prefetch help' for usage information");
+    }
+}
+
+fn show_prefetch_traces() {
+    use crate::cc;
+
+    outln!("Active Prefetch Traces");
+    outln!("======================");
+    outln!("");
+
+    let (snapshots, count) = cc::cc_pf_get_traces();
+
+    if count == 0 {
+        outln!("No active prefetch traces");
+        return;
+    }
+
+    outln!("{:<6} {:<10} {:<10} {:<8} {:<10}",
+        "Index", "State", "Type", "PID", "Pages");
+    outln!("------------------------------------------------");
+
+    for i in 0..count {
+        let snap = &snapshots[i];
+        let state_str = match snap.state {
+            cc::TraceState::Free => "Free",
+            cc::TraceState::Active => "Active",
+            cc::TraceState::Processing => "Processing",
+            cc::TraceState::Complete => "Complete",
+        };
+        let type_str = match snap.scenario_type {
+            cc::ScenarioType::Boot => "Boot",
+            cc::ScenarioType::App => "App",
+            cc::ScenarioType::Video => "Video",
+            cc::ScenarioType::Layout => "Layout",
+        };
+        outln!("{:<6} {:<10} {:<10} {:<8} {:<10}",
+            snap.index,
+            state_str,
+            type_str,
+            snap.process_id,
+            snap.pages_faulted
+        );
+    }
+
+    outln!("");
+    outln!("Total: {} traces", count);
+}
+
+// ============================================================================
+// Driver Verifier Commands
+// ============================================================================
+
+/// Driver Verifier command
+pub fn cmd_verifier(args: &[&str]) {
+    if args.is_empty() {
+        show_verifier_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_verifier_stats();
+    } else if eq_ignore_ascii_case(subcmd, "drivers") {
+        show_verifier_drivers();
+    } else if eq_ignore_ascii_case(subcmd, "irp") {
+        show_verifier_irp();
+    } else if eq_ignore_ascii_case(subcmd, "pool") {
+        show_verifier_pool();
+    } else if eq_ignore_ascii_case(subcmd, "deadlock") {
+        show_verifier_deadlock();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("verifier - Driver Verifier");
+        outln!("");
+        outln!("Usage: verifier [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats    - Show verifier statistics (default)");
+        outln!("  drivers  - List verified drivers");
+        outln!("  irp      - Show IRP tracking info");
+        outln!("  pool     - Show pool allocation tracking");
+        outln!("  deadlock - Show deadlock detection info");
+        outln!("");
+        outln!("Driver Verifier validates driver behavior by tracking");
+        outln!("IRPs, pool allocations, and lock acquisitions.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'verifier help' for usage information");
+    }
+}
+
+fn show_verifier_stats() {
+    use crate::verifier;
+
+    let stats = verifier::vf_get_statistics();
+
+    outln!("Driver Verifier Statistics");
+    outln!("==========================");
+    outln!("");
+    outln!("State:              {}", if verifier::vf_is_enabled() { "Enabled" } else { "Disabled" });
+    outln!("");
+    outln!("IRP Tracking:");
+    outln!("  Tracked:          {}", stats.irps_tracked);
+    outln!("  Completed:        {}", stats.irps_completed);
+    outln!("  Violations:       {}", stats.irp_violations);
+    outln!("");
+    outln!("Pool Tracking:");
+    outln!("  Allocations:      {}", stats.pool_allocations);
+    outln!("  Frees:            {}", stats.pool_frees);
+    outln!("  Violations:       {}", stats.pool_violations);
+    outln!("");
+    outln!("Deadlock:");
+    outln!("  Checks:           {}", stats.deadlock_checks);
+    outln!("  Detected:         {}", stats.deadlock_detections);
+}
+
+fn show_verifier_drivers() {
+    use crate::verifier;
+
+    outln!("Verified Drivers");
+    outln!("================");
+    outln!("");
+
+    let drivers = verifier::vf_get_verified_drivers();
+
+    if drivers.is_empty() {
+        outln!("No drivers currently being verified");
+        return;
+    }
+
+    outln!("Driver Name");
+    outln!("--------------------");
+
+    for driver in drivers.iter() {
+        outln!("{}", driver);
+    }
+
+    outln!("");
+    outln!("Total: {} verified drivers", drivers.len());
+}
+
+fn show_verifier_irp() {
+    use crate::verifier::irp;
+
+    let (alloc_count, free_count, active_count) = irp::vf_irp_get_stats();
+
+    outln!("IRP Verifier Statistics");
+    outln!("=======================");
+    outln!("");
+    outln!("Allocations:      {}", alloc_count);
+    outln!("Frees:            {}", free_count);
+    outln!("Active:           {}", active_count);
+    outln!("Outstanding:      {}", alloc_count.saturating_sub(free_count));
+}
+
+fn show_verifier_pool() {
+    use crate::verifier::pool;
+
+    let stats = pool::vf_pool_get_stats();
+
+    outln!("Pool Verifier Statistics");
+    outln!("========================");
+    outln!("");
+    outln!("Current Allocs:   {}", stats.current_allocs);
+    outln!("Total Allocs:     {}", stats.total_allocs);
+    outln!("Total Frees:      {}", stats.total_frees);
+    outln!("");
+    outln!("Memory:");
+    outln!("  Total Allocated: {} bytes", stats.total_bytes_allocated);
+    outln!("  Total Freed:     {} bytes", stats.total_bytes_freed);
+    outln!("  Current:         {} bytes", stats.current_bytes);
+    outln!("  Peak Allocs:     {}", stats.peak_alloc_count);
+}
+
+fn show_verifier_deadlock() {
+    use crate::verifier::deadlock;
+
+    let stats = deadlock::vf_deadlock_get_stats();
+
+    outln!("Deadlock Detection Statistics");
+    outln!("==============================");
+    outln!("");
+    outln!("Resources:        {}", stats.resources);
+    outln!("Graph Nodes:      {}", stats.graph_nodes);
+    outln!("Graph Edges:      {}", stats.graph_edges);
+    outln!("");
+    outln!("Threads:");
+    outln!("  Holding Locks:  {}", stats.threads_with_locks);
+    outln!("  Total Held:     {}", stats.total_locks_held);
+    outln!("");
+    outln!("Resets:           {}", stats.resets);
+}
+
+// ============================================================================
+// Disk/Partition Commands
+// ============================================================================
+
+/// Disk/Partition command
+pub fn cmd_disk(args: &[&str]) {
+    if args.is_empty() {
+        show_disk_info();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "info") {
+        show_disk_info();
+    } else if eq_ignore_ascii_case(subcmd, "partitions") {
+        show_disk_partitions();
+    } else if eq_ignore_ascii_case(subcmd, "mbr") {
+        show_disk_mbr();
+    } else if eq_ignore_ascii_case(subcmd, "gpt") {
+        show_disk_gpt();
+    } else if eq_ignore_ascii_case(subcmd, "geometry") {
+        show_disk_geometry();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("disk - Disk/Partition Viewer");
+        outln!("");
+        outln!("Usage: disk [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  info       - Show disk overview (default)");
+        outln!("  partitions - Show partition table");
+        outln!("  mbr        - Show MBR information");
+        outln!("  gpt        - Show GPT information");
+        outln!("  geometry   - Show disk geometry");
+        outln!("");
+        outln!("FSTUB provides partition table support for MBR and GPT");
+        outln!("disks, including extended partitions and GPT attributes.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'disk help' for usage information");
+    }
+}
+
+fn show_disk_info() {
+    use crate::fstub;
+
+    outln!("Disk Information");
+    outln!("================");
+    outln!("");
+    outln!("FSTUB Module Status: Initialized");
+    outln!("");
+    outln!("Supported Partition Styles:");
+    outln!("  - MBR (Master Boot Record)");
+    outln!("  - GPT (GUID Partition Table)");
+    outln!("");
+    outln!("Partition Types (MBR):");
+
+    let types = [
+        (fstub::PartitionType::Fat12, "FAT12"),
+        (fstub::PartitionType::Fat16Small, "FAT16 (<32MB)"),
+        (fstub::PartitionType::Fat16, "FAT16 (>=32MB)"),
+        (fstub::PartitionType::Fat32, "FAT32"),
+        (fstub::PartitionType::Fat32Lba, "FAT32 LBA"),
+        (fstub::PartitionType::Ntfs, "NTFS"),
+        (fstub::PartitionType::Linux, "Linux"),
+        (fstub::PartitionType::GptProtective, "GPT Protective"),
+        (fstub::PartitionType::Extended, "Extended"),
+    ];
+
+    for (ptype, name) in types.iter() {
+        outln!("  0x{:02X}  {}", *ptype as u8, name);
+    }
+}
+
+fn show_disk_partitions() {
+    outln!("Partition Information");
+    outln!("=====================");
+    outln!("");
+    outln!("Note: No physical disks attached to show partition data.");
+    outln!("");
+    outln!("To parse partitions, use:");
+    outln!("  fstub_read_partition_table(disk_data, sector_size)");
+    outln!("");
+    outln!("Supported partition styles:");
+    outln!("  - MBR: Up to 4 primary partitions");
+    outln!("  - MBR Extended: Unlimited logical partitions");
+    outln!("  - GPT: Up to 128 partitions");
+}
+
+fn show_disk_mbr() {
+    use crate::fstub;
+
+    outln!("MBR Structure");
+    outln!("=============");
+    outln!("");
+    outln!("Offset  Size   Description");
+    outln!("------  -----  -----------");
+    outln!("0x000   440    Bootstrap code");
+    outln!("0x1B8   4      Disk signature");
+    outln!("0x1BC   2      Reserved");
+    outln!("0x1BE   16     Partition entry 1");
+    outln!("0x1CE   16     Partition entry 2");
+    outln!("0x1DE   16     Partition entry 3");
+    outln!("0x1EE   16     Partition entry 4");
+    outln!("0x1FE   2      Boot signature (0xAA55)");
+    outln!("");
+    outln!("MBR Signature: 0x{:04X}", fstub::mbr::MBR_SIGNATURE);
+    outln!("Max Primary Partitions: {}", fstub::mbr::MAX_MBR_PARTITIONS);
+    outln!("");
+    outln!("Partition Entry Format (16 bytes):");
+    outln!("  Offset  Size  Description");
+    outln!("  0       1     Boot indicator (0x80 = active)");
+    outln!("  1       3     Starting CHS");
+    outln!("  4       1     Partition type");
+    outln!("  5       3     Ending CHS");
+    outln!("  8       4     Starting LBA");
+    outln!("  12      4     Size in sectors");
+}
+
+fn show_disk_gpt() {
+    use crate::fstub::gpt;
+
+    outln!("GPT Structure");
+    outln!("=============");
+    outln!("");
+    outln!("EFI Signature: \"EFI PART\" (0x{:016X})", gpt::EFI_SIGNATURE);
+    outln!("Revision:      0x{:08X}", gpt::GPT_REVISION);
+    outln!("Entry Size:    {} bytes", gpt::GPT_ENTRY_SIZE);
+    outln!("Max Entries:   128 partitions (typical)");
+    outln!("");
+    outln!("GPT Header Layout:");
+    outln!("  Offset  Size  Description");
+    outln!("  0x00    8     Signature \"EFI PART\"");
+    outln!("  0x08    4     Revision");
+    outln!("  0x0C    4     Header size");
+    outln!("  0x10    4     Header CRC32");
+    outln!("  0x18    8     Current LBA");
+    outln!("  0x20    8     Backup LBA");
+    outln!("  0x28    8     First usable LBA");
+    outln!("  0x30    8     Last usable LBA");
+    outln!("  0x38    16    Disk GUID");
+    outln!("  0x48    8     Partition entries LBA");
+    outln!("  0x50    4     Number of entries");
+    outln!("  0x54    4     Entry size");
+    outln!("  0x58    4     Partition entries CRC32");
+    outln!("");
+    outln!("Well-known Partition Type GUIDs:");
+    outln!("  EFI System:      C12A7328-F81F-11D2-BA4B-00A0C93EC93B");
+    outln!("  MS Reserved:     E3C9E316-0B5C-4DB8-817D-F92DF00215AE");
+    outln!("  MS Basic Data:   EBD0A0A2-B9E5-4433-87C0-68B6B72699C7");
+    outln!("  Linux FS:        0FC63DAF-8483-4772-8E79-3D69D8477DE4");
+}
+
+fn show_disk_geometry() {
+    use crate::fstub::geometry;
+
+    outln!("Disk Geometry");
+    outln!("=============");
+    outln!("");
+    outln!("Standard geometry for modern disks:");
+    let geo = geometry::estimate_geometry(500 * 1024 * 1024 * 1024, 512);
+    outln!("  Sectors per track:  {}", geo.sectors_per_track);
+    outln!("  Tracks per cyl:     {}", geo.tracks_per_cylinder);
+    outln!("  Bytes per sector:   {}", geo.bytes_per_sector);
+    outln!("");
+    outln!("Media Types:");
+    let types = [
+        geometry::MediaType::FixedMedia,
+        geometry::MediaType::RemovableMedia,
+        geometry::MediaType::F3_1pt44_512,
+        geometry::MediaType::F3_2pt88_512,
+        geometry::MediaType::F5_1pt2_512,
+    ];
+    for mt in types.iter() {
+        outln!("  {:2}  {}", *mt as u32, mt.name());
+    }
+}
+
+/// Format size in human-readable format for cache display
+fn format_cache_size(size: u64) -> &'static str {
+    // Use static strings for common sizes to avoid allocation
+    if size == 0 {
+        "0 B"
+    } else if size < 1024 {
+        "< 1 KB"
+    } else if size < 1024 * 1024 {
+        "< 1 MB"
+    } else if size < 10 * 1024 * 1024 {
+        "< 10 MB"
+    } else if size < 100 * 1024 * 1024 {
+        "< 100 MB"
+    } else if size < 1024 * 1024 * 1024 {
+        "< 1 GB"
+    } else {
+        "> 1 GB"
+    }
+}
+
+// ============================================================================
+// RTL Heap Command (heap)
+// ============================================================================
+
+/// heap - RTL Heap Manager diagnostics
+///
+/// Display heap statistics and configuration.
+///
+/// Usage: heap [stats|info|config]
+///
+/// Subcommands:
+///   stats   - Show heap statistics (default)
+///   info    - Show heap configuration info
+///   config  - Show heap constants and limits
+pub fn cmd_heap(args: &[&str]) {
+    if args.is_empty() {
+        show_heap_stats();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "stats") {
+        show_heap_stats();
+    } else if eq_ignore_ascii_case(subcmd, "info") {
+        show_heap_info();
+    } else if eq_ignore_ascii_case(subcmd, "config") {
+        show_heap_config();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("heap - RTL Heap Manager Diagnostics");
+        outln!("");
+        outln!("Usage: heap [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  stats   - Show heap statistics (default)");
+        outln!("  info    - Show heap information");
+        outln!("  config  - Show heap configuration constants");
+        outln!("");
+        outln!("Examples:");
+        outln!("  heap         - Show heap statistics");
+        outln!("  heap info    - Show heap information");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'heap help' for usage information");
+    }
+}
+
+fn show_heap_stats() {
+    use crate::rtl::heap;
+
+    outln!("RTL Heap Statistics");
+    outln!("===================");
+    outln!("");
+
+    outln!("Max Heaps Per Process: {}", heap::MAX_HEAPS_PER_PROCESS);
+    outln!("");
+
+    // Check process default heap
+    unsafe {
+        if let Some(handle) = heap::rtl_get_process_heap() {
+            outln!("Process Heap ({})", handle);
+            if let Some(stats) = heap::rtl_get_heap_stats(handle) {
+                outln!("  Total Size:    {} bytes", stats.total_size);
+                outln!("  Free Size:     {} bytes", stats.total_free_size);
+                outln!("  Allocations:   {}", stats.alloc_count);
+                outln!("  Frees:         {}", stats.free_count);
+                outln!("  Segments:      {}", stats.segment_count);
+            }
+        } else {
+            outln!("No process heap initialized");
+        }
+    }
+}
+
+fn show_heap_info() {
+    use crate::rtl::heap;
+
+    outln!("RTL Heap Information");
+    outln!("====================");
+    outln!("");
+    outln!("Process Default Heap:");
+
+    unsafe {
+        if let Some(handle) = heap::rtl_get_process_heap() {
+            outln!("  Handle:    {:#x}", handle);
+            outln!("  Status:    Active");
+        } else {
+            outln!("  Status:    Not initialized");
+        }
+    }
+
+    outln!("");
+    outln!("Heap Flags:");
+    outln!("  GROWABLE:              Create growable heap");
+    outln!("  NO_SERIALIZE:          Disable locking");
+    outln!("  GENERATE_EXCEPTIONS:   Throw on allocation failure");
+    outln!("  ZERO_MEMORY:           Zero allocated memory");
+    outln!("  REALLOC_IN_PLACE_ONLY: Don't move on realloc");
+    outln!("  TAIL_CHECKING_ENABLED: Enable tail checking");
+    outln!("  FREE_CHECKING_ENABLED: Enable free checking");
+    outln!("  CREATE_ALIGN_16:       16-byte alignment");
+}
+
+fn show_heap_config() {
+    use crate::rtl::heap;
+
+    outln!("RTL Heap Configuration");
+    outln!("======================");
+    outln!("");
+    outln!("Constants:");
+    outln!("  HEAP_GRANULARITY:        {} bytes", heap::HEAP_GRANULARITY);
+    outln!("  HEAP_MAXIMUM_FREELISTS:  {}", heap::HEAP_MAXIMUM_FREELISTS);
+    outln!("  HEAP_MAXIMUM_SEGMENTS:   {}", heap::HEAP_MAXIMUM_SEGMENTS);
+    outln!("  MAX_HEAPS_PER_PROCESS:   {}", heap::MAX_HEAPS_PER_PROCESS);
+    outln!("  HEAP_MAXIMUM_BLOCK_SIZE: {:#x}", heap::HEAP_MAXIMUM_BLOCK_SIZE);
+    outln!("");
+    outln!("Size Classes:");
+    outln!("  Free List 0:   1-{} bytes", heap::HEAP_GRANULARITY);
+    outln!("  Free List 1:   {}-{} bytes", heap::HEAP_GRANULARITY + 1, heap::HEAP_GRANULARITY * 2);
+    outln!("  ...");
+    outln!("  Free List 127: Large allocations");
+}
+
+// ============================================================================
+// Registry Command (reg)
+// ============================================================================
+
+/// reg - Registry browser
+///
+/// Browse and query the Windows registry.
+///
+/// Usage: reg [query|enum|info|hives] [path]
+///
+/// Subcommands:
+///   query <path>  - Query a registry key
+///   enum <path>   - Enumerate subkeys and values
+///   info <path>   - Show detailed key information
+///   hives         - List loaded registry hives
+pub fn cmd_reg(args: &[&str]) {
+    if args.is_empty() {
+        show_reg_hives();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "hives") {
+        show_reg_hives();
+    } else if eq_ignore_ascii_case(subcmd, "query") {
+        if args.len() < 2 {
+            outln!("Usage: reg query <path>");
+            outln!("Example: reg query SYSTEM\\CurrentControlSet");
+            return;
+        }
+        show_reg_query(args[1]);
+    } else if eq_ignore_ascii_case(subcmd, "enum") {
+        if args.len() < 2 {
+            outln!("Usage: reg enum <path>");
+            outln!("Example: reg enum SYSTEM");
+            return;
+        }
+        show_reg_enum(args[1]);
+    } else if eq_ignore_ascii_case(subcmd, "info") {
+        if args.len() < 2 {
+            outln!("Usage: reg info <path>");
+            outln!("Example: reg info SOFTWARE\\Microsoft");
+            return;
+        }
+        show_reg_info(args[1]);
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("reg - Registry Browser");
+        outln!("");
+        outln!("Usage: reg [subcommand] [path]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  hives         - List loaded registry hives (default)");
+        outln!("  query <path>  - Query a registry key");
+        outln!("  enum <path>   - Enumerate subkeys and values");
+        outln!("  info <path>   - Show detailed key information");
+        outln!("");
+        outln!("Path Examples:");
+        outln!("  SYSTEM");
+        outln!("  SYSTEM\\CurrentControlSet");
+        outln!("  SOFTWARE\\Microsoft\\Windows");
+        outln!("");
+        outln!("Examples:");
+        outln!("  reg hives               - List all hives");
+        outln!("  reg query SYSTEM        - Query SYSTEM hive root");
+        outln!("  reg enum SYSTEM         - Enumerate SYSTEM subkeys");
+    } else {
+        // Treat as a path query
+        show_reg_query(subcmd);
+    }
+}
+
+fn show_reg_hives() {
+    use crate::cm;
+    use core::sync::atomic::Ordering;
+
+    outln!("Registry Hives");
+    outln!("==============");
+    outln!("");
+
+    outln!("{:<20} {:<10} {:<10} {:<10}",
+        "Hive", "Keys", "Values", "Type");
+    outln!("------------------------------------------------------------");
+
+    let hive_count = cm::cm_get_hive_count();
+
+    unsafe {
+        for i in 0..hive_count {
+            if let Some(hive) = cm::cm_get_hive(i as u16) {
+                let name_len = hive.name.length as usize;
+                let name = core::str::from_utf8(&hive.name.chars[..name_len]).unwrap_or("<unknown>");
+                let hive_type = match hive.hive_type {
+                    cm::CmHiveType::Primary => "Primary",
+                    cm::CmHiveType::User => "User",
+                    cm::CmHiveType::Volatile => "Volatile",
+                    cm::CmHiveType::Alternate => "Alternate",
+                };
+                outln!("{:<20} {:<10} {:<10} {:<10}",
+                    name,
+                    hive.key_count.load(Ordering::SeqCst),
+                    hive.value_count.load(Ordering::SeqCst),
+                    hive_type
+                );
+            }
+        }
+    }
+
+    outln!("");
+    outln!("Total: {} hives loaded", hive_count);
+}
+
+fn show_reg_query(path: &str) {
+    use crate::cm;
+
+    outln!("Registry Query: {}", path);
+    outln!("{}", "=".repeat(path.len() + 17));
+    outln!("");
+
+    unsafe {
+        match cm::cm_open_key(path) {
+            Ok(handle) => {
+                // Get key info
+                if let Ok(info) = cm::cm_query_key_info(handle) {
+                    outln!("Key Information:");
+                    outln!("  Subkeys:        {}", info.subkey_count);
+                    outln!("  Values:         {}", info.value_count);
+                    outln!("  Volatile:       {}", if info.is_volatile { "Yes" } else { "No" });
+                    outln!("  Last Write:     {:#x}", info.last_write_time);
+                    outln!("");
+                }
+
+                // List values
+                if let Ok(info) = cm::cm_query_key_info(handle) {
+                    if info.value_count > 0 {
+                        outln!("Values:");
+                        for i in 0..info.value_count {
+                            if let Ok(value) = cm::cm_enumerate_value(handle, i) {
+                                let name = if value.name.is_empty() {
+                                    "(Default)"
+                                } else {
+                                    value.name.as_str()
+                                };
+                                let type_str = match value.value_type {
+                                    cm::RegType::Sz => "REG_SZ",
+                                    cm::RegType::Dword => "REG_DWORD",
+                                    cm::RegType::Qword => "REG_QWORD",
+                                    cm::RegType::Binary => "REG_BINARY",
+                                    cm::RegType::MultiSz => "REG_MULTI_SZ",
+                                    cm::RegType::ExpandSz => "REG_EXPAND_SZ",
+                                    _ => "REG_NONE",
+                                };
+
+                                // Get display value
+                                let display = match value.value_type {
+                                    cm::RegType::Sz | cm::RegType::ExpandSz => {
+                                        value.get_string().unwrap_or("")
+                                    }
+                                    _ => "",
+                                };
+
+                                if !display.is_empty() {
+                                    outln!("  {} ({}) = \"{}\"", name, type_str, display);
+                                } else if let Some(dw) = value.get_dword() {
+                                    outln!("  {} ({}) = {:#x}", name, type_str, dw);
+                                } else if let Some(qw) = value.get_qword() {
+                                    outln!("  {} ({}) = {:#x}", name, type_str, qw);
+                                } else {
+                                    outln!("  {} ({}) = <{} bytes>", name, type_str, value.data.size);
+                                }
+                            }
+                        }
+                        outln!("");
+                    }
+                }
+
+                cm::cm_close_key(handle);
+            }
+            Err(e) => {
+                outln!("Error opening key: {:?}", e);
+            }
+        }
+    }
+}
+
+fn show_reg_enum(path: &str) {
+    use crate::cm;
+
+    outln!("Registry Enumeration: {}", path);
+    outln!("{}", "=".repeat(path.len() + 23));
+    outln!("");
+
+    unsafe {
+        match cm::cm_open_key(path) {
+            Ok(handle) => {
+                // Get key info
+                if let Ok(info) = cm::cm_query_key_info(handle) {
+                    outln!("Subkeys ({}):", info.subkey_count);
+                    outln!("");
+
+                    for i in 0..info.subkey_count {
+                        if let Ok(subkey_handle) = cm::cm_enumerate_key(handle, i) {
+                            if let Some(name) = cm::cm_get_key_name(subkey_handle) {
+                                // Get subkey info
+                                if let Ok(subinfo) = cm::cm_query_key_info(subkey_handle) {
+                                    outln!("  [{}]  ({} subkeys, {} values)",
+                                        name, subinfo.subkey_count, subinfo.value_count);
+                                } else {
+                                    outln!("  [{}]", name);
+                                }
+                            }
+                        }
+                    }
+
+                    if info.subkey_count == 0 {
+                        outln!("  (none)");
+                    }
+
+                    outln!("");
+                    outln!("Values ({}):", info.value_count);
+                    outln!("");
+
+                    for i in 0..info.value_count {
+                        if let Ok(value) = cm::cm_enumerate_value(handle, i) {
+                            let name = if value.name.is_empty() {
+                                "(Default)"
+                            } else {
+                                value.name.as_str()
+                            };
+                            let type_str = match value.value_type {
+                                cm::RegType::Sz => "REG_SZ",
+                                cm::RegType::Dword => "REG_DWORD",
+                                cm::RegType::Qword => "REG_QWORD",
+                                cm::RegType::Binary => "REG_BINARY",
+                                cm::RegType::MultiSz => "REG_MULTI_SZ",
+                                cm::RegType::ExpandSz => "REG_EXPAND_SZ",
+                                _ => "REG_NONE",
+                            };
+                            outln!("  {}  [{}]  {} bytes", name, type_str, value.data.size);
+                        }
+                    }
+
+                    if info.value_count == 0 {
+                        outln!("  (none)");
+                    }
+                }
+
+                cm::cm_close_key(handle);
+            }
+            Err(e) => {
+                outln!("Error opening key: {:?}", e);
+            }
+        }
+    }
+}
+
+fn show_reg_info(path: &str) {
+    use crate::cm;
+
+    outln!("Registry Key Info: {}", path);
+    outln!("{}", "=".repeat(path.len() + 19));
+    outln!("");
+
+    unsafe {
+        match cm::cm_open_key(path) {
+            Ok(handle) => {
+                // Use enhanced query with KeyFullInformation
+                match cm::cm_query_key_ex(handle, cm::KeyInformationClass::KeyFullInformation) {
+                    Ok(cm::KeyQueryResult::Full(info)) => {
+                        outln!("Full Key Information:");
+                        outln!("  Last Write Time:      {:#x}", info.last_write_time);
+                        outln!("  Title Index:          {}", info.title_index);
+                        outln!("  Subkey Count:         {}", info.subkey_count);
+                        outln!("  Max Subkey Name Len:  {} bytes", info.max_subkey_name_length);
+                        outln!("  Max Subkey Class Len: {} bytes", info.max_subkey_class_length);
+                        outln!("  Value Count:          {}", info.value_count);
+                        outln!("  Max Value Name Len:   {} bytes", info.max_value_name_length);
+                        outln!("  Max Value Data Len:   {} bytes", info.max_value_data_length);
+                    }
+                    Ok(_) => {
+                        outln!("Unexpected result type");
+                    }
+                    Err(e) => {
+                        outln!("Error querying key info: {:?}", e);
+                    }
+                }
+
+                outln!("");
+
+                // Get path
+                if let Some(full_path) = cm::cm_get_key_full_path(handle) {
+                    outln!("Full Path: {}", full_path);
+                }
+
+                cm::cm_close_key(handle);
+            }
+            Err(e) => {
+                outln!("Error opening key: {:?}", e);
+            }
+        }
+    }
 }

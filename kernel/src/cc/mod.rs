@@ -6,6 +6,7 @@
 //! - **Lazy Writer**: Writes dirty pages back to disk in background
 //! - **Read Ahead**: Prefetches data anticipating sequential access
 //! - **Write Behind**: Batches writes for efficiency
+//! - **Prefetching**: Proactive loading based on application traces
 //!
 //! # Architecture
 //!
@@ -13,12 +14,15 @@
 //! - Virtual Address Control Block (VACB) - 256KB mapping windows
 //! - Shared Cache Map - Per-file cache state
 //! - Private Cache Map - Per-handle cache state
+//! - Prefetcher - Scenario-based proactive caching
 //!
 //! # Key Structures
 //!
 //! - `SharedCacheMap`: Per-file cache state and VACB array
 //! - `PrivateCacheMap`: Per-handle read-ahead state
 //! - `CacheView`: Mapped view of cached data
+//! - `PrefetchTrace`: Application launch trace
+//! - `PrefetchScenario`: Stored prefetch data
 //!
 //! # NT API
 //!
@@ -27,10 +31,13 @@
 //! - `CcCopyRead` / `CcCopyWrite` - Cached read/write
 //! - `CcMapData` / `CcUnpinData` - Map data into memory
 //! - `CcFlushCache` - Flush dirty data to disk
+//! - `CcPfBeginTrace` / `CcPfEndTrace` - Prefetch tracing
 
 use core::ptr;
 use crate::ke::spinlock::SpinLock;
 use crate::mm::PAGE_SIZE;
+
+pub mod prefetch;
 
 /// Size of a VACB mapping (256KB - standard NT cache granularity)
 pub const VACB_MAPPING_SIZE: usize = 256 * 1024;
@@ -1209,5 +1216,80 @@ pub fn init() {
         }
     }
 
+    // Initialize prefetcher
+    prefetch::init();
+
     crate::serial_println!("[CC] Cache Manager initialized");
+}
+
+// ============================================================================
+// Prefetch Integration
+// ============================================================================
+
+// Re-export prefetch types
+pub use prefetch::{
+    ScenarioType, TraceState, PrefetchStats, PrefetchQueryResult,
+    TraceSnapshot, PrefetchFileHeader,
+};
+
+/// Start a prefetch trace for an application launch
+///
+/// Called when an application is about to be launched.
+pub fn cc_pf_begin_app_launch(exe_path: &str, process_id: u32) -> Option<usize> {
+    prefetch::pf_begin_trace(prefetch::ScenarioType::App, exe_path, process_id)
+}
+
+/// End a prefetch trace
+///
+/// Called when the application has finished launching (or failed).
+pub fn cc_pf_end_app_launch(trace_index: usize, success: bool) {
+    prefetch::pf_end_trace(trace_index, success)
+}
+
+/// Apply prefetch data for an application
+///
+/// Called before launching an application to preload its data.
+/// Returns the number of pages that were prefetched.
+pub fn cc_pf_prefetch_app(exe_path: &str) -> u32 {
+    prefetch::pf_prefetch_scenario(exe_path)
+}
+
+/// Get combined cache and prefetch statistics
+#[derive(Debug, Clone, Copy)]
+pub struct CombinedCacheStats {
+    pub cache: CacheStats,
+    pub prefetch: prefetch::PrefetchStats,
+}
+
+/// Get combined cache and prefetch statistics
+pub fn cc_get_combined_stats() -> CombinedCacheStats {
+    CombinedCacheStats {
+        cache: cc_get_stats(),
+        prefetch: prefetch::pf_get_stats(),
+    }
+}
+
+/// Notify prefetcher of a page fault (called from MM)
+pub fn cc_pf_notify_fault(process_id: u32, file_object: usize, file_hash: u32, offset: u64) {
+    prefetch::pf_record_fault(process_id, file_object, file_hash, offset);
+}
+
+/// Notify prefetcher of I/O (called from IO manager)
+pub fn cc_pf_notify_io(process_id: u32) {
+    prefetch::pf_record_io(process_id);
+}
+
+/// Get prefetch scenario count
+pub fn cc_pf_scenario_count() -> usize {
+    prefetch::pf_scenario_count()
+}
+
+/// Get active prefetch trace count
+pub fn cc_pf_active_traces() -> usize {
+    prefetch::pf_active_trace_count()
+}
+
+/// Get prefetch trace snapshots for diagnostics
+pub fn cc_pf_get_traces() -> ([TraceSnapshot; 8], usize) {
+    prefetch::pf_get_trace_snapshots()
 }

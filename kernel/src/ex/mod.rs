@@ -30,6 +30,7 @@ pub mod luid;
 pub mod pushlock;
 pub mod resource;
 pub mod rundown;
+pub mod sysinfo;
 pub mod worker;
 // pub mod pool;      // Uses mm::pool
 // pub mod timer;     // Uses ke::timer
@@ -43,4 +44,5 @@ pub use luid::*;
 pub use pushlock::*;
 pub use resource::*;
 pub use rundown::*;
+pub use sysinfo::*;
 pub use worker::*;

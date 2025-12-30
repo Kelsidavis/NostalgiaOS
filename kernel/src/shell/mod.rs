@@ -148,23 +148,23 @@ const HISTORY_SIZE: usize = 32;
 const COMMANDS: &[&str] = &[
     "acpi", "apic", "apcq",
     "blocks", "bt",
-    "callback", "cat", "cd", "cid", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
-    "debug", "del", "desc", "descriptor", "devdrv", "dir", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
+    "cache", "callback", "cat", "cc", "cd", "cid", "clear", "cls", "copy", "cp", "cpufeatures", "cpuinfo",
+    "debug", "del", "desc", "descriptor", "devdrv", "dir", "disk", "dmi", "dpcq", "dump", "echo", "erase", "ex", "exception", "exit",
     "files",
-    "hal", "handles", "help", "history", "hpet",
+    "hal", "handles", "heap", "help", "history", "hpet",
     "int", "io", "iocp", "ioq", "irql", "irqstat",
     "job", "ke", "keyedev",
     "ldr", "lookaside", "ls", "luid",
     "md", "mem", "memmap", "memory", "mkdir", "mm", "msr", "mv",
     "net",
     "ob", "obdir",
-    "pagetable", "pci", "pe", "peb", "pfn", "pipes", "pool", "pooltag", "port", "prcb", "ps", "pwd",
+    "pagetable", "partition", "pci", "pe", "peb", "pfn", "pipes", "pool", "pooltag", "port", "prcb", "prefetch", "ps", "pwd",
     "quit",
-    "ramdisk", "rd", "reboot", "ren", "rename", "resume", "rm", "rmdir", "rtl",
+    "ramdisk", "rd", "reboot", "reg", "ren", "rename", "resume", "rm", "rmdir", "rtl",
     "sc", "sched", "se", "section", "services", "smbios", "stack", "suspend", "sysinfo",
     "tasks", "teb", "time", "timer", "timerq", "touch", "type",
     "usertest",
-    "vad", "veh", "ver", "version", "volumes",
+    "vad", "veh", "ver", "verifier", "version", "volumes",
     "waitq", "worker", "wset",
 ];
 
@@ -1163,6 +1163,9 @@ impl Shell {
         // Handle table viewer
         } else if eq_ignore_case(cmd, "handles") {
             commands::cmd_handles(&args[1..argc]);
+        // RTL Heap viewer
+        } else if eq_ignore_case(cmd, "heap") {
+            commands::cmd_heap(&args[1..argc]);
         // PRCB viewer
         } else if eq_ignore_case(cmd, "prcb") {
             commands::cmd_prcb(&args[1..argc]);
@@ -1199,6 +1202,9 @@ impl Shell {
         // RAM disk viewer
         } else if eq_ignore_case(cmd, "ramdisk") {
             commands::cmd_ramdisk(&args[1..argc]);
+        // Registry browser
+        } else if eq_ignore_case(cmd, "reg") {
+            commands::cmd_reg(&args[1..argc]);
         // Volume viewer
         } else if eq_ignore_case(cmd, "volumes") {
             commands::cmd_volumes(&args[1..argc]);
@@ -1244,6 +1250,18 @@ impl Shell {
         // User-mode test
         } else if eq_ignore_case(cmd, "usertest") {
             commands::cmd_usertest(&args[1..argc]);
+        // Cache Manager viewer
+        } else if eq_ignore_case(cmd, "cc") || eq_ignore_case(cmd, "cache") {
+            commands::cmd_cc(&args[1..argc]);
+        // Prefetch viewer
+        } else if eq_ignore_case(cmd, "prefetch") {
+            commands::cmd_prefetch(&args[1..argc]);
+        // Driver Verifier
+        } else if eq_ignore_case(cmd, "verifier") {
+            commands::cmd_verifier(&args[1..argc]);
+        // Disk/Partition viewer
+        } else if eq_ignore_case(cmd, "disk") || eq_ignore_case(cmd, "partition") {
+            commands::cmd_disk(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");

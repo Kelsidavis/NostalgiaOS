@@ -457,9 +457,7 @@ pub fn mm_get_size_classes() -> &'static [usize] {
 // Global Allocator (optional)
 // ============================================================================
 
-// Global allocator - disabled unless "alloc" feature is enabled
-// The feature doesn't exist yet but code is ready for future use
-#[cfg(any())]  // Effectively disabled - use #[cfg(feature = "alloc")] when ready
+// Global allocator for heap allocation support
 mod global_allocator {
     use super::*;
     use core::alloc::{GlobalAlloc, Layout};

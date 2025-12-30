@@ -49,6 +49,42 @@ pub mod pipe_type {
     pub const BYTE_READ: u32 = 0x0000;
     /// Read in message mode
     pub const MESSAGE_READ: u32 = 0x0002;
+    /// Non-blocking mode
+    pub const NOWAIT: u32 = 0x0004;
+    /// Accept remote connections
+    pub const ACCEPT_REMOTE_CLIENTS: u32 = 0x0008;
+    /// Reject remote connections
+    pub const REJECT_REMOTE_CLIENTS: u32 = 0x0010;
+}
+
+/// Pipe wait flags
+pub mod pipe_wait {
+    /// Wait forever for pipe
+    pub const INFINITE: u64 = u64::MAX;
+    /// Default timeout in milliseconds
+    pub const DEFAULT_TIMEOUT_MS: u64 = 5000;
+}
+
+/// Pipe FSCTL codes
+pub mod pipe_fsctl {
+    /// Peek at pipe data
+    pub const FSCTL_PIPE_PEEK: u32 = 0x0011400C;
+    /// Wait for pipe to become available
+    pub const FSCTL_PIPE_WAIT: u32 = 0x00110018;
+    /// Disconnect pipe
+    pub const FSCTL_PIPE_DISCONNECT: u32 = 0x00110004;
+    /// Listen for connection
+    pub const FSCTL_PIPE_LISTEN: u32 = 0x00110008;
+    /// Transact (write then read)
+    pub const FSCTL_PIPE_TRANSACT: u32 = 0x0011C017;
+    /// Impersonate client
+    pub const FSCTL_PIPE_IMPERSONATE: u32 = 0x0011001C;
+    /// Get client computer name
+    pub const FSCTL_PIPE_GET_CLIENT_COMPUTER_NAME: u32 = 0x00110418;
+    /// Set client computer name
+    pub const FSCTL_PIPE_SET_CLIENT_COMPUTER_NAME: u32 = 0x00110418;
+    /// Query client process info
+    pub const FSCTL_PIPE_GET_CONNECTION_ATTRIBUTE: u32 = 0x00114003;
 }
 
 /// Pipe state
@@ -103,6 +139,41 @@ pub struct PipeInstance {
     pub in_use: bool,
 }
 
+/// Message header for message-mode pipes
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct MessageHeader {
+    /// Message length
+    pub length: u16,
+    /// Reserved flags
+    pub flags: u16,
+}
+
+impl MessageHeader {
+    pub const SIZE: usize = 4;
+
+    pub const fn new(length: u16) -> Self {
+        Self { length, flags: 0 }
+    }
+
+    pub fn to_bytes(&self) -> [u8; 4] {
+        let mut bytes = [0u8; 4];
+        bytes[0..2].copy_from_slice(&self.length.to_le_bytes());
+        bytes[2..4].copy_from_slice(&self.flags.to_le_bytes());
+        bytes
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() < 4 {
+            return None;
+        }
+        Some(Self {
+            length: u16::from_le_bytes([bytes[0], bytes[1]]),
+            flags: u16::from_le_bytes([bytes[2], bytes[3]]),
+        })
+    }
+}
+
 /// Ring buffer for pipe data
 #[repr(C)]
 pub struct PipeBuffer {
@@ -114,6 +185,10 @@ pub struct PipeBuffer {
     write_pos: usize,
     /// Current data count
     count: usize,
+    /// Message mode (true = messages, false = bytes)
+    message_mode: bool,
+    /// Current message being read (for partial reads)
+    current_message_remaining: usize,
 }
 
 impl PipeBuffer {
@@ -124,7 +199,14 @@ impl PipeBuffer {
             read_pos: 0,
             write_pos: 0,
             count: 0,
+            message_mode: false,
+            current_message_remaining: 0,
         }
+    }
+
+    /// Set message mode
+    pub fn set_message_mode(&mut self, enabled: bool) {
+        self.message_mode = enabled;
     }
 
     /// Check if buffer is empty
@@ -147,7 +229,7 @@ impl PipeBuffer {
         self.count
     }
 
-    /// Write data to buffer
+    /// Write data to buffer (byte mode)
     pub fn write(&mut self, data: &[u8]) -> usize {
         let to_write = core::cmp::min(data.len(), self.available());
 
@@ -160,7 +242,38 @@ impl PipeBuffer {
         to_write
     }
 
-    /// Read data from buffer
+    /// Write a complete message (message mode)
+    pub fn write_message(&mut self, data: &[u8]) -> Result<usize, PipeError> {
+        // Need space for header + data
+        let required = MessageHeader::SIZE + data.len();
+        if required > self.available() {
+            return Err(PipeError::BufferFull);
+        }
+
+        if data.len() > u16::MAX as usize {
+            return Err(PipeError::MessageTooLarge);
+        }
+
+        // Write header
+        let header = MessageHeader::new(data.len() as u16);
+        let header_bytes = header.to_bytes();
+        for &byte in &header_bytes {
+            self.data[self.write_pos] = byte;
+            self.write_pos = (self.write_pos + 1) % DEFAULT_BUFFER_SIZE;
+            self.count += 1;
+        }
+
+        // Write data
+        for &byte in data {
+            self.data[self.write_pos] = byte;
+            self.write_pos = (self.write_pos + 1) % DEFAULT_BUFFER_SIZE;
+            self.count += 1;
+        }
+
+        Ok(data.len())
+    }
+
+    /// Read data from buffer (byte mode)
     pub fn read(&mut self, buffer: &mut [u8]) -> usize {
         let to_read = core::cmp::min(buffer.len(), self.count);
 
@@ -171,6 +284,46 @@ impl PipeBuffer {
         }
 
         to_read
+    }
+
+    /// Read a complete message (message mode)
+    /// Returns (bytes read, more_data_in_message)
+    pub fn read_message(&mut self, buffer: &mut [u8]) -> Result<(usize, bool), PipeError> {
+        if self.count == 0 {
+            return Ok((0, false));
+        }
+
+        // If we're continuing a partial message
+        if self.current_message_remaining > 0 {
+            let to_read = core::cmp::min(buffer.len(), self.current_message_remaining);
+            let read = self.read(&mut buffer[..to_read]);
+            self.current_message_remaining -= read;
+            return Ok((read, self.current_message_remaining > 0));
+        }
+
+        // Read new message header
+        if self.count < MessageHeader::SIZE {
+            return Err(PipeError::IncompleteMessage);
+        }
+
+        let mut header_bytes = [0u8; 4];
+        self.peek(&mut header_bytes);
+
+        let header = MessageHeader::from_bytes(&header_bytes)
+            .ok_or(PipeError::InvalidMessageHeader)?;
+
+        // Skip the header
+        self.read_pos = (self.read_pos + MessageHeader::SIZE) % DEFAULT_BUFFER_SIZE;
+        self.count -= MessageHeader::SIZE;
+
+        let message_len = header.length as usize;
+        let to_read = core::cmp::min(buffer.len(), message_len);
+        let read = self.read(&mut buffer[..to_read]);
+
+        // Track remaining bytes in this message
+        self.current_message_remaining = message_len - read;
+
+        Ok((read, self.current_message_remaining > 0))
     }
 
     /// Peek at data without removing it
@@ -186,12 +339,93 @@ impl PipeBuffer {
         to_peek
     }
 
+    /// Peek at the next message's info (for message mode)
+    pub fn peek_message_info(&self) -> Option<(u16, usize)> {
+        if self.count < MessageHeader::SIZE {
+            return None;
+        }
+
+        let mut header_bytes = [0u8; 4];
+        self.peek(&mut header_bytes);
+
+        let header = MessageHeader::from_bytes(&header_bytes)?;
+        let message_len = header.length as usize;
+        let available = if self.count >= MessageHeader::SIZE {
+            (self.count - MessageHeader::SIZE).min(message_len)
+        } else {
+            0
+        };
+
+        Some((header.length, available))
+    }
+
+    /// Get message count in buffer
+    pub fn message_count(&self) -> usize {
+        let mut count = 0;
+        let mut pos = self.read_pos;
+        let mut remaining = self.count;
+
+        while remaining >= MessageHeader::SIZE {
+            // Read header at current position
+            let mut header_bytes = [0u8; 4];
+            for byte in header_bytes.iter_mut() {
+                *byte = self.data[pos];
+                pos = (pos + 1) % DEFAULT_BUFFER_SIZE;
+            }
+
+            if let Some(header) = MessageHeader::from_bytes(&header_bytes) {
+                let message_len = header.length as usize;
+                remaining -= MessageHeader::SIZE;
+
+                if remaining >= message_len {
+                    // Complete message
+                    count += 1;
+                    remaining -= message_len;
+                    pos = (pos + message_len) % DEFAULT_BUFFER_SIZE;
+                } else {
+                    // Partial message
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        count
+    }
+
     /// Clear the buffer
     pub fn clear(&mut self) {
         self.read_pos = 0;
         self.write_pos = 0;
         self.count = 0;
+        self.current_message_remaining = 0;
     }
+}
+
+/// Pipe operation errors
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PipeError {
+    /// Buffer is full
+    BufferFull,
+    /// Message too large for buffer
+    MessageTooLarge,
+    /// Incomplete message in buffer
+    IncompleteMessage,
+    /// Invalid message header
+    InvalidMessageHeader,
+    /// Pipe disconnected
+    Disconnected,
+    /// Pipe not connected
+    NotConnected,
+    /// Pipe is busy
+    Busy,
+    /// Invalid pipe state
+    InvalidState,
+    /// Timeout waiting for pipe
+    Timeout,
+    /// Invalid parameter
+    InvalidParameter,
 }
 
 impl PipeInstance {
@@ -764,6 +998,405 @@ pub fn pipe_type_name(type_flags: u32) -> &'static str {
     } else {
         "Byte"
     }
+}
+
+// ============================================================================
+// Enhanced Pipe Operations (NT-Style)
+// ============================================================================
+
+/// Transact on a pipe (atomic write then read)
+///
+/// This is the FSCTL_PIPE_TRANSACT operation - writes data to the pipe,
+/// then reads the response. Common for RPC-style communication.
+pub unsafe fn io_transact_pipe(
+    instance: *mut PipeInstance,
+    write_buffer: *const u8,
+    write_length: usize,
+    read_buffer: *mut u8,
+    read_length: usize,
+) -> Result<usize, PipeError> {
+    if instance.is_null() {
+        return Err(PipeError::InvalidParameter);
+    }
+
+    let inst = &mut *instance;
+
+    // Must be connected
+    if inst.state != PipeState::Connected || inst.peer.is_null() {
+        return Err(PipeError::NotConnected);
+    }
+
+    // Write data to peer
+    if !write_buffer.is_null() && write_length > 0 {
+        let write_data = core::slice::from_raw_parts(write_buffer, write_length);
+        let peer = &mut *inst.peer;
+
+        // Use message mode if enabled
+        if (inst.type_flags & pipe_type::MESSAGE_TYPE) != 0 {
+            peer.in_buffer.write_message(write_data)?;
+        } else {
+            let written = peer.in_buffer.write(write_data);
+            if written < write_data.len() {
+                return Err(PipeError::BufferFull);
+            }
+        }
+        peer.data_event.set();
+    }
+
+    // Read response
+    if !read_buffer.is_null() && read_length > 0 {
+        let read_buf = core::slice::from_raw_parts_mut(read_buffer, read_length);
+
+        // For message mode, read a complete message
+        if (inst.type_flags & pipe_type::MESSAGE_READ) != 0 {
+            let (read, _more) = inst.in_buffer.read_message(read_buf)?;
+            if inst.in_buffer.is_empty() {
+                inst.data_event.reset();
+            }
+            Ok(read)
+        } else {
+            let read = inst.in_buffer.read(read_buf);
+            if inst.in_buffer.is_empty() {
+                inst.data_event.reset();
+            }
+            Ok(read)
+        }
+    } else {
+        Ok(0)
+    }
+}
+
+/// Write a message to pipe (message mode)
+pub unsafe fn io_write_pipe_message(
+    instance: *mut PipeInstance,
+    buffer: *const u8,
+    length: usize,
+) -> Result<usize, PipeError> {
+    if instance.is_null() || buffer.is_null() {
+        return Err(PipeError::InvalidParameter);
+    }
+
+    let inst = &mut *instance;
+
+    if inst.state != PipeState::Connected || inst.peer.is_null() {
+        return Err(PipeError::NotConnected);
+    }
+
+    let data = core::slice::from_raw_parts(buffer, length);
+    let peer = &mut *inst.peer;
+
+    peer.in_buffer.write_message(data)?;
+    peer.data_event.set();
+
+    Ok(length)
+}
+
+/// Read a message from pipe (message mode)
+/// Returns (bytes_read, more_data_remaining)
+pub unsafe fn io_read_pipe_message(
+    instance: *mut PipeInstance,
+    buffer: *mut u8,
+    length: usize,
+) -> Result<(usize, bool), PipeError> {
+    if instance.is_null() || buffer.is_null() {
+        return Err(PipeError::InvalidParameter);
+    }
+
+    let inst = &mut *instance;
+    let buf = core::slice::from_raw_parts_mut(buffer, length);
+
+    let result = inst.in_buffer.read_message(buf)?;
+
+    if inst.in_buffer.is_empty() {
+        inst.data_event.reset();
+    }
+
+    Ok(result)
+}
+
+/// Wait for a named pipe to become available
+///
+/// This waits for a server instance to start listening.
+pub unsafe fn io_wait_named_pipe(
+    name: &[u8],
+    _timeout_ms: u64,
+) -> Result<(), PipeError> {
+    let _guard = PIPE_LOCK.lock();
+
+    let name_hash = hash_name(name);
+
+    for pipe in PIPE_POOL.iter() {
+        if pipe.in_use && pipe.name_hash == name_hash && pipe.name_matches(name) {
+            // Check if any instance is listening or can accept connections
+            for instance in pipe.instances.iter() {
+                if instance.in_use && instance.state == PipeState::Listening {
+                    return Ok(());
+                }
+            }
+
+            // Pipe exists but no listening instance
+            // In a full implementation, we would wait on an event
+            return Err(PipeError::Busy);
+        }
+    }
+
+    Err(PipeError::NotConnected)
+}
+
+/// Peek at named pipe data
+#[repr(C)]
+pub struct PipePeekInfo {
+    /// Pipe state
+    pub state: u32,
+    /// Bytes available to read
+    pub read_data_available: u32,
+    /// Number of messages available (message mode)
+    pub number_of_messages_left: u32,
+    /// Size of next message (message mode)
+    pub message_length: u32,
+}
+
+impl PipePeekInfo {
+    pub const fn empty() -> Self {
+        Self {
+            state: 0,
+            read_data_available: 0,
+            number_of_messages_left: 0,
+            message_length: 0,
+        }
+    }
+}
+
+/// Get pipe peek information
+pub unsafe fn io_peek_named_pipe_info(
+    instance: *mut PipeInstance,
+) -> Result<PipePeekInfo, PipeError> {
+    if instance.is_null() {
+        return Err(PipeError::InvalidParameter);
+    }
+
+    let inst = &*instance;
+
+    let mut info = PipePeekInfo::empty();
+    info.state = inst.state as u32;
+    info.read_data_available = inst.in_buffer.len() as u32;
+
+    // Message mode info
+    if (inst.type_flags & pipe_type::MESSAGE_TYPE) != 0 {
+        info.number_of_messages_left = inst.in_buffer.message_count() as u32;
+        if let Some((msg_len, _available)) = inst.in_buffer.peek_message_info() {
+            info.message_length = msg_len as u32;
+        }
+    }
+
+    Ok(info)
+}
+
+/// Handle FSCTL operation on pipe
+pub unsafe fn io_fsctl_pipe(
+    instance: *mut PipeInstance,
+    fsctl_code: u32,
+    _input_buffer: *const u8,
+    _input_length: usize,
+    output_buffer: *mut u8,
+    output_length: usize,
+) -> Result<usize, PipeError> {
+    if instance.is_null() {
+        return Err(PipeError::InvalidParameter);
+    }
+
+    match fsctl_code {
+        pipe_fsctl::FSCTL_PIPE_PEEK => {
+            // Return peek info
+            let info = io_peek_named_pipe_info(instance)?;
+            if output_length >= core::mem::size_of::<PipePeekInfo>() && !output_buffer.is_null() {
+                let out_ptr = output_buffer as *mut PipePeekInfo;
+                *out_ptr = info;
+                Ok(core::mem::size_of::<PipePeekInfo>())
+            } else {
+                Ok(0)
+            }
+        }
+        pipe_fsctl::FSCTL_PIPE_LISTEN => {
+            if io_listen_pipe(instance) {
+                Ok(0)
+            } else {
+                Err(PipeError::InvalidState)
+            }
+        }
+        pipe_fsctl::FSCTL_PIPE_DISCONNECT => {
+            (*instance).disconnect();
+            Ok(0)
+        }
+        pipe_fsctl::FSCTL_PIPE_WAIT => {
+            // Already handled by io_wait_named_pipe
+            Ok(0)
+        }
+        _ => Err(PipeError::InvalidParameter),
+    }
+}
+
+/// Set pipe read mode
+pub unsafe fn io_set_pipe_read_mode(
+    instance: *mut PipeInstance,
+    message_mode: bool,
+) -> Result<(), PipeError> {
+    if instance.is_null() {
+        return Err(PipeError::InvalidParameter);
+    }
+
+    let inst = &mut *instance;
+
+    if message_mode {
+        inst.type_flags |= pipe_type::MESSAGE_READ;
+        inst.in_buffer.set_message_mode(true);
+    } else {
+        inst.type_flags &= !pipe_type::MESSAGE_READ;
+        inst.in_buffer.set_message_mode(false);
+    }
+
+    Ok(())
+}
+
+/// Get pipe handle info
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct PipeHandleInfo {
+    /// Flags
+    pub flags: u32,
+    /// Read mode (byte or message)
+    pub read_mode: u32,
+    /// Max instances
+    pub max_instances: u32,
+    /// Inbound quota
+    pub in_buffer_size: u32,
+    /// Outbound quota
+    pub out_buffer_size: u32,
+}
+
+impl PipeHandleInfo {
+    pub const fn empty() -> Self {
+        Self {
+            flags: 0,
+            read_mode: 0,
+            max_instances: 0,
+            in_buffer_size: 0,
+            out_buffer_size: 0,
+        }
+    }
+}
+
+/// Get information about a pipe handle
+pub unsafe fn io_get_pipe_handle_info(
+    instance: *mut PipeInstance,
+) -> Result<PipeHandleInfo, PipeError> {
+    if instance.is_null() {
+        return Err(PipeError::InvalidParameter);
+    }
+
+    let inst = &*instance;
+
+    Ok(PipeHandleInfo {
+        flags: inst.type_flags,
+        read_mode: if (inst.type_flags & pipe_type::MESSAGE_READ) != 0 { 1 } else { 0 },
+        max_instances: MAX_PIPE_INSTANCES as u32,
+        in_buffer_size: DEFAULT_BUFFER_SIZE as u32,
+        out_buffer_size: DEFAULT_BUFFER_SIZE as u32,
+    })
+}
+
+/// Call a named pipe (client: open + transact + close)
+///
+/// Convenience function for simple RPC-style calls.
+pub unsafe fn io_call_named_pipe(
+    name: &[u8],
+    write_buffer: *const u8,
+    write_length: usize,
+    read_buffer: *mut u8,
+    read_length: usize,
+    _timeout_ms: u64,
+) -> Result<usize, PipeError> {
+    // Open the pipe
+    let instance = io_open_named_pipe(name);
+    if instance.is_null() {
+        return Err(PipeError::NotConnected);
+    }
+
+    // Transact
+    let result = io_transact_pipe(
+        instance,
+        write_buffer,
+        write_length,
+        read_buffer,
+        read_length,
+    );
+
+    // Close the pipe (even if transact failed)
+    io_close_pipe_instance(instance);
+
+    result
+}
+
+/// Pipe local info for queries
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct PipeLocalInfo {
+    /// Pipe type (byte or message)
+    pub pipe_type: u32,
+    /// Pipe end (server or client)
+    pub pipe_end: u32,
+    /// Max instances
+    pub max_instances: u32,
+    /// Current instances
+    pub current_instances: u32,
+    /// Inbound quota
+    pub in_buffer_size: u32,
+    /// Bytes in read buffer
+    pub read_data_available: u32,
+    /// Outbound quota
+    pub out_buffer_size: u32,
+    /// Bytes in write buffer
+    pub write_data_available: u32,
+}
+
+impl PipeLocalInfo {
+    pub const fn empty() -> Self {
+        Self {
+            pipe_type: 0,
+            pipe_end: 0,
+            max_instances: 0,
+            current_instances: 0,
+            in_buffer_size: 0,
+            read_data_available: 0,
+            out_buffer_size: 0,
+            write_data_available: 0,
+        }
+    }
+}
+
+/// Query local pipe information
+pub unsafe fn io_query_pipe_local_info(
+    instance: *mut PipeInstance,
+) -> Result<PipeLocalInfo, PipeError> {
+    if instance.is_null() {
+        return Err(PipeError::InvalidParameter);
+    }
+
+    let inst = &*instance;
+
+    let pipe_type = if (inst.type_flags & pipe_type::MESSAGE_TYPE) != 0 { 1 } else { 0 };
+    let pipe_end = inst.end as u32;
+
+    Ok(PipeLocalInfo {
+        pipe_type,
+        pipe_end,
+        max_instances: MAX_PIPE_INSTANCES as u32,
+        current_instances: 1, // Would need to track parent pipe
+        in_buffer_size: DEFAULT_BUFFER_SIZE as u32,
+        read_data_available: inst.in_buffer.len() as u32,
+        out_buffer_size: DEFAULT_BUFFER_SIZE as u32,
+        write_data_available: inst.out_buffer.len() as u32,
+    })
 }
 
 // ============================================================================

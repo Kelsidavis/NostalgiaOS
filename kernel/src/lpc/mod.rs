@@ -40,8 +40,9 @@
 //! - Cancellation
 //! - Security contexts
 
-pub mod port;
+pub mod alpc;
 pub mod message;
+pub mod port;
 
 
 // Re-export types
@@ -78,12 +79,42 @@ pub use message::{
     lpc_send_datagram,
 };
 
+// Re-export ALPC types
+pub use alpc::{
+    AlpcPortAttributes,
+    AlpcPortAttributeFlags,
+    AlpcMessageAttributes,
+    AlpcMessageAttributeFlags,
+    AlpcDataView,
+    AlpcDataViewFlags,
+    AlpcSecurityAttribute,
+    AlpcContextAttribute,
+    AlpcHandleAttribute,
+    AlpcCompletionInfo,
+    AlpcPortExtension,
+    AlpcInformationClass,
+    AlpcBasicInformation,
+    AlpcStatistics,
+    SecurityQos,
+    ImpersonationLevel,
+    ContextTrackingMode,
+    alpc_create_port,
+    alpc_enable_port,
+    alpc_create_data_view,
+    alpc_delete_data_view,
+    alpc_set_completion_port,
+    alpc_send_with_view,
+    alpc_query_information,
+    alpc_get_statistics,
+};
+
 /// Initialize the LPC subsystem
 pub fn init() {
     crate::serial_println!("[LPC] Initializing Local Procedure Call subsystem...");
 
     port::init();
     message::init();
+    alpc::init();
 
-    crate::serial_println!("[LPC] LPC subsystem initialized");
+    crate::serial_println!("[LPC] LPC/ALPC subsystem initialized");
 }

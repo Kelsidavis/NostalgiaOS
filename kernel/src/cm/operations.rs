@@ -12,6 +12,8 @@
 //! - `cm_enumerate_key` - Enumerate subkeys
 //! - `cm_enumerate_value` - Enumerate values
 
+extern crate alloc;
+
 use super::key::{
     CmKeyNode,
     cm_allocate_key, cm_free_key, cm_get_key, cm_get_key_mut,
@@ -505,6 +507,739 @@ pub struct CmKeyInfo {
     pub value_count: usize,
     pub last_write_time: u64,
     pub is_volatile: bool,
+}
+
+// ============================================================================
+// NT-Style Information Classes
+// ============================================================================
+
+/// Key information class for NtQueryKey/NtEnumerateKey
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum KeyInformationClass {
+    /// Basic key information (name, last write time)
+    KeyBasicInformation = 0,
+    /// Node information (name, class name, last write time)
+    KeyNodeInformation = 1,
+    /// Full information (name, class, subkey/value counts)
+    KeyFullInformation = 2,
+    /// Just the key name
+    KeyNameInformation = 3,
+    /// Cached key information
+    KeyCachedInformation = 4,
+    /// Key flags information
+    KeyFlagsInformation = 5,
+    /// Virtualization information
+    KeyVirtualizationInformation = 6,
+    /// Handle tags information
+    KeyHandleTagsInformation = 7,
+}
+
+/// Value information class for NtQueryValueKey/NtEnumerateValueKey
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum KeyValueInformationClass {
+    /// Basic value information (name, type, data length)
+    KeyValueBasicInformation = 0,
+    /// Full information (name, type, data)
+    KeyValueFullInformation = 1,
+    /// Partial information (type, data only)
+    KeyValuePartialInformation = 2,
+    /// Partial information aligned to 64-bit
+    KeyValuePartialInformationAlign64 = 3,
+    /// Full information aligned to 64-bit
+    KeyValueFullInformationAlign64 = 4,
+}
+
+/// Maximum name length for returned key/value info
+pub const MAX_INFO_NAME_LENGTH: usize = 128;
+
+/// Maximum class name length
+pub const MAX_CLASS_NAME_LENGTH: usize = 64;
+
+/// KEY_BASIC_INFORMATION structure
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct KeyBasicInformation {
+    /// Last write time (100-ns intervals since 1601)
+    pub last_write_time: u64,
+    /// Title index (usually 0)
+    pub title_index: u32,
+    /// Name length in bytes
+    pub name_length: u32,
+    /// Key name (variable length, up to MAX_INFO_NAME_LENGTH)
+    pub name: [u8; MAX_INFO_NAME_LENGTH],
+}
+
+impl KeyBasicInformation {
+    pub const fn empty() -> Self {
+        Self {
+            last_write_time: 0,
+            title_index: 0,
+            name_length: 0,
+            name: [0; MAX_INFO_NAME_LENGTH],
+        }
+    }
+
+    /// Get the name as a string slice
+    pub fn get_name(&self) -> &str {
+        let len = (self.name_length as usize).min(MAX_INFO_NAME_LENGTH);
+        core::str::from_utf8(&self.name[..len]).unwrap_or("")
+    }
+}
+
+/// KEY_NODE_INFORMATION structure
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct KeyNodeInformation {
+    /// Last write time
+    pub last_write_time: u64,
+    /// Title index
+    pub title_index: u32,
+    /// Offset to class name from structure start
+    pub class_offset: u32,
+    /// Class name length in bytes
+    pub class_length: u32,
+    /// Name length in bytes
+    pub name_length: u32,
+    /// Key name
+    pub name: [u8; MAX_INFO_NAME_LENGTH],
+    /// Class name
+    pub class_name: [u8; MAX_CLASS_NAME_LENGTH],
+}
+
+impl KeyNodeInformation {
+    pub const fn empty() -> Self {
+        Self {
+            last_write_time: 0,
+            title_index: 0,
+            class_offset: 0,
+            class_length: 0,
+            name_length: 0,
+            name: [0; MAX_INFO_NAME_LENGTH],
+            class_name: [0; MAX_CLASS_NAME_LENGTH],
+        }
+    }
+
+    /// Get the name as a string slice
+    pub fn get_name(&self) -> &str {
+        let len = (self.name_length as usize).min(MAX_INFO_NAME_LENGTH);
+        core::str::from_utf8(&self.name[..len]).unwrap_or("")
+    }
+
+    /// Get the class name as a string slice
+    pub fn get_class_name(&self) -> &str {
+        let len = (self.class_length as usize).min(MAX_CLASS_NAME_LENGTH);
+        core::str::from_utf8(&self.class_name[..len]).unwrap_or("")
+    }
+}
+
+/// KEY_FULL_INFORMATION structure
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct KeyFullInformation {
+    /// Last write time
+    pub last_write_time: u64,
+    /// Title index
+    pub title_index: u32,
+    /// Offset to class name
+    pub class_offset: u32,
+    /// Class name length
+    pub class_length: u32,
+    /// Number of subkeys
+    pub subkey_count: u32,
+    /// Maximum subkey name length
+    pub max_subkey_name_length: u32,
+    /// Maximum subkey class length
+    pub max_subkey_class_length: u32,
+    /// Number of values
+    pub value_count: u32,
+    /// Maximum value name length
+    pub max_value_name_length: u32,
+    /// Maximum value data length
+    pub max_value_data_length: u32,
+    /// Class name
+    pub class_name: [u8; MAX_CLASS_NAME_LENGTH],
+}
+
+impl KeyFullInformation {
+    pub const fn empty() -> Self {
+        Self {
+            last_write_time: 0,
+            title_index: 0,
+            class_offset: 0,
+            class_length: 0,
+            subkey_count: 0,
+            max_subkey_name_length: 0,
+            max_subkey_class_length: 0,
+            value_count: 0,
+            max_value_name_length: 0,
+            max_value_data_length: 0,
+            class_name: [0; MAX_CLASS_NAME_LENGTH],
+        }
+    }
+}
+
+/// KEY_NAME_INFORMATION structure
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct KeyNameInformation {
+    /// Name length in bytes
+    pub name_length: u32,
+    /// Key name
+    pub name: [u8; MAX_INFO_NAME_LENGTH],
+}
+
+impl KeyNameInformation {
+    pub const fn empty() -> Self {
+        Self {
+            name_length: 0,
+            name: [0; MAX_INFO_NAME_LENGTH],
+        }
+    }
+
+    /// Get the name as a string slice
+    pub fn get_name(&self) -> &str {
+        let len = (self.name_length as usize).min(MAX_INFO_NAME_LENGTH);
+        core::str::from_utf8(&self.name[..len]).unwrap_or("")
+    }
+}
+
+/// KEY_CACHED_INFORMATION structure
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct KeyCachedInformation {
+    /// Last write time
+    pub last_write_time: u64,
+    /// Title index
+    pub title_index: u32,
+    /// Number of subkeys
+    pub subkey_count: u32,
+    /// Maximum subkey name length
+    pub max_subkey_name_length: u32,
+    /// Number of values
+    pub value_count: u32,
+    /// Maximum value name length
+    pub max_value_name_length: u32,
+    /// Maximum value data length
+    pub max_value_data_length: u32,
+    /// Name length
+    pub name_length: u32,
+}
+
+impl KeyCachedInformation {
+    pub const fn empty() -> Self {
+        Self {
+            last_write_time: 0,
+            title_index: 0,
+            subkey_count: 0,
+            max_subkey_name_length: 0,
+            value_count: 0,
+            max_value_name_length: 0,
+            max_value_data_length: 0,
+            name_length: 0,
+        }
+    }
+}
+
+/// Maximum value data in returned info
+pub const MAX_INFO_VALUE_DATA: usize = 256;
+
+/// KEY_VALUE_BASIC_INFORMATION structure
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct KeyValueBasicInformation {
+    /// Title index
+    pub title_index: u32,
+    /// Value type (REG_SZ, REG_DWORD, etc.)
+    pub value_type: u32,
+    /// Name length in bytes
+    pub name_length: u32,
+    /// Value name
+    pub name: [u8; MAX_INFO_NAME_LENGTH],
+}
+
+impl KeyValueBasicInformation {
+    pub const fn empty() -> Self {
+        Self {
+            title_index: 0,
+            value_type: 0,
+            name_length: 0,
+            name: [0; MAX_INFO_NAME_LENGTH],
+        }
+    }
+
+    /// Get the name as a string slice
+    pub fn get_name(&self) -> &str {
+        let len = (self.name_length as usize).min(MAX_INFO_NAME_LENGTH);
+        core::str::from_utf8(&self.name[..len]).unwrap_or("")
+    }
+}
+
+/// KEY_VALUE_FULL_INFORMATION structure
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct KeyValueFullInformation {
+    /// Title index
+    pub title_index: u32,
+    /// Value type
+    pub value_type: u32,
+    /// Offset to data from structure start
+    pub data_offset: u32,
+    /// Data length
+    pub data_length: u32,
+    /// Name length
+    pub name_length: u32,
+    /// Value name
+    pub name: [u8; MAX_INFO_NAME_LENGTH],
+    /// Value data
+    pub data: [u8; MAX_INFO_VALUE_DATA],
+}
+
+impl KeyValueFullInformation {
+    pub const fn empty() -> Self {
+        Self {
+            title_index: 0,
+            value_type: 0,
+            data_offset: 0,
+            data_length: 0,
+            name_length: 0,
+            name: [0; MAX_INFO_NAME_LENGTH],
+            data: [0; MAX_INFO_VALUE_DATA],
+        }
+    }
+
+    /// Get the name as a string slice
+    pub fn get_name(&self) -> &str {
+        let len = (self.name_length as usize).min(MAX_INFO_NAME_LENGTH);
+        core::str::from_utf8(&self.name[..len]).unwrap_or("")
+    }
+
+    /// Get the data bytes
+    pub fn get_data(&self) -> &[u8] {
+        let len = (self.data_length as usize).min(MAX_INFO_VALUE_DATA);
+        &self.data[..len]
+    }
+}
+
+/// KEY_VALUE_PARTIAL_INFORMATION structure
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+pub struct KeyValuePartialInformation {
+    /// Title index
+    pub title_index: u32,
+    /// Value type
+    pub value_type: u32,
+    /// Data length
+    pub data_length: u32,
+    /// Value data
+    pub data: [u8; MAX_INFO_VALUE_DATA],
+}
+
+impl KeyValuePartialInformation {
+    pub const fn empty() -> Self {
+        Self {
+            title_index: 0,
+            value_type: 0,
+            data_length: 0,
+            data: [0; MAX_INFO_VALUE_DATA],
+        }
+    }
+
+    /// Get the data bytes
+    pub fn get_data(&self) -> &[u8] {
+        let len = (self.data_length as usize).min(MAX_INFO_VALUE_DATA);
+        &self.data[..len]
+    }
+}
+
+// ============================================================================
+// Enhanced Enumeration APIs (NT-Style)
+// ============================================================================
+
+/// Query key information (NtQueryKey equivalent)
+pub unsafe fn cm_query_key_ex(
+    handle: CmKeyHandle,
+    info_class: KeyInformationClass,
+) -> Result<KeyQueryResult, CmStatus> {
+    let key = cm_get_key(handle.index()).ok_or(CmStatus::InvalidKey)?;
+    let key_pool = super::key::cm_get_key_pool();
+
+    match info_class {
+        KeyInformationClass::KeyBasicInformation => {
+            let mut info = KeyBasicInformation::empty();
+            info.last_write_time = key.last_write_time;
+            info.title_index = 0;
+
+            let name = key.name.as_str();
+            let name_bytes = name.as_bytes();
+            let len = name_bytes.len().min(MAX_INFO_NAME_LENGTH);
+            info.name[..len].copy_from_slice(&name_bytes[..len]);
+            info.name_length = len as u32;
+
+            Ok(KeyQueryResult::Basic(info))
+        }
+        KeyInformationClass::KeyNodeInformation => {
+            let mut info = KeyNodeInformation::empty();
+            info.last_write_time = key.last_write_time;
+            info.title_index = 0;
+
+            let name = key.name.as_str();
+            let name_bytes = name.as_bytes();
+            let len = name_bytes.len().min(MAX_INFO_NAME_LENGTH);
+            info.name[..len].copy_from_slice(&name_bytes[..len]);
+            info.name_length = len as u32;
+
+            // Class name is typically empty for most keys
+            info.class_offset = 0;
+            info.class_length = 0;
+
+            Ok(KeyQueryResult::Node(info))
+        }
+        KeyInformationClass::KeyFullInformation => {
+            let mut info = KeyFullInformation::empty();
+            info.last_write_time = key.last_write_time;
+            info.title_index = 0;
+            info.subkey_count = key.subkey_count as u32;
+            info.value_count = key.value_count as u32;
+
+            // Calculate max subkey name length
+            let mut max_subkey_name = 0u32;
+            for i in 0..key.subkey_count as usize {
+                let subkey_idx = key.subkeys[i] as usize;
+                if subkey_idx < key_pool.len() {
+                    let name_len = key_pool[subkey_idx].name.length as u32;
+                    if name_len > max_subkey_name {
+                        max_subkey_name = name_len;
+                    }
+                }
+            }
+            info.max_subkey_name_length = max_subkey_name;
+            info.max_subkey_class_length = 0;
+
+            // Calculate max value name/data lengths
+            let mut max_value_name = 0u32;
+            let mut max_value_data = 0u32;
+            for i in 0..key.value_count as usize {
+                let name_len = key.values[i].name.length as u32;
+                let data_len = key.values[i].data.size as u32;
+                if name_len > max_value_name {
+                    max_value_name = name_len;
+                }
+                if data_len > max_value_data {
+                    max_value_data = data_len;
+                }
+            }
+            info.max_value_name_length = max_value_name;
+            info.max_value_data_length = max_value_data;
+
+            Ok(KeyQueryResult::Full(info))
+        }
+        KeyInformationClass::KeyNameInformation => {
+            let mut info = KeyNameInformation::empty();
+
+            let name = key.name.as_str();
+            let name_bytes = name.as_bytes();
+            let len = name_bytes.len().min(MAX_INFO_NAME_LENGTH);
+            info.name[..len].copy_from_slice(&name_bytes[..len]);
+            info.name_length = len as u32;
+
+            Ok(KeyQueryResult::Name(info))
+        }
+        KeyInformationClass::KeyCachedInformation => {
+            let mut info = KeyCachedInformation::empty();
+            info.last_write_time = key.last_write_time;
+            info.title_index = 0;
+            info.subkey_count = key.subkey_count as u32;
+            info.value_count = key.value_count as u32;
+            info.name_length = key.name.length as u32;
+
+            // Calculate max lengths
+            let mut max_subkey_name = 0u32;
+            for i in 0..key.subkey_count as usize {
+                let subkey_idx = key.subkeys[i] as usize;
+                if subkey_idx < key_pool.len() {
+                    let name_len = key_pool[subkey_idx].name.length as u32;
+                    if name_len > max_subkey_name {
+                        max_subkey_name = name_len;
+                    }
+                }
+            }
+            info.max_subkey_name_length = max_subkey_name;
+
+            let mut max_value_name = 0u32;
+            let mut max_value_data = 0u32;
+            for i in 0..key.value_count as usize {
+                let name_len = key.values[i].name.length as u32;
+                let data_len = key.values[i].data.size as u32;
+                if name_len > max_value_name {
+                    max_value_name = name_len;
+                }
+                if data_len > max_value_data {
+                    max_value_data = data_len;
+                }
+            }
+            info.max_value_name_length = max_value_name;
+            info.max_value_data_length = max_value_data;
+
+            Ok(KeyQueryResult::Cached(info))
+        }
+        _ => Err(CmStatus::InvalidParameter),
+    }
+}
+
+/// Result of key query
+#[derive(Debug, Clone, Copy)]
+pub enum KeyQueryResult {
+    Basic(KeyBasicInformation),
+    Node(KeyNodeInformation),
+    Full(KeyFullInformation),
+    Name(KeyNameInformation),
+    Cached(KeyCachedInformation),
+}
+
+/// Enumerate key with information class (NtEnumerateKey equivalent)
+pub unsafe fn cm_enumerate_key_ex(
+    handle: CmKeyHandle,
+    index: usize,
+    info_class: KeyInformationClass,
+) -> Result<KeyQueryResult, CmStatus> {
+    let subkey_handle = cm_enumerate_key(handle, index)?;
+    cm_query_key_ex(subkey_handle, info_class)
+}
+
+/// Query value with information class (NtQueryValueKey equivalent)
+pub unsafe fn cm_query_value_ex(
+    handle: CmKeyHandle,
+    value_name: &str,
+    info_class: KeyValueInformationClass,
+) -> Result<ValueQueryResult, CmStatus> {
+    let key = cm_get_key(handle.index()).ok_or(CmStatus::InvalidKey)?;
+    let value = key.find_value(value_name).ok_or(CmStatus::ValueNotFound)?;
+
+    match info_class {
+        KeyValueInformationClass::KeyValueBasicInformation => {
+            let mut info = KeyValueBasicInformation::empty();
+            info.title_index = 0;
+            info.value_type = value.value_type as u32;
+
+            let name = value.name.as_str();
+            let name_bytes = name.as_bytes();
+            let len = name_bytes.len().min(MAX_INFO_NAME_LENGTH);
+            info.name[..len].copy_from_slice(&name_bytes[..len]);
+            info.name_length = len as u32;
+
+            Ok(ValueQueryResult::Basic(info))
+        }
+        KeyValueInformationClass::KeyValueFullInformation
+        | KeyValueInformationClass::KeyValueFullInformationAlign64 => {
+            let mut info = KeyValueFullInformation::empty();
+            info.title_index = 0;
+            info.value_type = value.value_type as u32;
+
+            let name = value.name.as_str();
+            let name_bytes = name.as_bytes();
+            let name_len = name_bytes.len().min(MAX_INFO_NAME_LENGTH);
+            info.name[..name_len].copy_from_slice(&name_bytes[..name_len]);
+            info.name_length = name_len as u32;
+
+            let data_bytes = value.data.as_bytes();
+            let data_len = data_bytes.len().min(MAX_INFO_VALUE_DATA);
+            info.data[..data_len].copy_from_slice(&data_bytes[..data_len]);
+            info.data_length = data_len as u32;
+            info.data_offset = core::mem::size_of::<u32>() as u32 * 5
+                + MAX_INFO_NAME_LENGTH as u32;
+
+            Ok(ValueQueryResult::Full(info))
+        }
+        KeyValueInformationClass::KeyValuePartialInformation
+        | KeyValueInformationClass::KeyValuePartialInformationAlign64 => {
+            let mut info = KeyValuePartialInformation::empty();
+            info.title_index = 0;
+            info.value_type = value.value_type as u32;
+
+            let data_bytes = value.data.as_bytes();
+            let data_len = data_bytes.len().min(MAX_INFO_VALUE_DATA);
+            info.data[..data_len].copy_from_slice(&data_bytes[..data_len]);
+            info.data_length = data_len as u32;
+
+            Ok(ValueQueryResult::Partial(info))
+        }
+    }
+}
+
+/// Result of value query
+#[derive(Debug, Clone, Copy)]
+pub enum ValueQueryResult {
+    Basic(KeyValueBasicInformation),
+    Full(KeyValueFullInformation),
+    Partial(KeyValuePartialInformation),
+}
+
+/// Enumerate value with information class (NtEnumerateValueKey equivalent)
+pub unsafe fn cm_enumerate_value_ex(
+    handle: CmKeyHandle,
+    index: usize,
+    info_class: KeyValueInformationClass,
+) -> Result<ValueQueryResult, CmStatus> {
+    let key = cm_get_key(handle.index()).ok_or(CmStatus::InvalidKey)?;
+
+    let values = key.enumerate_values();
+    if index >= values.len() {
+        return Err(CmStatus::NoMoreEntries);
+    }
+
+    let value = &values[index];
+
+    match info_class {
+        KeyValueInformationClass::KeyValueBasicInformation => {
+            let mut info = KeyValueBasicInformation::empty();
+            info.title_index = 0;
+            info.value_type = value.value_type as u32;
+
+            let name = value.name.as_str();
+            let name_bytes = name.as_bytes();
+            let len = name_bytes.len().min(MAX_INFO_NAME_LENGTH);
+            info.name[..len].copy_from_slice(&name_bytes[..len]);
+            info.name_length = len as u32;
+
+            Ok(ValueQueryResult::Basic(info))
+        }
+        KeyValueInformationClass::KeyValueFullInformation
+        | KeyValueInformationClass::KeyValueFullInformationAlign64 => {
+            let mut info = KeyValueFullInformation::empty();
+            info.title_index = 0;
+            info.value_type = value.value_type as u32;
+
+            let name = value.name.as_str();
+            let name_bytes = name.as_bytes();
+            let name_len = name_bytes.len().min(MAX_INFO_NAME_LENGTH);
+            info.name[..name_len].copy_from_slice(&name_bytes[..name_len]);
+            info.name_length = name_len as u32;
+
+            let data_bytes = value.data.as_bytes();
+            let data_len = data_bytes.len().min(MAX_INFO_VALUE_DATA);
+            info.data[..data_len].copy_from_slice(&data_bytes[..data_len]);
+            info.data_length = data_len as u32;
+            info.data_offset = core::mem::size_of::<u32>() as u32 * 5
+                + MAX_INFO_NAME_LENGTH as u32;
+
+            Ok(ValueQueryResult::Full(info))
+        }
+        KeyValueInformationClass::KeyValuePartialInformation
+        | KeyValueInformationClass::KeyValuePartialInformationAlign64 => {
+            let mut info = KeyValuePartialInformation::empty();
+            info.title_index = 0;
+            info.value_type = value.value_type as u32;
+
+            let data_bytes = value.data.as_bytes();
+            let data_len = data_bytes.len().min(MAX_INFO_VALUE_DATA);
+            info.data[..data_len].copy_from_slice(&data_bytes[..data_len]);
+            info.data_length = data_len as u32;
+
+            Ok(ValueQueryResult::Partial(info))
+        }
+    }
+}
+
+/// Get full key path (useful for debugging)
+pub unsafe fn cm_get_key_full_path(handle: CmKeyHandle) -> Option<alloc::string::String> {
+    use alloc::string::String;
+    use alloc::vec::Vec;
+
+    let mut path_parts: Vec<&str> = Vec::new();
+    let mut current = handle.index();
+
+    // Walk up the key tree
+    while current != u32::MAX {
+        let key = cm_get_key(current)?;
+        path_parts.push(key.name.as_str());
+        current = key.parent;
+    }
+
+    // Reverse and join
+    path_parts.reverse();
+    let path = path_parts.join("\\");
+    Some(String::from("\\") + &path)
+}
+
+/// Count subkeys matching a pattern
+pub unsafe fn cm_count_subkeys_matching(
+    handle: CmKeyHandle,
+    pattern: &str,
+) -> Result<usize, CmStatus> {
+    let key = cm_get_key(handle.index()).ok_or(CmStatus::InvalidKey)?;
+    let key_pool = super::key::cm_get_key_pool();
+
+    let mut count = 0;
+    for i in 0..key.subkey_count as usize {
+        let subkey_idx = key.subkeys[i] as usize;
+        if subkey_idx < key_pool.len() {
+            let subkey_name = key_pool[subkey_idx].name.as_str();
+            if subkey_name.contains(pattern) {
+                count += 1;
+            }
+        }
+    }
+
+    Ok(count)
+}
+
+/// Find subkey by name pattern
+pub unsafe fn cm_find_subkey(
+    handle: CmKeyHandle,
+    name: &str,
+) -> Result<CmKeyHandle, CmStatus> {
+    let key = cm_get_key(handle.index()).ok_or(CmStatus::InvalidKey)?;
+    let key_pool = super::key::cm_get_key_pool();
+
+    let subkey_idx = key.find_subkey_index(name, key_pool)
+        .ok_or(CmStatus::KeyNotFound)?;
+
+    Ok(CmKeyHandle::new(subkey_idx))
+}
+
+/// Check if key has subkey with given name
+pub unsafe fn cm_key_has_subkey(handle: CmKeyHandle, name: &str) -> bool {
+    cm_find_subkey(handle, name).is_ok()
+}
+
+/// Check if key has value with given name
+pub unsafe fn cm_key_has_value(handle: CmKeyHandle, name: &str) -> bool {
+    if let Some(key) = cm_get_key(handle.index()) {
+        key.find_value(name).is_some()
+    } else {
+        false
+    }
+}
+
+/// Flush key (persist changes to disk)
+pub unsafe fn cm_flush_key(handle: CmKeyHandle) -> CmStatus {
+    let key = match cm_get_key_mut(handle.index()) {
+        Some(k) => k,
+        None => return CmStatus::InvalidKey,
+    };
+
+    // Clear dirty flag
+    key.clear_flag(key_flags::KEY_DIRTY);
+
+    // In a full implementation, this would write to the hive file
+    CmStatus::Success
+}
+
+/// Notify on key change (placeholder for future implementation)
+pub unsafe fn cm_notify_change_key(
+    handle: CmKeyHandle,
+    _watch_subtree: bool,
+    _notify_filter: u32,
+) -> CmStatus {
+    if cm_get_key(handle.index()).is_none() {
+        return CmStatus::InvalidKey;
+    }
+
+    // In a full implementation, this would set up change notification
+    // For now, just return success
+    CmStatus::Success
 }
 
 // ============================================================================
