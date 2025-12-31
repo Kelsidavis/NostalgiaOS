@@ -28195,6 +28195,160 @@ pub fn cmd_arbiter(args: &[&str]) {
 }
 
 // ============================================================================
+// CACHE Command - Cache Manager Information
+// ============================================================================
+
+/// CACHE command - show cache manager information
+pub fn cmd_cache(args: &[&str]) {
+    use crate::cc;
+
+    if args.iter().any(|a| *a == "/?") {
+        outln!("CACHE - Cache Manager Viewer");
+        outln!("");
+        outln!("Usage: cache [stats | lazy | prefetch | maps | flush]");
+        outln!("");
+        outln!("  (no args)  Show cache manager overview");
+        outln!("  stats      Show cache statistics");
+        outln!("  lazy       Show lazy writer status");
+        outln!("  prefetch   Show prefetcher status");
+        outln!("  maps       Show active cache maps");
+        outln!("  flush      Force flush all dirty data");
+        return;
+    }
+
+    let subcmd = if !args.is_empty() { args[0].to_ascii_lowercase() } else { "".into() };
+
+    if subcmd == "stats" {
+        let stats = cc::cc_get_stats();
+        outln!("Cache Statistics:");
+        outln!("=================");
+        outln!("");
+        outln!("  Total Reads:       {}", stats.total_reads);
+        outln!("  Cache Hits:        {}", stats.cache_hits);
+        outln!("  Cache Misses:      {}", stats.cache_misses);
+        outln!("  Hit Rate:          {}%", stats.hit_rate_percent());
+        outln!("");
+        outln!("  Total Writes:      {}", stats.total_writes);
+        outln!("  Dirty Pages:       {}", stats.dirty_pages);
+        outln!("  Active Cache Maps: {}", stats.active_cache_maps);
+    } else if subcmd == "lazy" {
+        let lw_stats = cc::cc_get_lazy_writer_stats();
+        let lw = cc::lazywrite::get_lazy_writer();
+        let deferred = cc::cc_get_deferred_write_count();
+
+        outln!("Lazy Writer Status:");
+        outln!("===================");
+        outln!("");
+        outln!("  Enabled:           {}", if cc::cc_is_lazy_writer_enabled() { "Yes" } else { "No" });
+        outln!("  Active:            {}", if lw.is_active() { "Yes" } else { "No" });
+        outln!("  Dirty Pages:       {}", lw.dirty_pages());
+        outln!("  Deferred Writes:   {}", deferred);
+        outln!("");
+        outln!("Statistics:");
+        outln!("  Scans:             {}", lw_stats.scans);
+        outln!("  Pages Written:     {}", lw_stats.pages_written);
+        outln!("  Write I/Os:        {}", lw_stats.write_ios);
+        outln!("  Hot Spots:         {}", lw_stats.hot_spots);
+        outln!("  Data Flushes:      {}", lw_stats.data_flushes);
+        outln!("  Deferred Queued:   {}", lw_stats.deferred_writes);
+        outln!("  Deferred Complete: {}", lw_stats.deferred_completed);
+        outln!("  Lost Writes:       {}", lw_stats.lost_delayed_writes);
+        outln!("  Lazy Closes:       {}", lw_stats.lazy_closes);
+    } else if subcmd == "prefetch" {
+        let pf_stats = cc::prefetch::pf_get_stats();
+        let enabled = cc::prefetch::pf_is_enabled();
+        let scenarios = cc::cc_pf_scenario_count();
+        let traces = cc::cc_pf_active_traces();
+
+        outln!("Prefetcher Status:");
+        outln!("==================");
+        outln!("");
+        outln!("  Enabled:           {}", if enabled { "Yes" } else { "No" });
+        outln!("  Stored Scenarios:  {}", scenarios);
+        outln!("  Active Traces:     {}", traces);
+        outln!("");
+        outln!("Statistics:");
+        outln!("  Traces Started:    {}", pf_stats.traces_started);
+        outln!("  Traces Completed:  {}", pf_stats.traces_completed);
+        outln!("  Traces Aborted:    {}", pf_stats.traces_aborted);
+        outln!("  Pages Prefetched:  {}", pf_stats.pages_prefetched);
+        outln!("  Prefetch Hits:     {}", pf_stats.prefetch_hits);
+        outln!("  Prefetch Misses:   {}", pf_stats.prefetch_misses);
+        outln!("  Hit Rate:          {}%", pf_stats.hit_rate_percent());
+
+        // Show active traces
+        if traces > 0 {
+            let (snapshots, count) = cc::cc_pf_get_traces();
+            outln!("");
+            outln!("Active Traces:");
+            for i in 0..count {
+                let t = &snapshots[i];
+                outln!("  [{:2}] PID={:5} pages={:4} sections={:2}",
+                    t.index, t.process_id, t.pages_faulted, t.section_count);
+            }
+        }
+    } else if subcmd == "maps" {
+        let (snapshots, count) = cc::cc_get_cache_snapshots(32);
+
+        outln!("Active Cache Maps:");
+        outln!("==================");
+        outln!("");
+
+        if count == 0 {
+            outln!("  (no active cache maps)");
+        } else {
+            outln!("  {:>4}  {:>12}  {:>6}  {:>6}", "Idx", "FileSize", "VACBs", "Dirty");
+            outln!("  {:->4}  {:->12}  {:->6}  {:->6}", "", "", "", "");
+            for i in 0..count {
+                let m = &snapshots[i];
+                outln!("  {:>4}  {:>12}  {:>6}  {:>6}",
+                    m.index, m.file_size, m.active_vacbs, m.dirty_pages);
+            }
+        }
+        outln!("");
+        outln!("Total: {} cache maps", count);
+    } else if subcmd == "flush" {
+        outln!("Flushing all dirty cache data...");
+        unsafe {
+            cc::cc_flush_all();
+        }
+        outln!("Done.");
+    } else {
+        // Overview
+        let stats = cc::cc_get_stats();
+        let lw_stats = cc::cc_get_lazy_writer_stats();
+        let pf_stats = cc::prefetch::pf_get_stats();
+        let lw = cc::lazywrite::get_lazy_writer();
+
+        outln!("Cache Manager Overview");
+        outln!("======================");
+        outln!("");
+        outln!("Cache Statistics:");
+        outln!("  Reads: {}  Hits: {} ({}%)  Writes: {}",
+            stats.total_reads, stats.cache_hits,
+            stats.hit_rate_percent(), stats.total_writes);
+        outln!("  Active Maps: {}  Dirty Pages: {}",
+            stats.active_cache_maps, stats.dirty_pages);
+        outln!("");
+        outln!("Lazy Writer:");
+        outln!("  Status: {}  Dirty: {}  Scans: {}",
+            if lw.is_active() { "Active" } else { "Idle" },
+            lw.dirty_pages(), lw_stats.scans);
+        outln!("  Pages Written: {}  Deferred: {}",
+            lw_stats.pages_written, cc::cc_get_deferred_write_count());
+        outln!("");
+        outln!("Prefetcher:");
+        outln!("  Status: {}  Scenarios: {}  Traces: {}",
+            if cc::prefetch::pf_is_enabled() { "Enabled" } else { "Disabled" },
+            cc::cc_pf_scenario_count(), cc::cc_pf_active_traces());
+        outln!("  Pages Prefetched: {}  Hit Rate: {}%",
+            pf_stats.pages_prefetched, pf_stats.hit_rate_percent());
+        outln!("");
+        outln!("Use 'cache <subcommand>' for detailed views.");
+    }
+}
+
+// ============================================================================
 // LOGMAN Command - Performance Logs and Alerts
 // ============================================================================
 

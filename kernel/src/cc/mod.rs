@@ -38,6 +38,7 @@ use crate::ke::spinlock::SpinLock;
 use crate::mm::PAGE_SIZE;
 
 pub mod prefetch;
+pub mod lazywrite;
 
 /// Size of a VACB mapping (256KB - standard NT cache granularity)
 pub const VACB_MAPPING_SIZE: usize = 256 * 1024;
@@ -761,36 +762,74 @@ pub fn cc_set_lazy_writer(enabled: bool) {
     }
 }
 
+/// Check if lazy writer is enabled
+pub fn cc_is_lazy_writer_enabled() -> bool {
+    unsafe { LAZY_WRITER_ENABLED }
+}
+
 /// Lazy writer tick - called periodically to flush dirty data
 pub unsafe fn cc_lazy_writer_tick() {
     if !LAZY_WRITER_ENABLED {
         return;
     }
 
-    let _guard = CACHE_LOCK.lock();
+    // Use the enhanced lazy writer
+    lazywrite::lazy_writer_tick();
+}
 
-    // Scan for dirty cache maps and flush some pages
-    for i in 0..MAX_CACHED_FILES {
-        if CACHE_MAP_BITMAP & (1 << i) != 0 {
-            let map = &mut CACHE_MAP_POOL[i];
+/// Schedule a lazy write scan
+pub fn cc_schedule_lazy_write_scan(fast_scan: bool) {
+    lazywrite::schedule_lazy_write_scan(fast_scan);
+}
 
-            // Find oldest dirty VACB with zero refs
-            let mut dirty_vacb_idx: Option<usize> = None;
-            for (idx, vacb) in map.vacbs.iter().enumerate() {
-                if vacb.is_dirty() && vacb.ref_count == 0 {
-                    dirty_vacb_idx = Some(idx);
-                    break;
-                }
-            }
+/// Wait for current lazy writer activity
+pub fn cc_wait_for_lazy_writer() -> i32 {
+    lazywrite::cc_wait_for_current_lazy_writer_activity()
+}
 
-            // Flush it if found
-            if let Some(idx) = dirty_vacb_idx {
-                let vacb = &mut map.vacbs[idx];
-                // Clear dirty state directly (simulating write to file)
-                vacb.clear_dirty();
-            }
-        }
-    }
+/// Get lazy writer statistics
+pub fn cc_get_lazy_writer_stats() -> lazywrite::LazyWriterStats {
+    lazywrite::get_stats()
+}
+
+/// Check if a write can proceed
+pub fn cc_can_i_write_ex(
+    cache_map: *mut SharedCacheMap,
+    bytes_to_write: u32,
+    wait: bool,
+    retrying: bool,
+) -> bool {
+    lazywrite::cc_can_i_write(cache_map, bytes_to_write, wait, retrying)
+}
+
+/// Defer a write for later
+pub fn cc_defer_write_ex(
+    cache_map: *mut SharedCacheMap,
+    bytes_to_write: u32,
+    retrying: bool,
+) {
+    lazywrite::cc_defer_write(cache_map, bytes_to_write, retrying);
+}
+
+/// Get deferred write count
+pub fn cc_get_deferred_write_count() -> u32 {
+    lazywrite::get_deferred_write_count()
+}
+
+/// Set dirty page thresholds
+pub fn cc_set_dirty_page_thresholds(threshold: u32, target: u32) {
+    lazywrite::set_dirty_page_threshold(threshold);
+    lazywrite::set_dirty_page_target(target);
+}
+
+/// Notify lazy writer of new dirty pages
+pub fn cc_notify_dirty_pages(count: u32) {
+    lazywrite::get_lazy_writer().add_dirty_pages(count);
+}
+
+/// Notify lazy writer of cleaned pages
+pub fn cc_notify_clean_pages(count: u32) {
+    lazywrite::get_lazy_writer().remove_dirty_pages(count);
 }
 
 // ============================================================================
@@ -1216,6 +1255,9 @@ pub fn init() {
         }
     }
 
+    // Initialize lazy writer
+    lazywrite::init();
+
     // Initialize prefetcher
     prefetch::init();
 
@@ -1293,3 +1335,13 @@ pub fn cc_pf_active_traces() -> usize {
 pub fn cc_pf_get_traces() -> ([TraceSnapshot; 8], usize) {
     prefetch::pf_get_trace_snapshots()
 }
+
+// ============================================================================
+// Lazy Writer Re-exports
+// ============================================================================
+
+// Re-export lazy writer types
+pub use lazywrite::{
+    LazyWriterStats, WorkFunction, WorkQueueEntry, DeferredWrite,
+    LAZY_WRITER_IDLE_DELAY, LAZY_WRITER_MAX_AGE_TARGET, MAX_WRITE_BEHIND,
+};

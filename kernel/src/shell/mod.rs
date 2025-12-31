@@ -1322,6 +1322,9 @@ impl Shell {
         // ARBITER - resource arbiter
         } else if eq_ignore_case(cmd, "arbiter") {
             commands::cmd_arbiter(&args[1..argc]);
+        // CACHE - cache manager
+        } else if eq_ignore_case(cmd, "cache") {
+            commands::cmd_cache(&args[1..argc]);
         // ARP cache
         } else if eq_ignore_case(cmd, "arp") {
             commands::cmd_arp(&args[1..argc]);
