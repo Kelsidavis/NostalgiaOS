@@ -184,14 +184,64 @@ extern "x86-interrupt" fn page_fault_handler(
 ) {
     use x86_64::registers::control::Cr2;
 
-    let faulting_address = Cr2::read();
+    let faulting_address = Cr2::read().unwrap_or(x86_64::VirtAddr::zero());
+    let fault_addr_u64 = faulting_address.as_u64();
+
+    // Parse error code to determine access type
+    let is_write = error_code.contains(PageFaultErrorCode::CAUSED_BY_WRITE);
+    let is_user = error_code.contains(PageFaultErrorCode::USER_MODE);
+    let is_protection_violation = error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION);
+    let is_instruction_fetch = error_code.contains(PageFaultErrorCode::INSTRUCTION_FETCH);
+
+    // Try to handle the fault through the memory manager
+    unsafe {
+        // Get the current address space
+        let aspace = crate::mm::mm_get_system_address_space();
+
+        // Attempt to resolve the page fault
+        if crate::mm::mm_access_fault(aspace, fault_addr_u64, is_write, is_user) {
+            // Fault was successfully handled - return to continue execution
+            return;
+        }
+    }
+
+    // Fault could not be handled - this is a real fault
+    // Generate appropriate error based on context
+    let fault_type = if is_protection_violation {
+        if is_write {
+            "WRITE ACCESS VIOLATION"
+        } else if is_instruction_fetch {
+            "INSTRUCTION FETCH VIOLATION"
+        } else {
+            "READ ACCESS VIOLATION"
+        }
+    } else {
+        "PAGE NOT PRESENT"
+    };
+
+    let mode = if is_user { "USER MODE" } else { "KERNEL MODE" };
 
     panic!(
-        "EXCEPTION: PAGE FAULT\n\
-        Accessed Address: {:?}\n\
-        Error Code: {:?}\n\
-        {:#?}",
-        faulting_address, error_code, stack_frame
+        "EXCEPTION: PAGE FAULT ({})\n\
+        Fault Type:      {}\n\
+        Access Mode:     {}\n\
+        Faulting Address: 0x{:016x}\n\
+        Error Code:      {:?}\n\
+        Instruction Ptr: 0x{:016x}\n\
+        Stack Pointer:   0x{:016x}\n\
+        Code Segment:    0x{:04x}\n\
+        Stack Segment:   0x{:04x}\n\
+        CPU Flags:       0x{:016x}",
+        if is_user { "USER" } else { "KERNEL" },
+        fault_type,
+        mode,
+        fault_addr_u64,
+        error_code,
+        stack_frame.instruction_pointer.as_u64(),
+        stack_frame.stack_pointer.as_u64(),
+        stack_frame.code_segment.0,
+        stack_frame.stack_segment.0,
+        stack_frame.cpu_flags
     );
 }
 

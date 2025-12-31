@@ -13907,7 +13907,7 @@ fn show_section_list() {
 ///
 /// Display working set statistics for address spaces.
 ///
-/// Usage: wset [stats]
+/// Usage: wset [stats|faults]
 pub fn cmd_wset(args: &[&str]) {
     if args.is_empty() {
         show_working_set_stats();
@@ -13918,6 +13918,8 @@ pub fn cmd_wset(args: &[&str]) {
 
     if eq_ignore_ascii_case(subcmd, "stats") {
         show_working_set_stats();
+    } else if eq_ignore_ascii_case(subcmd, "faults") {
+        show_page_fault_stats();
     } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
         outln!("wset - Working Set Viewer");
         outln!("");
@@ -13925,6 +13927,7 @@ pub fn cmd_wset(args: &[&str]) {
         outln!("");
         outln!("Subcommands:");
         outln!("  stats  - Show working set statistics (default)");
+        outln!("  faults - Show page fault statistics");
         outln!("");
         outln!("Working sets track the resident pages for each address space.");
         outln!("Pages not in the working set may be paged out.");
@@ -13947,7 +13950,42 @@ fn show_working_set_stats() {
     outln!("  Allocated: {}", stats.allocated);
     outln!("  Free:      {}", stats.free);
     outln!("");
-    outln!("Note: Use 'mm' command for detailed memory statistics.");
+    outln!("Use 'wset faults' for page fault statistics.");
+}
+
+fn show_page_fault_stats() {
+    use core::sync::atomic::Ordering;
+
+    outln!("Page Fault Statistics");
+    outln!("=====================");
+    outln!("");
+
+    unsafe {
+        let aspace = crate::mm::mm_get_system_address_space();
+        if !aspace.is_null() {
+            let aspace_ref = &*aspace;
+            let hard = aspace_ref.working_set.hard_fault_count.load(Ordering::Relaxed);
+            let soft = aspace_ref.working_set.soft_fault_count.load(Ordering::Relaxed);
+            let total = hard + soft;
+
+            outln!("System Address Space:");
+            outln!("  Total Faults:     {}", total);
+            outln!("  Hard Faults:      {} (page allocation required)", hard);
+            outln!("  Soft Faults:      {} (TLB miss only)", soft);
+            outln!("");
+            outln!("Working Set:");
+            outln!("  Current Size:     {} pages", aspace_ref.working_set.current_size);
+            outln!("  Peak Size:        {} pages", aspace_ref.working_set.peak_size);
+            outln!("  Minimum Size:     {} pages", aspace_ref.working_set.minimum_size);
+            outln!("  Maximum Size:     {} pages", aspace_ref.working_set.maximum_size);
+            outln!("");
+            outln!("Fault Types:");
+            outln!("  Hard Fault: Page not in working set, requires I/O or allocation");
+            outln!("  Soft Fault: Page in memory, just needed TLB refresh");
+        } else {
+            outln!("Error: Could not get system address space");
+        }
+    }
 }
 
 // ============================================================================
