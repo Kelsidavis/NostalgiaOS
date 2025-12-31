@@ -32865,3 +32865,96 @@ fn show_version_info() {
     outln!("");
     outln!("Platform:     {}", if rtl::rtl_is_server() { "Server" } else { "Workstation" });
 }
+
+// =============================================================================
+// LPC (Local Procedure Call) Command
+// =============================================================================
+
+/// LPC diagnostic command
+pub fn cmd_lpc(args: &[&str]) {
+    use crate::lpc;
+
+    if args.is_empty() {
+        outln!("Local Procedure Call (LPC) / Advanced LPC");
+        outln!("");
+        outln!("Usage: lpc <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  stats       Show LPC port and message statistics");
+        outln!("  alpc        Show ALPC-specific statistics");
+        outln!("  info        Show LPC subsystem information");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "stats") {
+        let stats = lpc::lpc_get_port_stats();
+
+        outln!("LPC Port Statistics");
+        outln!("");
+        outln!("Ports:");
+        outln!("  Allocated:    {}", stats.allocated_ports);
+        outln!("  Server Ports: {}", stats.server_ports);
+        outln!("  Client Ports: {}", stats.client_ports);
+        outln!("  Connected:    {}", stats.connected_ports);
+        outln!("");
+        outln!("Messages:");
+        outln!("  Total Sent:     {}", stats.total_messages_sent);
+        outln!("  Total Received: {}", stats.total_messages_received);
+        outln!("");
+        outln!("Limits:");
+        outln!("  Max Ports:           {}", lpc::MAX_PORTS);
+        outln!("  Max Port Name:       {} bytes", lpc::MAX_PORT_NAME_LENGTH);
+        outln!("  Max Message Size:    {} bytes", lpc::MAX_MESSAGE_SIZE);
+        outln!("  Max LPC Data Size:   {} bytes", lpc::MAX_LPC_DATA_SIZE);
+        outln!("  Max Connections/Port: {}", lpc::MAX_CONNECTIONS_PER_PORT);
+
+    } else if eq_ignore_case(cmd, "alpc") {
+        let stats = lpc::alpc_get_statistics();
+
+        outln!("Advanced LPC (ALPC) Statistics");
+        outln!("");
+        outln!("ALPC Extensions:");
+        outln!("  ALPC-Enabled Ports:     {}", stats.alpc_ports);
+        outln!("  Ports with Completion:  {}", stats.ports_with_completion);
+        outln!("");
+        outln!("Data Views:");
+        outln!("  Total Views:      {}", stats.total_views);
+        outln!("  Total View Bytes: {} bytes", stats.total_view_bytes);
+        if stats.total_views > 0 {
+            outln!("  Avg View Size:    {} bytes", stats.total_view_bytes / stats.total_views as usize);
+        }
+
+    } else if eq_ignore_case(cmd, "info") {
+        outln!("LPC Subsystem Information");
+        outln!("");
+        outln!("Overview:");
+        outln!("  LPC (Local Procedure Call) is the NT inter-process");
+        outln!("  communication mechanism for client-server communication.");
+        outln!("");
+        outln!("Port Types:");
+        outln!("  Server Port   - Accepts incoming connections");
+        outln!("  Client Port   - Connects to server ports");
+        outln!("  Communication - Active bidirectional channel");
+        outln!("");
+        outln!("Message Types:");
+        outln!("  LPC_REQUEST          - Client request to server");
+        outln!("  LPC_REPLY            - Server reply to client");
+        outln!("  LPC_DATAGRAM         - One-way message (no reply)");
+        outln!("  LPC_CONNECTION_REQUEST - Client connecting");
+        outln!("  LPC_CONNECTION_REPLY   - Server accepting/rejecting");
+        outln!("  LPC_CLIENT_DIED      - Client process terminated");
+        outln!("  LPC_PORT_CLOSED      - Port was closed");
+        outln!("");
+        outln!("ALPC Extensions:");
+        outln!("  - Completion ports for async I/O");
+        outln!("  - Data views (shared memory sections)");
+        outln!("  - Message cancellation");
+        outln!("  - Security contexts");
+
+    } else {
+        outln!("Unknown lpc command: {}", cmd);
+        outln!("Use 'lpc' for usage information");
+    }
+}
