@@ -48,6 +48,7 @@ pub mod random;
 pub mod string;
 pub mod time;
 pub mod uuid;
+pub mod environ;
 // pub mod splay;  // TODO: Splay trees
 
 // Re-exports for convenience
@@ -68,3 +69,4 @@ pub use random::*;
 pub use string::*;
 pub use time::*;
 pub use uuid::{Uuid, create_uuid, create_sequential_uuid};
+pub use environ::*;

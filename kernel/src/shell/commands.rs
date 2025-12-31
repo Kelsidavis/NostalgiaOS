@@ -32289,3 +32289,178 @@ fn test_nbqueue(args: &[&str]) {
         outln!("Test FAILED: only {} of {} items processed", removed, count);
     }
 }
+
+// =============================================================================
+// Environment Variables Command
+// =============================================================================
+
+pub fn cmd_env(args: &[&str]) {
+    if args.is_empty() {
+        show_env_list();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    // Check if it's a variable assignment (NAME=VALUE)
+    if let Some(eq_pos) = subcmd.find('=') {
+        let name = &subcmd[..eq_pos];
+        let value = &subcmd[eq_pos + 1..];
+        env_set_var(name, value);
+        return;
+    }
+
+    if eq_ignore_ascii_case(subcmd, "list") {
+        show_env_list();
+    } else if eq_ignore_ascii_case(subcmd, "get") {
+        env_get_var(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "set") {
+        if args.len() >= 3 {
+            env_set_var(args[1], args[2]);
+        } else {
+            outln!("Usage: env set <name> <value>");
+        }
+    } else if eq_ignore_ascii_case(subcmd, "unset") || eq_ignore_ascii_case(subcmd, "remove") {
+        env_unset_var(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "expand") {
+        env_expand_string(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "status") {
+        show_env_status();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("env - Environment Variables");
+        outln!("");
+        outln!("Usage: env [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  list              - List all variables (default)");
+        outln!("  get <name>        - Get variable value");
+        outln!("  set <name> <val>  - Set variable value");
+        outln!("  <name>=<value>    - Set variable (shorthand)");
+        outln!("  unset <name>      - Remove variable");
+        outln!("  expand <string>   - Expand %VAR% in string");
+        outln!("  status            - Show environment statistics");
+        outln!("");
+        outln!("Environment variables are used for system configuration");
+        outln!("and process settings. Use %VAR% syntax for expansion.");
+    } else {
+        // Try to get the variable
+        env_get_var_single(subcmd);
+    }
+}
+
+fn show_env_list() {
+    use crate::rtl;
+
+    outln!("System Environment Variables");
+    outln!("============================");
+    outln!("");
+
+    let vars = rtl::rtl_list_environment_variables();
+    if vars.is_empty() {
+        outln!("(no variables set)");
+        return;
+    }
+
+    for (name, value) in vars.iter() {
+        outln!("{}={}", name, value);
+    }
+
+    outln!("");
+    outln!("Total: {} variables", vars.len());
+}
+
+fn env_get_var(args: &[&str]) {
+    if args.is_empty() {
+        outln!("Usage: env get <name>");
+        return;
+    }
+
+    env_get_var_single(args[0]);
+}
+
+fn env_get_var_single(name: &str) {
+    use crate::rtl;
+
+    match rtl::rtl_query_environment_variable(name) {
+        Some(value) => {
+            outln!("{}={}", name, value);
+        }
+        None => {
+            outln!("Variable not found: {}", name);
+        }
+    }
+}
+
+fn env_set_var(name: &str, value: &str) {
+    use crate::rtl;
+
+    match rtl::rtl_set_environment_variable(name, value) {
+        Ok(()) => {
+            outln!("{}={}", name, value);
+        }
+        Err(e) => {
+            outln!("Failed to set variable: {}", e);
+        }
+    }
+}
+
+fn env_unset_var(args: &[&str]) {
+    use crate::rtl;
+
+    if args.is_empty() {
+        outln!("Usage: env unset <name>");
+        return;
+    }
+
+    let name = args[0];
+
+    match rtl::rtl_remove_environment_variable(name) {
+        Ok(()) => {
+            outln!("Removed: {}", name);
+        }
+        Err(e) => {
+            outln!("Failed to remove variable: {}", e);
+        }
+    }
+}
+
+fn env_expand_string(args: &[&str]) {
+    use crate::rtl;
+
+    if args.is_empty() {
+        outln!("Usage: env expand <string>");
+        outln!("  Use %VAR% to reference variables");
+        outln!("");
+        outln!("Example:");
+        outln!("  env expand \"System root is %SYSTEMROOT%\"");
+        return;
+    }
+
+    let input = args.join(" ");
+    let expanded = rtl::rtl_expand_environment_strings(&input);
+    outln!("{}", expanded);
+}
+
+fn show_env_status() {
+    use crate::rtl;
+
+    outln!("Environment Status");
+    outln!("==================");
+    outln!("");
+
+    let stats = rtl::rtl_environ_get_stats();
+
+    outln!("System Environment:");
+    outln!("  Variables:     {}", stats.system_vars);
+    outln!("  Total Size:    {} bytes", stats.system_size);
+    outln!("");
+
+    outln!("Process Environments: {}", stats.process_envs);
+    outln!("");
+
+    outln!("Statistics:");
+    outln!("  Get Operations:    {}", stats.total_get);
+    outln!("  Set Operations:    {}", stats.total_set);
+    outln!("  Remove Operations: {}", stats.total_removed);
+    outln!("  Expand Operations: {}", stats.total_expanded);
+}

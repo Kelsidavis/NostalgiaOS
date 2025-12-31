@@ -1289,6 +1289,9 @@ impl Shell {
         // Non-Blocking Queue
         } else if eq_ignore_case(cmd, "nbqueue") {
             commands::cmd_nbqueue(&args[1..argc]);
+        // Environment Variables
+        } else if eq_ignore_case(cmd, "env") || eq_ignore_case(cmd, "set") {
+            commands::cmd_env(&args[1..argc]);
         // Disk/Partition viewer
         } else if eq_ignore_case(cmd, "disk") || eq_ignore_case(cmd, "partition") {
             commands::cmd_disk(&args[1..argc]);

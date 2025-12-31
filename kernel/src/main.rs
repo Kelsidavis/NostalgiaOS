@@ -458,6 +458,11 @@ fn phase1_init(boot_info: &BootInfo) {
     ex::nbqueue::exp_nbqueue_init();
     kprintln!("  Non-blocking queue subsystem initialized");
 
+    // Initialize Environment Variables subsystem
+    kprintln!("  Initializing environment variables...");
+    rtl::environ::rtl_environ_init();
+    kprintln!("  Environment variables initialized");
+
     // Initialize Service Control Manager
     kprintln!("  Initializing Service Control Manager...");
     svc::scm_initialize();
