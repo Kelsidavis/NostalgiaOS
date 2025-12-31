@@ -33477,3 +33477,98 @@ pub fn cmd_mdl(args: &[&str]) {
         outln!("Use 'mdl' for usage information");
     }
 }
+
+// ============================================================================
+// System Call Trace Command (strace)
+// ============================================================================
+
+/// System call tracing command
+pub fn cmd_strace(args: &[&str]) {
+    use crate::arch::x86_64::syscall;
+
+    if args.is_empty() {
+        outln!("System Call Tracing (strace)");
+        outln!("============================");
+        outln!("");
+        outln!("Usage: strace <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  on        Enable syscall tracing");
+        outln!("  off       Disable syscall tracing");
+        outln!("  status    Show tracing status");
+        outln!("  show      Display recent traced syscalls");
+        outln!("  clear     Clear the trace buffer");
+        outln!("");
+        outln!("Traces system calls with arguments and results.");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "on") || eq_ignore_case(cmd, "enable") {
+        syscall::syscall_trace_enable();
+        outln!("Syscall tracing enabled");
+
+    } else if eq_ignore_case(cmd, "off") || eq_ignore_case(cmd, "disable") {
+        syscall::syscall_trace_disable();
+        outln!("Syscall tracing disabled");
+
+    } else if eq_ignore_case(cmd, "status") {
+        let enabled = syscall::syscall_trace_is_enabled();
+        let count = syscall::syscall_trace_count();
+
+        outln!("Syscall Tracing Status");
+        outln!("======================");
+        outln!("");
+        outln!("Tracing:      {}", if enabled { "ENABLED" } else { "DISABLED" });
+        outln!("Total Traced: {}", count);
+        outln!("");
+
+    } else if eq_ignore_case(cmd, "show") || eq_ignore_case(cmd, "list") {
+        let max = if args.len() > 1 {
+            args[1].parse().unwrap_or(20)
+        } else {
+            20
+        };
+
+        let entries = syscall::syscall_trace_get_entries(max);
+
+        if entries.is_empty() {
+            outln!("No traced syscalls.");
+            outln!("Use 'strace on' to enable tracing.");
+            return;
+        }
+
+        outln!("Recent Syscalls ({} entries)", entries.len());
+        outln!("=====================================");
+        outln!("");
+        outln!("{:<6} {:<25} {:<18} {:<18} {:>12}",
+               "NUM", "NAME", "ARG1", "ARG2", "RESULT");
+        outln!("{}", "-".repeat(80).as_str());
+
+        for entry in entries.iter() {
+            let name = syscall::syscall_name(entry.syscall_num as usize);
+            let result_str = if entry.result >= 0 {
+                alloc::format!("0x{:x}", entry.result)
+            } else {
+                alloc::format!("-0x{:x}", (-entry.result) as u64)
+            };
+
+            outln!("{:<6} {:<25} 0x{:<16x} 0x{:<16x} {:>12}",
+                   entry.syscall_num,
+                   name,
+                   entry.arg1,
+                   entry.arg2,
+                   result_str);
+        }
+        outln!("");
+
+    } else if eq_ignore_case(cmd, "clear") {
+        syscall::syscall_trace_clear();
+        outln!("Trace buffer cleared");
+
+    } else {
+        outln!("Unknown strace command: {}", cmd);
+        outln!("Use 'strace' for usage information");
+    }
+}

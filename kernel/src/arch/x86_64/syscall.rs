@@ -266,6 +266,213 @@ pub type SyscallHandler = fn(usize, usize, usize, usize, usize, usize) -> isize;
 /// Syscall dispatch table
 static mut SYSCALL_TABLE: [Option<SyscallHandler>; MAX_SYSCALLS] = [None; MAX_SYSCALLS];
 
+// ============================================================================
+// Syscall Tracing
+// ============================================================================
+
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use spin::Mutex;
+
+/// Maximum number of traced syscalls to buffer
+const MAX_TRACE_ENTRIES: usize = 64;
+
+/// Syscall trace entry
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SyscallTraceEntry {
+    /// Syscall number
+    pub syscall_num: u32,
+    /// First argument
+    pub arg1: u64,
+    /// Second argument
+    pub arg2: u64,
+    /// Result code
+    pub result: i64,
+    /// Timestamp (ticks)
+    pub timestamp: u64,
+}
+
+/// Trace buffer state
+struct TraceBuffer {
+    entries: [SyscallTraceEntry; MAX_TRACE_ENTRIES],
+    head: usize,
+    count: usize,
+}
+
+impl TraceBuffer {
+    const fn new() -> Self {
+        Self {
+            entries: [SyscallTraceEntry {
+                syscall_num: 0,
+                arg1: 0,
+                arg2: 0,
+                result: 0,
+                timestamp: 0,
+            }; MAX_TRACE_ENTRIES],
+            head: 0,
+            count: 0,
+        }
+    }
+
+    fn push(&mut self, entry: SyscallTraceEntry) {
+        self.entries[self.head] = entry;
+        self.head = (self.head + 1) % MAX_TRACE_ENTRIES;
+        if self.count < MAX_TRACE_ENTRIES {
+            self.count += 1;
+        }
+    }
+
+    fn clear(&mut self) {
+        self.head = 0;
+        self.count = 0;
+    }
+}
+
+/// Global trace state
+static TRACE_ENABLED: AtomicBool = AtomicBool::new(false);
+static TRACE_COUNT: AtomicU64 = AtomicU64::new(0);
+static TRACE_FILTER: AtomicU32 = AtomicU32::new(0xFFFFFFFF); // Trace all by default
+static TRACE_BUFFER: Mutex<TraceBuffer> = Mutex::new(TraceBuffer::new());
+
+/// Enable syscall tracing
+pub fn syscall_trace_enable() {
+    TRACE_ENABLED.store(true, Ordering::SeqCst);
+    crate::serial_println!("[STRACE] Syscall tracing enabled");
+}
+
+/// Disable syscall tracing
+pub fn syscall_trace_disable() {
+    TRACE_ENABLED.store(false, Ordering::SeqCst);
+    crate::serial_println!("[STRACE] Syscall tracing disabled");
+}
+
+/// Check if tracing is enabled
+pub fn syscall_trace_is_enabled() -> bool {
+    TRACE_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Clear the trace buffer
+pub fn syscall_trace_clear() {
+    TRACE_BUFFER.lock().clear();
+    TRACE_COUNT.store(0, Ordering::SeqCst);
+    crate::serial_println!("[STRACE] Trace buffer cleared");
+}
+
+/// Get total trace count
+pub fn syscall_trace_count() -> u64 {
+    TRACE_COUNT.load(Ordering::Relaxed)
+}
+
+/// Set trace filter (bitmask of syscall categories)
+pub fn syscall_trace_set_filter(filter: u32) {
+    TRACE_FILTER.store(filter, Ordering::SeqCst);
+}
+
+/// Get current trace filter
+pub fn syscall_trace_get_filter() -> u32 {
+    TRACE_FILTER.load(Ordering::Relaxed)
+}
+
+extern crate alloc;
+
+/// Get traced entries (returns up to `max_entries` most recent)
+pub fn syscall_trace_get_entries(max_entries: usize) -> alloc::vec::Vec<SyscallTraceEntry> {
+    use alloc::vec::Vec;
+
+    let buffer = TRACE_BUFFER.lock();
+    let count = core::cmp::min(max_entries, buffer.count);
+    let mut result = Vec::with_capacity(count);
+
+    // Get entries in order (oldest to newest)
+    let start = if buffer.count >= MAX_TRACE_ENTRIES {
+        buffer.head
+    } else {
+        0
+    };
+
+    for i in 0..count {
+        let idx = (start + buffer.count - count + i) % MAX_TRACE_ENTRIES;
+        result.push(buffer.entries[idx]);
+    }
+
+    result
+}
+
+/// Get syscall name from number
+pub fn syscall_name(num: usize) -> &'static str {
+    match num {
+        0 => "NtTerminateProcess",
+        1 => "NtTerminateThread",
+        2 => "NtCreateThread",
+        3 => "NtGetCurrentProcessId",
+        4 => "NtGetCurrentThreadId",
+        5 => "NtYieldExecution",
+        6 => "NtDelayExecution",
+        10 => "NtAllocateVirtualMemory",
+        11 => "NtFreeVirtualMemory",
+        12 => "NtProtectVirtualMemory",
+        13 => "NtQueryVirtualMemory",
+        20 => "NtCreateFile",
+        21 => "NtOpenFile",
+        22 => "NtReadFile",
+        23 => "NtWriteFile",
+        24 => "NtClose",
+        25 => "NtQueryInformationFile",
+        26 => "NtSetInformationFile",
+        27 => "NtDeleteFile",
+        28 => "NtQueryDirectoryFile",
+        29 => "NtLockFile",
+        30 => "NtWaitForSingleObject",
+        31 => "NtWaitForMultipleObjects",
+        32 => "NtSetEvent",
+        33 => "NtResetEvent",
+        34 => "NtCreateEvent",
+        35 => "NtReleaseSemaphore",
+        36 => "NtCreateSemaphore",
+        40 => "NtCreateSection",
+        41 => "NtOpenSection",
+        42 => "NtMapViewOfSection",
+        43 => "NtUnmapViewOfSection",
+        52 => "NtDebugPrint",
+        60 => "NtCreateKey",
+        61 => "NtOpenKey",
+        62 => "NtCloseKey",
+        63 => "NtQueryValueKey",
+        64 => "NtSetValueKey",
+        80 => "NtDuplicateHandle",
+        81 => "NtQueryObject",
+        90 => "NtSuspendThread",
+        91 => "NtResumeThread",
+        92 => "NtSuspendProcess",
+        93 => "NtResumeProcess",
+        100 => "NtQuerySystemInformation",
+        110 => "NtLockVirtualMemory",
+        111 => "NtUnlockVirtualMemory",
+        _ => "Unknown",
+    }
+}
+
+/// Record a syscall trace entry
+fn trace_syscall(syscall_num: usize, arg1: usize, arg2: usize, result: isize) {
+    if !TRACE_ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+
+    // Increment trace count
+    TRACE_COUNT.fetch_add(1, Ordering::Relaxed);
+
+    // Create entry
+    let entry = SyscallTraceEntry {
+        syscall_num: syscall_num as u32,
+        arg1: arg1 as u64,
+        arg2: arg2 as u64,
+        result: result as i64,
+        timestamp: crate::hal::rtc::get_system_time(),
+    };
+
+    // Add to buffer
+    TRACE_BUFFER.lock().push(entry);
+}
+
 /// Read an MSR
 #[inline]
 unsafe fn rdmsr(msr: u32) -> u64 {
@@ -733,7 +940,7 @@ extern "C" fn syscall_dispatcher(
     // Get handler from table
     let handler = unsafe { SYSCALL_TABLE[syscall_num] };
 
-    match handler {
+    let result = match handler {
         Some(func) => {
             // Call the handler
             func(arg1, arg2, arg3, arg4, arg5, arg6)
@@ -742,7 +949,12 @@ extern "C" fn syscall_dispatcher(
             crate::serial_println!("[SYSCALL] Unimplemented syscall: {}", syscall_num);
             STATUS_NOT_IMPLEMENTED
         }
-    }
+    };
+
+    // Record trace entry if tracing is enabled
+    trace_syscall(syscall_num, arg1, arg2, result);
+
+    result
 }
 
 // ============================================================================
