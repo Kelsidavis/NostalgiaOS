@@ -24960,7 +24960,17 @@ pub fn cmd_compact(args: &[&str]) {
 // ============================================================================
 
 /// WMIC command - Windows Management Instrumentation command-line
+/// Uses kernel subsystems for real system information
 pub fn cmd_wmic(args: &[&str]) {
+    use crate::ps::{get_cid_stats, get_process_cid_snapshots, CidEntryType};
+    use crate::svc::{self, ServiceState};
+    use crate::io::disk::{get_volume_stats, io_get_volume_snapshots};
+    use crate::fs::mount::{list_mounts, get_mount_point};
+    use crate::fs::vfs::FsType;
+    use crate::mm::mm_get_pool_stats;
+    use crate::se::get_token_stats;
+    use crate::hal::apic::get_tick_count;
+
     if args.is_empty() {
         outln!("WMIC - WMI Command-line Interface");
         outln!("");
@@ -24995,79 +25005,254 @@ pub fn cmd_wmic(args: &[&str]) {
     };
 
     if alias == "CPU" {
+        // Get CPU info from x86_64 crate
+        use x86_64::registers::control::Cr0;
+
+        let ticks = get_tick_count();
+        let cr0 = Cr0::read();
+
         outln!("");
         outln!("Name                                      NumberOfCores  MaxClockSpeed");
         outln!("========================================  =============  =============");
-        outln!("Intel(R) Core(TM) Processor               4              3600");
+        outln!("x86_64 Processor                          1              Unknown");
+        outln!("");
+        outln!("CPU Info:");
+        outln!("  Architecture: x86_64");
+        outln!("  Tick Count: {}", ticks);
+        outln!("  CR0: {:?}", cr0);
+        outln!("  Paging: {}", if cr0.contains(x86_64::registers::control::Cr0Flags::PAGING) { "Enabled" } else { "Disabled" });
+
     } else if alias == "OS" {
+        let pool_stats = mm_get_pool_stats();
+        let cid_stats = get_cid_stats();
+        let ticks = get_tick_count();
+
         outln!("");
         outln!("Caption                                   Version        BuildNumber");
         outln!("========================================  =============  ===========");
         outln!("Nostalgos (Windows Server 2003 Clone)     5.2.3790       3790");
+        outln!("");
+        outln!("Operating System Statistics:");
+        outln!("  System Uptime:      {} ticks", ticks);
+        outln!("  Active Processes:   {}", cid_stats.active_processes);
+        outln!("  Active Threads:     {}", cid_stats.active_threads);
+        outln!("  Pool Memory Used:   {} bytes", pool_stats.bytes_allocated);
+        outln!("  Pool Memory Free:   {} bytes", pool_stats.bytes_free);
+
     } else if alias == "PROCESS" {
+        let cid_stats = get_cid_stats();
+        let (snapshots, count) = get_process_cid_snapshots(32);
+
         outln!("");
         if verb == "LIST" {
             outln!("Handle  Name              ProcessId  ThreadCount");
             outln!("======  ================  =========  ===========");
-            outln!("0       System Idle       0          1");
-            outln!("4       System            4          64");
-            outln!("264     smss.exe          264        3");
-            outln!("324     csrss.exe         324        12");
-            outln!("352     winlogon.exe      352        18");
-            outln!("400     services.exe      400        16");
+
+            // Show real process snapshots
+            for i in 0..count {
+                let snap = &snapshots[i];
+                if snap.entry_type == CidEntryType::Process {
+                    outln!("{:<6}  Process_{:04X}      {:>9}  1", snap.id, snap.id, snap.id);
+                }
+            }
+
+            if count == 0 {
+                outln!("0       System Idle       0          1");
+            }
+
+            outln!("");
+            outln!("Process Pool Statistics:");
+            outln!("  Active processes: {}", cid_stats.active_processes);
+            outln!("  Active threads:   {}", cid_stats.active_threads);
         } else {
-            outln!("Name              ProcessId  CommandLine");
-            outln!("================  =========  ===========");
-            outln!("System            4          ");
-            outln!("smss.exe          264        \\SystemRoot\\System32\\smss.exe");
+            outln!("Name              ProcessId  Address");
+            outln!("================  =========  ================");
+            for i in 0..count {
+                let snap = &snapshots[i];
+                if snap.entry_type == CidEntryType::Process {
+                    outln!("Process_{:04X}      {:>9}  0x{:016X}", snap.id, snap.id, snap.object_addr);
+                }
+            }
         }
+
     } else if alias == "SERVICE" {
         outln!("");
         outln!("Name                  DisplayName                     State    StartMode");
         outln!("====================  ==============================  =======  =========");
-        outln!("Dhcp                  DHCP Client                     Running  Auto");
-        outln!("Dnscache              DNS Client                      Running  Auto");
-        outln!("EventLog              Event Log                       Running  Auto");
-        outln!("lanmanserver          Server                          Running  Auto");
-        outln!("RpcSs                 Remote Procedure Call (RPC)     Running  Auto");
+
+        // Show real services using enumerate_services
+        let mut count = 0u32;
+        svc::enumerate_services(|svc| {
+            let state_str = match svc.state() {
+                ServiceState::Running => "Running",
+                ServiceState::Stopped => "Stopped",
+                ServiceState::StartPending => "Starting",
+                ServiceState::StopPending => "Stopping",
+                ServiceState::Paused => "Paused",
+                _ => "Unknown",
+            };
+            outln!("{:<22}{:<32}{:<9}Auto", svc.name_str(), svc.display_name_str(), state_str);
+            count += 1;
+            true // continue enumeration
+        });
+
+        if count == 0 {
+            outln!("(No services registered)");
+        }
+
+        let total = svc::service_count();
+        let running = svc::get_services_by_state(ServiceState::Running);
+
+        outln!("");
+        outln!("Service Statistics:");
+        outln!("  Total services:     {}", total);
+        outln!("  Running services:   {}", running);
+        outln!("  Stopped services:   {}", total.saturating_sub(running));
+
     } else if alias == "DISKDRIVE" {
+        let vol_stats = get_volume_stats();
+        let (snapshots, count) = io_get_volume_snapshots(8);
+
         outln!("");
         outln!("Model                         Size          Partitions");
         outln!("============================  ============  ==========");
-        outln!("VirtIO Block Device           536870912     1");
+
+        if count > 0 {
+            // Group by disk index
+            let mut disks_seen = [false; 8];
+            let mut disk_sizes = [0u64; 8];
+            let mut disk_parts = [0u32; 8];
+
+            for i in 0..count {
+                let snap = &snapshots[i];
+                let idx = snap.disk_index as usize;
+                if idx < 8 {
+                    disks_seen[idx] = true;
+                    disk_sizes[idx] += snap.size_mb as u64 * 1024 * 1024;
+                    disk_parts[idx] += 1;
+                }
+            }
+
+            for (idx, seen) in disks_seen.iter().enumerate() {
+                if *seen {
+                    outln!("VirtIO Disk {}                  {:>12}  {:>10}",
+                           idx, disk_sizes[idx], disk_parts[idx]);
+                }
+            }
+        } else {
+            outln!("VirtIO Block Device           {} MB   {}", vol_stats.total_size_mb, vol_stats.active_volumes);
+        }
+
     } else if alias == "LOGICALDISK" {
+        let vol_stats = get_volume_stats();
+        let (snapshots, count) = io_get_volume_snapshots(8);
+        let mounts = list_mounts();
+
         outln!("");
         outln!("DeviceID  FileSystem  FreeSpace    Size         VolumeName");
         outln!("========  ==========  ===========  ===========  ==========");
-        outln!("C:        NTFS        402653184    536870912    NOSTALGOS");
-    } else if alias == "NIC" {
-        outln!("");
-        outln!("Description                   MACAddress");
-        outln!("============================  =================");
-        for i in 0..4 {
-            if let Some(device) = crate::net::get_device(i) {
-                let mac = device.info.mac_address;
-                outln!("{:<30} {:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-                    &device.info.name,
-                    mac.0[0], mac.0[1], mac.0[2], mac.0[3], mac.0[4], mac.0[5]);
+
+        // Show mounted volumes
+        for item in mounts.iter().flatten() {
+            let (letter, fs_type) = *item;
+            let fs_name = match fs_type {
+                FsType::Fat32 => "FAT32",
+                FsType::Ntfs => "NTFS",
+                FsType::Fat12 => "FAT12",
+                FsType::Fat16 => "FAT16",
+                _ => "Unknown",
+            };
+
+            let size_mb = vol_stats.total_size_mb / (vol_stats.active_volumes.max(1) as u64);
+            let size_bytes = size_mb * 1024 * 1024;
+            let free_bytes = size_bytes * 3 / 4;  // Estimate 75% free
+
+            if let Some(mp) = get_mount_point(letter) {
+                outln!("{}:        {:<10}  {:>11}  {:>11}  {}", letter, fs_name, free_bytes, size_bytes, mp.volume_label_str());
+            } else {
+                outln!("{}:        {:<10}  {:>11}  {:>11}  VOLUME", letter, fs_name, free_bytes, size_bytes);
             }
         }
+
+        if vol_stats.active_volumes == 0 {
+            outln!("(No logical disks found)");
+        }
+
+    } else if alias == "NIC" {
+        let device_count = crate::net::get_device_count();
+        let net_stats = crate::net::get_stats();
+
+        outln!("");
+        outln!("Description                   MACAddress          IPAddress");
+        outln!("============================  ==================  ===============");
+        for i in 0..device_count {
+            if let Some(device) = crate::net::get_device(i) {
+                let mac = device.info.mac_address;
+                let ip_str = if let Some(ip) = device.ip_address {
+                    alloc::format!("{}.{}.{}.{}", ip.0[0], ip.0[1], ip.0[2], ip.0[3])
+                } else {
+                    alloc::string::String::from("(not configured)")
+                };
+                outln!("{:<30}{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}  {}",
+                    &device.info.name,
+                    mac.0[0], mac.0[1], mac.0[2], mac.0[3], mac.0[4], mac.0[5],
+                    ip_str);
+            }
+        }
+
+        if device_count == 0 {
+            outln!("(No network adapters found)");
+        }
+
+        outln!("");
+        outln!("Network Statistics:");
+        outln!("  Packets RX:     {}", net_stats.packets_received);
+        outln!("  Packets TX:     {}", net_stats.packets_transmitted);
+        outln!("  Bytes RX:       {}", net_stats.bytes_received);
+        outln!("  Bytes TX:       {}", net_stats.bytes_transmitted);
+
     } else if alias == "BIOS" {
+        // Show BIOS info using available data
+        let ticks = get_tick_count();
+
         outln!("");
-        outln!("Manufacturer    Name                  Version");
-        outln!("==============  ====================  =======");
-        outln!("SeaBIOS         SeaBIOS               1.16.0");
+        outln!("Manufacturer    Name                  Version     SMBIOSVersion");
+        outln!("==============  ====================  ==========  =============");
+        outln!("QEMU/KVM        UEFI Firmware         1.0         2.4");
+        outln!("");
+        outln!("System Info:");
+        outln!("  Uptime ticks: {}", ticks);
+        outln!("  Architecture: x86_64 UEFI");
+
     } else if alias == "MEMORYCHIP" {
+        let pool_stats = mm_get_pool_stats();
+        let total_pool = pool_stats.bytes_allocated + pool_stats.bytes_free;
+
         outln!("");
-        outln!("BankLabel    Capacity     Speed");
-        outln!("===========  ===========  =====");
-        outln!("BANK 0       536870912    Unknown");
+        outln!("BankLabel    Capacity       MemoryType    Speed");
+        outln!("===========  =============  ============  =====");
+        outln!("BANK 0       {:>13}  DDR           Unknown", total_pool);
+        outln!("");
+        outln!("Memory Pool Statistics:");
+        outln!("  Total pool size:  {} bytes", total_pool);
+        outln!("  Allocated:        {} bytes", pool_stats.bytes_allocated);
+        outln!("  Free:             {} bytes", pool_stats.bytes_free);
+        outln!("  Allocations:      {}", pool_stats.allocation_count);
+
     } else if alias == "USERACCOUNT" {
+        let token_stats = get_token_stats();
+
         outln!("");
-        outln!("Name            Disabled  LocalAccount");
-        outln!("==============  ========  ============");
-        outln!("Administrator   FALSE     TRUE");
-        outln!("Guest           TRUE      TRUE");
+        outln!("Name            Disabled  LocalAccount  SID");
+        outln!("==============  ========  ============  ===");
+        outln!("Administrator   FALSE     TRUE          S-1-5-21-*-500");
+        outln!("SYSTEM          FALSE     TRUE          S-1-5-18");
+        outln!("");
+        outln!("Token Statistics:");
+        outln!("  Allocated tokens:       {}", token_stats.allocated_tokens);
+        outln!("  Primary tokens:         {}", token_stats.primary_tokens);
+        outln!("  Impersonation tokens:   {}", token_stats.impersonation_tokens);
+
     } else {
         outln!("Alias not found: {}", alias);
         outln!("Use 'wmic' for list of aliases.");
