@@ -19045,10 +19045,36 @@ pub fn cmd_title(args: &[&str]) {
 }
 
 /// Ver command - display OS version (enhanced)
+/// Integrates with various kernel subsystems to show system info
 pub fn cmd_ver_extended(_args: &[&str]) {
+    use crate::hal::rtc::get_datetime;
+    use crate::hal::apic::get_tick_count;
+    use crate::mm::mm_get_pool_stats;
+    use crate::ps::get_cid_stats;
+    use crate::ldr::get_loaded_dll_count;
+
+    let dt = get_datetime();
+    let ticks = get_tick_count();
+    let pool_stats = mm_get_pool_stats();
+    let cid_stats = get_cid_stats();
+
     outln!("");
     outln!("Microsoft Windows [Version 5.2.3790]");
     outln!("(Nostalgic Build of Windows Server 2003)");
+    outln!("");
+    outln!("Built on NostalgiaOS Kernel - Rust Implementation");
+    outln!("");
+    outln!("System Information:");
+    outln!("  Date: {:02}/{:02}/{}", dt.month, dt.day, dt.year);
+    outln!("  Time: {:02}:{:02}:{:02}", dt.hour, dt.minute, dt.second);
+    outln!("  Uptime: {} ticks", ticks);
+    outln!("");
+    outln!("Kernel Statistics:");
+    outln!("  Pool memory:     {} bytes allocated", pool_stats.bytes_allocated);
+    outln!("  Pool free:       {} bytes", pool_stats.bytes_free);
+    outln!("  Active processes:{}", cid_stats.active_processes);
+    outln!("  Active threads:  {}", cid_stats.active_threads);
+    outln!("  Loaded modules:  {}", get_loaded_dll_count());
     outln!("");
 }
 
@@ -25519,14 +25545,27 @@ pub fn cmd_format(args: &[&str]) {
 // ============================================================================
 
 /// FSUTIL command - file system utilities
+/// Uses the filesystem subsystem for mount points, volumes, and disk information
 pub fn cmd_fsutil(args: &[&str]) {
+    use crate::fs::mount::{get_mount_point, list_mounts, mount_count};
+    use crate::fs::vfs::FsType;
+    use crate::io::disk::{get_volume_stats, io_get_volume_snapshots};
+    use crate::mm::mm_get_pool_stats;
+    use crate::ex::eventlog::{log_info, EventSource};
+
     if args.is_empty() || args.iter().any(|a| *a == "/?") {
         outln!("FSUTIL - File System Utility");
         outln!("");
-        outln!("  fsutil fsinfo drives      List all drives");
-        outln!("  fsutil fsinfo volumeinfo  Volume information");
-        outln!("  fsutil dirty query C:     Query dirty bit");
-        outln!("  fsutil volume diskfree    Disk free space");
+        outln!("Commands:");
+        outln!("  fsutil fsinfo drives         List all drives");
+        outln!("  fsutil fsinfo volumeinfo C:  Volume information");
+        outln!("  fsutil fsinfo ntfsinfo C:    NTFS-specific information");
+        outln!("  fsutil fsinfo statistics C:  FS statistics");
+        outln!("  fsutil dirty query C:        Query dirty bit");
+        outln!("  fsutil volume diskfree C:    Disk free space");
+        outln!("  fsutil file queryfilenamebyid");
+        outln!("  fsutil behavior query        Query FS behavior options");
+        outln!("  fsutil usn                   USN journal commands");
         return;
     }
 
@@ -25534,23 +25573,239 @@ pub fn cmd_fsutil(args: &[&str]) {
 
     if subcmd == "fsinfo" && args.len() > 1 {
         let cmd2 = args[1].to_ascii_lowercase();
+
         if cmd2 == "drives" {
+            // List all mounted drives using the mount subsystem
+            let mounts = list_mounts();
+            let count = mount_count();
             outln!("");
-            outln!("Drives: C:\\");
+            outln!("Drives:");
+
+            let mut found = false;
+            for item in mounts.iter().flatten() {
+                let (letter, _fs_type) = *item;
+                out!(" {}:\\", letter);
+                found = true;
+            }
+            if found {
+                outln!("");
+            } else {
+                outln!(" (none mounted)");
+            }
+            outln!("");
+            outln!("Total mounted: {}", count);
+            log_info(EventSource::FileSystem, 6000, "FSUTIL: Listed drives");
+
         } else if cmd2 == "volumeinfo" {
+            // Get volume info for a specific drive
+            let drive = if args.len() > 2 {
+                args[2].chars().next().unwrap_or('C').to_ascii_uppercase()
+            } else {
+                'C'
+            };
+
+            if let Some(mp) = get_mount_point(drive) {
+                outln!("");
+                outln!("Volume Name         : {}", mp.volume_label_str());
+                outln!("Volume Serial Number: 0x{:08X}", mp.volume_serial);
+                outln!("Max Component Length: 255");
+                outln!("File System Name    : {}", match mp.fs_type {
+                    FsType::Fat32 => "FAT32",
+                    FsType::Ntfs => "NTFS",
+                    FsType::Fat12 => "FAT12",
+                    FsType::Fat16 => "FAT16",
+                    FsType::ExFat => "exFAT",
+                    FsType::Ext2 => "ext2",
+                    FsType::Ext4 => "ext4",
+                    FsType::Iso9660 => "CDFS",
+                    FsType::Unknown => "RAW",
+                });
+                outln!("Device Path         : {}", mp.device_path_str());
+                outln!("");
+                outln!("Flags:");
+                if mp.is_system() { outln!("  System Volume"); }
+                if mp.is_boot() { outln!("  Boot Volume"); }
+                if mp.is_readonly() { outln!("  Read-Only"); }
+            } else {
+                outln!("Volume {}:\\ is not mounted.", drive);
+            }
+
+        } else if cmd2 == "ntfsinfo" {
+            let drive = if args.len() > 2 {
+                args[2].chars().next().unwrap_or('C').to_ascii_uppercase()
+            } else {
+                'C'
+            };
+
+            if let Some(mp) = get_mount_point(drive) {
+                let vol_stats = get_volume_stats();
+                let (snapshots, count) = io_get_volume_snapshots(8);
+
+                outln!("");
+                outln!("NTFS Volume Serial Number : 0x{:08X}", mp.volume_serial);
+                outln!("Version                   : 3.1");
+                outln!("Number Sectors            : {}", if count > 0 { snapshots[0].total_sectors } else { 0 });
+                outln!("Total Clusters            : {}", if count > 0 { snapshots[0].total_sectors / 8 } else { 0 });
+                outln!("Free Clusters             : {}", if count > 0 { snapshots[0].total_sectors / 16 } else { 0 });
+                outln!("Bytes Per Sector          : 512");
+                outln!("Bytes Per Physical Sector : 512");
+                outln!("Bytes Per Cluster         : 4096");
+                outln!("Bytes Per FileRecord Segment: 1024");
+                outln!("Clusters Per FileRecord Segment: 0");
+                outln!("Mft Start Lcn             : 0x00000000000C0000");
+                outln!("Mft2 Start Lcn            : 0x0000000000000002");
+                outln!("Mft Zone Start            : 0x00000000000C0000");
+                outln!("Mft Zone End              : 0x00000000000C4000");
+                outln!("");
+                outln!("Volume Statistics:");
+                outln!("  Active volumes: {}", vol_stats.active_volumes);
+                outln!("  Total size: {} MB", vol_stats.total_size_mb);
+            } else {
+                outln!("Volume {}:\\ is not NTFS or not mounted.", drive);
+            }
+
+        } else if cmd2 == "statistics" {
+            let drive = if args.len() > 2 {
+                args[2].chars().next().unwrap_or('C').to_ascii_uppercase()
+            } else {
+                'C'
+            };
+
+            let vol_stats = get_volume_stats();
+            let pool_stats = mm_get_pool_stats();
+
             outln!("");
-            outln!("Volume Name : NOSTALGOS");
-            outln!("Volume Serial Number : 0x12345678");
-            outln!("File System Name : NTFS");
+            outln!("File System Type          : NTFS");
+            outln!("Version                   : 3.1");
+            outln!("");
+            outln!("UserFileReads             : 0");
+            outln!("UserFileReadBytes         : 0");
+            outln!("UserDiskReads             : 0");
+            outln!("UserFileWrites            : 0");
+            outln!("UserFileWriteBytes        : 0");
+            outln!("UserDiskWrites            : 0");
+            outln!("");
+            outln!("MetaData Reads            : 0");
+            outln!("MetaData ReadBytes        : 0");
+            outln!("MetaData Writes           : 0");
+            outln!("MetaData WriteBytes       : 0");
+            outln!("");
+            outln!("LogFileReads              : 0");
+            outln!("LogFileWriteBytes         : 0");
+            outln!("");
+            outln!("Pool Statistics:");
+            outln!("  Pool bytes allocated: {}", pool_stats.bytes_allocated);
+            outln!("  Pool bytes free: {}", pool_stats.bytes_free);
         }
-    } else if subcmd == "dirty" && args.len() > 2 {
-        outln!("Volume - {} is NOT Dirty", args[2]);
+
+    } else if subcmd == "dirty" {
+        if args.len() > 2 {
+            let drive = args[2].chars().next().unwrap_or('C').to_ascii_uppercase();
+
+            if let Some(_mp) = get_mount_point(drive) {
+                outln!("Volume - {}:\\ is NOT Dirty", drive);
+            } else {
+                outln!("Volume - {}:\\ is not mounted", drive);
+            }
+        } else {
+            outln!("Usage: fsutil dirty query <drive>");
+        }
+
     } else if subcmd == "volume" && args.len() > 1 {
-        if args[1].to_ascii_lowercase() == "diskfree" {
+        let cmd2 = args[1].to_ascii_lowercase();
+
+        if cmd2 == "diskfree" {
+            let drive = if args.len() > 2 {
+                args[2].chars().next().unwrap_or('C').to_ascii_uppercase()
+            } else {
+                'C'
+            };
+
+            let vol_stats = get_volume_stats();
+            let (snapshots, count) = io_get_volume_snapshots(8);
+
+            // Try to find the volume for this drive
+            let mut vol_size_bytes: u64 = 0;
+            let mut vol_free_bytes: u64 = 0;
+
+            for i in 0..count {
+                // First volume is C:, second is D:, etc.
+                let vol_letter = ((b'C' + i as u8) as char).to_ascii_uppercase();
+                if vol_letter == drive {
+                    let snap = &snapshots[i];
+                    vol_size_bytes = snap.size_mb as u64 * 1024 * 1024;
+                    // Assume 50% free for demonstration
+                    vol_free_bytes = vol_size_bytes / 2;
+                    break;
+                }
+            }
+
+            if vol_size_bytes == 0 {
+                // Fallback to total stats
+                vol_size_bytes = vol_stats.total_size_mb as u64 * 1024 * 1024;
+                vol_free_bytes = vol_size_bytes * 3 / 4;  // 75% free
+            }
+
             outln!("");
-            outln!("Total free bytes  : 402653184");
-            outln!("Total bytes       : 536870912");
+            outln!("Total # of free bytes        : {}", vol_free_bytes);
+            outln!("Total # of bytes             : {}", vol_size_bytes);
+            outln!("Total # of avail free bytes  : {}", vol_free_bytes);
+            outln!("");
+            outln!("Volume Statistics:");
+            outln!("  Active volumes: {}", vol_stats.active_volumes);
+            outln!("  Total size: {} MB", vol_stats.total_size_mb);
+
+            log_info(EventSource::FileSystem, 6001, &alloc::format!("FSUTIL: Disk free query for {}:", drive));
         }
+
+    } else if subcmd == "behavior" {
+        if args.len() > 1 && args[1].to_ascii_lowercase() == "query" {
+            outln!("");
+            outln!("FSUTIL Behavior Settings:");
+            outln!("  disable8dot3          = 1");
+            outln!("  allowextchar          = 0");
+            outln!("  disablelastaccess     = 1");
+            outln!("  quotanotify           = 3600");
+            outln!("  mftzone               = 200");
+            outln!("  memoryusage           = 1");
+            outln!("  disablecompression    = 0");
+            outln!("  disableencryption     = 0");
+        }
+
+    } else if subcmd == "usn" {
+        if args.len() > 1 {
+            let cmd2 = args[1].to_ascii_lowercase();
+            if cmd2 == "queryjournal" {
+                outln!("Usn Journal ID     : 0x01d9a5b6c7d8e9f0");
+                outln!("First Usn          : 0x0000000000000000");
+                outln!("Next Usn           : 0x0000000000001000");
+                outln!("Lowest Valid Usn   : 0x0000000000000000");
+                outln!("Max Usn            : 0x7fffffffffffffff");
+                outln!("Maximum Size       : 0x0000000002000000");
+                outln!("Allocation Delta   : 0x0000000000100000");
+            } else if cmd2 == "enumdata" {
+                outln!("USN Journal enumeration not available in kernel mode.");
+            }
+        } else {
+            outln!("Usage: fsutil usn [queryjournal|enumdata|...]");
+        }
+
+    } else if subcmd == "file" {
+        if args.len() > 1 {
+            let cmd2 = args[1].to_ascii_lowercase();
+            if cmd2 == "queryfilenamebyid" {
+                outln!("File ID query not available in kernel mode.");
+            } else if cmd2 == "layout" {
+                outln!("File layout information:");
+                outln!("  (requires valid file path)");
+            }
+        } else {
+            outln!("Usage: fsutil file [queryfilenamebyid|layout|...]");
+        }
+
+    } else {
+        outln!("Invalid parameter: {}", subcmd);
+        outln!("Valid commands: fsinfo, dirty, volume, behavior, usn, file");
     }
 }
 
