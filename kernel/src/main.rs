@@ -473,6 +473,16 @@ fn phase1_init(boot_info: &BootInfo) {
     rtl::version::rtl_version_init();
     kprintln!("  Version info initialized");
 
+    // Initialize Unicode Prefix Table subsystem
+    kprintln!("  Initializing prefix tables...");
+    rtl::prefix::rtl_prefix_init();
+    kprintln!("  Prefix tables initialized");
+
+    // Initialize Range List subsystem
+    kprintln!("  Initializing range lists...");
+    rtl::range::rtl_range_init();
+    kprintln!("  Range lists initialized");
+
     // Initialize Service Control Manager
     kprintln!("  Initializing Service Control Manager...");
     svc::scm_initialize();

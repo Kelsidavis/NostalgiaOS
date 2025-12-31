@@ -49,6 +49,8 @@ pub mod string;
 pub mod time;
 pub mod uuid;
 pub mod environ;
+pub mod prefix;
+pub mod range;
 pub mod splay;
 pub mod version;
 
@@ -71,5 +73,7 @@ pub use string::*;
 pub use time::*;
 pub use uuid::{Uuid, create_uuid, create_sequential_uuid};
 pub use environ::*;
+pub use prefix::*;
+pub use range::*;
 pub use splay::*;
 pub use version::*;
