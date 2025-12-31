@@ -1277,6 +1277,9 @@ impl Shell {
         // Security Auditing
         } else if eq_ignore_case(cmd, "audit") {
             commands::cmd_audit(&args[1..argc]);
+        // CPU Profiling
+        } else if eq_ignore_case(cmd, "profile") {
+            commands::cmd_profile(&args[1..argc]);
         // Disk/Partition viewer
         } else if eq_ignore_case(cmd, "disk") || eq_ignore_case(cmd, "partition") {
             commands::cmd_disk(&args[1..argc]);

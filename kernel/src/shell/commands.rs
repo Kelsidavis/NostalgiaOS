@@ -166,6 +166,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    verifier       Driver Verifier (stats, irp, pool, deadlock)");
         outln!("    kd             Kernel Debugger (status, bp, print, data)");
         outln!("    audit          Security Auditing (status, policy, events)");
+        outln!("    profile        CPU Profiling (create, start, stop, hits)");
         outln!("    disk,partition Disk/Partition info (mbr, gpt, geometry)");
         outln!("");
         outln!("  Use UP/DOWN arrows to navigate command history.");
@@ -31456,4 +31457,338 @@ fn toggle_crash_on_fail(args: &[&str]) {
 
     se::sep_adt_set_crash_on_fail(enable);
     outln!("Crash on audit fail: {}", if enable { "Enabled" } else { "Disabled" });
+}
+
+/// CPU Profile command
+pub fn cmd_profile(args: &[&str]) {
+    if args.is_empty() {
+        show_profile_status();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "status") {
+        show_profile_status();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_profile_list();
+    } else if eq_ignore_ascii_case(subcmd, "create") {
+        create_profile(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "start") {
+        start_profile(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "stop") {
+        stop_profile(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "hits") {
+        show_profile_hits(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "delete") {
+        delete_profile(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "reset") {
+        reset_profile(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "interval") {
+        set_profile_interval(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("profile - CPU Profiling");
+        outln!("");
+        outln!("Usage: profile [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  status              - Show profile status (default)");
+        outln!("  list                - List all profiles");
+        outln!("  create <name> <base> <size> [bucket] - Create profile");
+        outln!("  start <id>          - Start profiling");
+        outln!("  stop <id>           - Stop profiling");
+        outln!("  hits <id> [count]   - Show top profile hits");
+        outln!("  delete <id>         - Delete profile");
+        outln!("  reset <id>          - Reset profile counters");
+        outln!("  interval <source> <interval> - Set sample interval");
+        outln!("");
+        outln!("Sources: time, cycles, instructions, cache, branch");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'profile help' for usage information");
+    }
+}
+
+fn show_profile_status() {
+    use crate::ex;
+
+    outln!("CPU Profile Status");
+    outln!("==================");
+    outln!("");
+
+    let stats = ex::exp_profile_get_stats();
+    outln!("Statistics:");
+    outln!("  Profiles Created: {}", stats.0);
+    outln!("  Profiles Started: {}", stats.1);
+    outln!("  Profiles Stopped: {}", stats.2);
+    outln!("  Total Hits:       {}", stats.3);
+    outln!("  Active Profiles:  {}", stats.4);
+    outln!("");
+
+    outln!("Profiling Enabled:  {}", ex::exp_profile_enabled());
+}
+
+fn show_profile_list() {
+    use crate::ex;
+
+    outln!("Profile List");
+    outln!("============");
+    outln!("");
+
+    let profiles = ex::exp_list_profiles();
+    if profiles.is_empty() {
+        outln!("(no profiles)");
+        return;
+    }
+
+    outln!("ID  Name           Range                 Bucket  State   Hits");
+    outln!("--  -------------  --------------------  ------  ------  --------");
+
+    for p in profiles.iter() {
+        let state_str = match p.state {
+            ex::ProfileState::Stopped => "Stop",
+            ex::ProfileState::Running => "Run",
+            ex::ProfileState::Paused => "Pause",
+        };
+        outln!("{:<2}  {:<13}  {:#010x}-{:#010x}  {:>5}   {:<6}  {}",
+            p.id,
+            if p.name.len() > 13 { &p.name[..13] } else { &p.name },
+            p.range_base,
+            p.range_base + p.range_size,
+            1 << p.bucket_shift,
+            state_str,
+            p.total_hits);
+    }
+}
+
+fn create_profile(args: &[&str]) {
+    use crate::ex;
+
+    if args.len() < 3 {
+        outln!("Usage: profile create <name> <base> <size> [bucket_shift]");
+        outln!("");
+        outln!("  name         - Profile name");
+        outln!("  base         - Range base address (hex, e.g., 0x1000)");
+        outln!("  size         - Range size (hex or decimal)");
+        outln!("  bucket_shift - Log2 of bucket size (default 4 = 16 bytes)");
+        return;
+    }
+
+    let name = args[0];
+    let base = parse_hex_or_dec(args[1]);
+    let size = parse_hex_or_dec(args[2]);
+    let bucket_shift = if args.len() > 3 {
+        args[3].parse().unwrap_or(4)
+    } else {
+        4 // 16-byte buckets by default
+    };
+
+    if base.is_none() || size.is_none() {
+        outln!("Invalid address or size");
+        return;
+    }
+
+    let base = base.unwrap() as usize;
+    let size = size.unwrap() as usize;
+
+    match ex::exp_create_profile(name, 0, base, size, bucket_shift, ex::ProfileSource::Time, !0) {
+        Ok(id) => {
+            outln!("Profile {} created: {} ({:#x}-{:#x})", id, name, base, base + size);
+        }
+        Err(e) => {
+            outln!("Failed to create profile: {}", e);
+        }
+    }
+}
+
+fn start_profile(args: &[&str]) {
+    use crate::ex;
+
+    if args.is_empty() {
+        outln!("Usage: profile start <id>");
+        return;
+    }
+
+    let id: u32 = match args[0].parse() {
+        Ok(v) => v,
+        Err(_) => {
+            outln!("Invalid profile ID");
+            return;
+        }
+    };
+
+    match ex::exp_start_profile(id) {
+        Ok(()) => outln!("Profile {} started", id),
+        Err(e) => outln!("Failed to start profile: {}", e),
+    }
+}
+
+fn stop_profile(args: &[&str]) {
+    use crate::ex;
+
+    if args.is_empty() {
+        outln!("Usage: profile stop <id>");
+        return;
+    }
+
+    let id: u32 = match args[0].parse() {
+        Ok(v) => v,
+        Err(_) => {
+            outln!("Invalid profile ID");
+            return;
+        }
+    };
+
+    match ex::exp_stop_profile(id) {
+        Ok(()) => outln!("Profile {} stopped", id),
+        Err(e) => outln!("Failed to stop profile: {}", e),
+    }
+}
+
+fn show_profile_hits(args: &[&str]) {
+    use crate::ex;
+
+    if args.is_empty() {
+        outln!("Usage: profile hits <id> [count]");
+        return;
+    }
+
+    let id: u32 = match args[0].parse() {
+        Ok(v) => v,
+        Err(_) => {
+            outln!("Invalid profile ID");
+            return;
+        }
+    };
+
+    let count = if args.len() > 1 {
+        args[1].parse().unwrap_or(20)
+    } else {
+        20
+    };
+
+    let profile = match ex::exp_get_profile(id) {
+        Some(p) => p,
+        None => {
+            outln!("Profile not found");
+            return;
+        }
+    };
+
+    outln!("Profile {} - {} ({:#x}-{:#x})",
+        profile.id,
+        profile.name,
+        profile.range_base,
+        profile.range_base + profile.range_size);
+    outln!("Total hits: {}", profile.total_hits);
+    outln!("");
+
+    let top_hits = match ex::exp_get_top_hits(id, count) {
+        Some(h) => h,
+        None => {
+            outln!("Failed to get hits");
+            return;
+        }
+    };
+
+    if top_hits.is_empty() {
+        outln!("(no hits recorded)");
+        return;
+    }
+
+    outln!("Top {} hits:", top_hits.len());
+    outln!("");
+    outln!("Address           Bucket  Hits");
+    outln!("-----------------  ------  --------");
+
+    for (addr, bucket, hits) in top_hits.iter() {
+        outln!("{:#018x}  {:>6}  {:>8}", addr, bucket, hits);
+    }
+}
+
+fn delete_profile(args: &[&str]) {
+    use crate::ex;
+
+    if args.is_empty() {
+        outln!("Usage: profile delete <id>");
+        return;
+    }
+
+    let id: u32 = match args[0].parse() {
+        Ok(v) => v,
+        Err(_) => {
+            outln!("Invalid profile ID");
+            return;
+        }
+    };
+
+    match ex::exp_delete_profile(id) {
+        Ok(()) => outln!("Profile {} deleted", id),
+        Err(e) => outln!("Failed to delete profile: {}", e),
+    }
+}
+
+fn reset_profile(args: &[&str]) {
+    use crate::ex;
+
+    if args.is_empty() {
+        outln!("Usage: profile reset <id>");
+        return;
+    }
+
+    let id: u32 = match args[0].parse() {
+        Ok(v) => v,
+        Err(_) => {
+            outln!("Invalid profile ID");
+            return;
+        }
+    };
+
+    match ex::exp_reset_profile(id) {
+        Ok(()) => outln!("Profile {} reset", id),
+        Err(e) => outln!("Failed to reset profile: {}", e),
+    }
+}
+
+fn set_profile_interval(args: &[&str]) {
+    use crate::ex;
+
+    if args.len() < 2 {
+        outln!("Usage: profile interval <source> <interval>");
+        outln!("");
+        outln!("Sources: time, cycles, instructions, cache, branch");
+        outln!("Interval: in 100ns units (e.g., 10000 = 1ms)");
+        return;
+    }
+
+    let source = match args[0].to_lowercase().as_str() {
+        "time" => ex::ProfileSource::Time,
+        "cycles" => ex::ProfileSource::TotalCycles,
+        "instructions" | "instr" => ex::ProfileSource::InstructionRetired,
+        "cache" => ex::ProfileSource::CacheMisses,
+        "branch" => ex::ProfileSource::BranchMispredictions,
+        _ => {
+            outln!("Unknown source: {}", args[0]);
+            return;
+        }
+    };
+
+    let interval: u32 = match args[1].parse() {
+        Ok(v) => v,
+        Err(_) => {
+            outln!("Invalid interval");
+            return;
+        }
+    };
+
+    ex::exp_set_profile_interval(source, interval);
+    outln!("Profile interval for {:?} set to {}", source, interval);
+}
+
+fn parse_hex_or_dec(s: &str) -> Option<u64> {
+    if s.starts_with("0x") || s.starts_with("0X") {
+        u64::from_str_radix(&s[2..], 16).ok()
+    } else {
+        s.parse().ok()
+    }
 }

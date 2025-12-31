@@ -438,6 +438,11 @@ fn phase1_init(boot_info: &BootInfo) {
     kd::kd_init_system(0, true);
     kprintln!("  Kernel debugger initialized");
 
+    // Initialize Executive Profile subsystem
+    kprintln!("  Initializing profile subsystem...");
+    ex::profile::exp_profile_init();
+    kprintln!("  Profile subsystem initialized");
+
     // Initialize Service Control Manager
     kprintln!("  Initializing Service Control Manager...");
     svc::scm_initialize();
