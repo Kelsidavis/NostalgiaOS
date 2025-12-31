@@ -34,6 +34,7 @@ pub mod directory;
 pub mod handle;
 pub mod header;
 pub mod object_type;
+pub mod symlink;
 
 // Re-exports for convenience
 pub use header::{ObjectHeader, ObjectNameInfo, flags, OB_MAX_NAME_LENGTH};
@@ -58,6 +59,13 @@ pub use directory::{
     DirectoryEntrySnapshot, DirectoryStats, ob_get_directory_stats,
     ob_get_directory_entries, ob_get_directory_name,
 };
+pub use symlink::{
+    ObjectSymbolicLink, symlink_flags, symlink_access,
+    ob_create_symbolic_link, ob_create_symbolic_link_ex, ob_create_dos_device_link,
+    ob_delete_symbolic_link, ob_query_symbolic_link, ob_parse_symbolic_link,
+    ob_resolve_symbolic_links, ob_is_symbolic_link, ob_list_symbolic_links,
+    ob_get_symlink_stats, obp_symlink_init,
+};
 
 /// Initialize the Object Manager
 ///
@@ -74,6 +82,9 @@ pub unsafe fn init() {
 
     // Initialize the system handle table
     handle::init_system_handle_table();
+
+    // Initialize symbolic links
+    symlink::obp_symlink_init();
 
     crate::serial_println!("[OB] Object Manager initialized");
 }

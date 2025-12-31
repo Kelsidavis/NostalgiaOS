@@ -75,6 +75,9 @@ pub mod device_queue;
 // Profile object
 pub mod profile;
 
+// Balance set manager
+pub mod balance;
+
 // Re-export key types
 pub use list::ListEntry;
 pub use thread::{KThread, ThreadState};
@@ -202,6 +205,20 @@ pub use device_queue::{
     ke_initialize_device_queue, ke_insert_device_queue,
     ke_insert_by_key_device_queue, ke_remove_device_queue,
     ke_remove_by_key_device_queue, ke_remove_entry_device_queue,
+};
+
+// Re-export balance set manager types
+pub use balance::{
+    BalanceObject, BalanceSetStats, SwapEntry,
+    ke_balance_init, ke_balance_set_manager,
+    ke_signal_working_set_manager, ke_set_memory_pressure,
+    ke_request_stack_outswap, ke_boost_thread_priority,
+    ke_get_balance_stats, ke_is_balance_manager_running,
+    ke_get_memory_pressure, ke_get_stack_protect_time,
+    ke_set_stack_protect_time, ke_swap_in_process,
+    ke_swap_out_process, ke_inswap_kernel_stack,
+    MAXIMUM_THREAD_STACKS, PERIODIC_INTERVAL,
+    READY_WITHOUT_RUNNING, STACK_SCAN_PERIOD,
 };
 
 // Re-export profile types

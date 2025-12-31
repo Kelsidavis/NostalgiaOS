@@ -327,6 +327,11 @@ fn phase1_init(boot_info: &BootInfo) {
     }
     kprintln!("  Kernel executive initialized");
 
+    // Initialize balance set manager
+    kprintln!("  Initializing balance set manager...");
+    ke::balance::ke_balance_init();
+    kprintln!("  Balance set manager initialized");
+
     // Initialize memory manager
     kprintln!("  Initializing memory manager...");
     unsafe {
