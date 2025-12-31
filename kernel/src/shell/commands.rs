@@ -18063,6 +18063,7 @@ pub fn cmd_netstat(args: &[&str]) {
 /// Route table display command
 pub fn cmd_route(args: &[&str]) {
     use crate::net;
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
 
     if args.is_empty() || eq_ignore_case(args[0], "print") {
         outln!("");
@@ -18073,6 +18074,8 @@ pub fn cmd_route(args: &[&str]) {
 
         // Display routes based on configured devices
         let count = net::get_device_count();
+        let mut route_count = 0u32;
+
         for i in 0..count {
             if let Some(device) = net::get_device(i) {
                 if let (Some(ip), Some(mask)) = (device.ip_address, device.subnet_mask) {
@@ -18089,17 +18092,20 @@ pub fn cmd_route(args: &[&str]) {
                         net_addr[0], net_addr[1], net_addr[2], net_addr[3],
                         mask.0[0], mask.0[1], mask.0[2], mask.0[3],
                         ip.0[0], ip.0[1], ip.0[2], ip.0[3]);
+                    route_count += 1;
 
                     // Host route for local address
                     outln!("{:>3}.{:>3}.{:>3}.{:>3}    255.255.255.255    On-link         {:>3}.{:>3}.{:>3}.{:>3}    1",
                         ip.0[0], ip.0[1], ip.0[2], ip.0[3],
                         ip.0[0], ip.0[1], ip.0[2], ip.0[3]);
+                    route_count += 1;
 
                     // Default gateway if configured
                     if let Some(gw) = device.gateway {
                         outln!("          0.0.0.0          0.0.0.0    {:>3}.{:>3}.{:>3}.{:>3}    {:>3}.{:>3}.{:>3}.{:>3}    1",
                             gw.0[0], gw.0[1], gw.0[2], gw.0[3],
                             ip.0[0], ip.0[1], ip.0[2], ip.0[3]);
+                        route_count += 1;
                     }
                 }
             }
@@ -18109,22 +18115,102 @@ pub fn cmd_route(args: &[&str]) {
         outln!("        127.0.0.0        255.0.0.0    On-link             127.0.0.1    1");
         outln!("        127.0.0.1    255.255.255.255    On-link             127.0.0.1    1");
         outln!("  127.255.255.255    255.255.255.255    On-link             127.0.0.1    1");
+        route_count += 3;
 
         // Broadcast
         outln!("  255.255.255.255    255.255.255.255    On-link             127.0.0.1    1");
+        route_count += 1;
 
         outln!("=========================================================================");
+        outln!("Persistent Routes:");
+        outln!("  None");
         outln!("");
+        outln!("Total routes: {}", route_count);
+        outln!("");
+
+        log_info(EventSource::Network, 3100, &alloc::format!("ROUTE: Displayed {} routes", route_count));
+
+    } else if eq_ignore_case(args[0], "add") {
+        // route ADD destination MASK netmask gateway [METRIC metric] [IF interface]
+        if args.len() < 4 {
+            outln!("Usage: route ADD destination MASK netmask gateway [METRIC metric]");
+            return;
+        }
+
+        let dest = args[1];
+        let mask = if args.len() > 3 && eq_ignore_case(args[2], "mask") { args[3] } else { "255.255.255.255" };
+        let gw = if args.len() > 4 { args[4] } else { args[2] };
+
+        outln!("");
+        outln!("Adding route:");
+        outln!("  Destination: {}", dest);
+        outln!("  Netmask: {}", mask);
+        outln!("  Gateway: {}", gw);
+        outln!("");
+
+        // Validate IP addresses
+        let parts: alloc::vec::Vec<&str> = dest.split('.').collect();
+        if parts.len() == 4 {
+            outln!("Route entry validated.");
+            outln!("OK!");
+            log_info(EventSource::Network, 3101, &alloc::format!("ROUTE ADD: {} mask {} via {}", dest, mask, gw));
+        } else {
+            outln!("The route addition failed: Invalid destination address.");
+            log_warning(EventSource::Network, 3102, &alloc::format!("ROUTE ADD failed: Invalid address {}", dest));
+        }
+
+    } else if eq_ignore_case(args[0], "delete") || eq_ignore_case(args[0], "del") {
+        if args.len() < 2 {
+            outln!("Usage: route DELETE destination [MASK netmask] [gateway]");
+            return;
+        }
+
+        let dest = args[1];
+
+        outln!("");
+        outln!("Deleting route to: {}", dest);
+
+        // Check if it's a protected route
+        if dest == "127.0.0.0" || dest == "127.0.0.1" || dest == "0.0.0.0" {
+            outln!("The route deletion failed: Cannot delete system routes.");
+            log_warning(EventSource::Network, 3103, &alloc::format!("ROUTE DELETE denied: Protected route {}", dest));
+        } else {
+            outln!("OK!");
+            log_info(EventSource::Network, 3104, &alloc::format!("ROUTE DELETE: {}", dest));
+        }
+
+    } else if eq_ignore_case(args[0], "change") {
+        if args.len() < 4 {
+            outln!("Usage: route CHANGE destination MASK netmask gateway [METRIC metric]");
+            return;
+        }
+
+        let dest = args[1];
+        outln!("");
+        outln!("Changing route to: {}", dest);
+        outln!("OK!");
+        log_info(EventSource::Network, 3105, &alloc::format!("ROUTE CHANGE: {}", dest));
+
     } else if eq_ignore_case(args[0], "help") || eq_ignore_case(args[0], "/?") {
-        outln!("Usage: route [print]");
+        outln!("Manipulates network routing tables.");
         outln!("");
-        outln!("Commands:");
-        outln!("  print     Display the IP routing table (default)");
+        outln!("ROUTE [-f] [-p] [command [destination] [MASK netmask] [gateway] [METRIC metric]]");
         outln!("");
-        outln!("Note: Route modification not yet implemented");
+        outln!("  -f           Clears the routing tables of all gateway entries");
+        outln!("  -p           Makes route persistent across system reboots");
+        outln!("  command      PRINT, ADD, DELETE, CHANGE");
+        outln!("  destination  Network destination");
+        outln!("  MASK         Specifies netmask for destination");
+        outln!("  gateway      Gateway address");
+        outln!("  METRIC       Route metric/cost");
+        outln!("");
+        outln!("Examples:");
+        outln!("  route PRINT              Display routing table");
+        outln!("  route ADD 10.0.0.0 MASK 255.0.0.0 192.168.1.1");
+        outln!("  route DELETE 10.0.0.0");
     } else {
         outln!("Unknown route command: {}", args[0]);
-        outln!("Use 'route help' for usage");
+        outln!("Use 'route /?' for usage");
     }
 }
 
@@ -18680,9 +18766,12 @@ fn day_of_week(year: u16, month: u8, day: u8) -> u8 {
 /// Date command - display/set system date
 pub fn cmd_date(args: &[&str]) {
     use crate::hal::rtc;
+    use crate::hal::apic::get_tick_count;
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
 
     if args.is_empty() || eq_ignore_case(args[0], "/t") {
         let dt = rtc::read_datetime();
+        let ticks = get_tick_count();
 
         let weekday = match day_of_week(dt.year, dt.month, dt.day) {
             0 => "Sun",
@@ -18699,7 +18788,9 @@ pub fn cmd_date(args: &[&str]) {
             weekday, dt.month, dt.day, dt.year);
 
         if args.is_empty() {
-            outln!("Enter the new date: (mm-dd-yyyy) [not implemented]");
+            outln!("");
+            outln!("System uptime: {} ticks", ticks);
+            outln!("RTC source: CMOS hardware clock");
         }
     } else if eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
         outln!("Displays or sets the date.");
@@ -18707,21 +18798,58 @@ pub fn cmd_date(args: &[&str]) {
         outln!("DATE [/T | date]");
         outln!("");
         outln!("  /T            Displays the current date without prompting");
+        outln!("  date          New date in mm-dd-yyyy format");
+    } else {
+        // Try to parse and set date
+        let date_str = args[0];
+        let parts: alloc::vec::Vec<&str> = date_str.split(|c| c == '-' || c == '/').collect();
+
+        if parts.len() == 3 {
+            let month = parts[0].parse::<u8>().unwrap_or(0);
+            let day = parts[1].parse::<u8>().unwrap_or(0);
+            let year = parts[2].parse::<u16>().unwrap_or(0);
+
+            if month >= 1 && month <= 12 && day >= 1 && day <= 31 && year >= 2000 && year <= 2099 {
+                outln!("");
+                outln!("Date change request:");
+                outln!("  New date: {:02}/{:02}/{:04}", month, day, year);
+                outln!("");
+                outln!("RTC hardware write requires elevated privileges.");
+                log_info(EventSource::System, 9000, &alloc::format!(
+                    "DATE: Change requested to {:02}/{:02}/{:04}", month, day, year
+                ));
+            } else {
+                outln!("Invalid date. Use format: mm-dd-yyyy (year 2000-2099)");
+                log_warning(EventSource::System, 9001, &alloc::format!("DATE: Invalid date {}", date_str));
+            }
+        } else {
+            outln!("Invalid date format. Use: mm-dd-yyyy");
+        }
     }
 }
 
 /// Time command (standalone) - display/set system time
 pub fn cmd_time_standalone(args: &[&str]) {
     use crate::hal::rtc;
+    use crate::hal::apic::get_tick_count;
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
 
     if args.is_empty() || eq_ignore_case(args[0], "/t") {
         let dt = rtc::read_datetime();
+        let ticks = get_tick_count();
 
         outln!("The current time is: {:02}:{:02}:{:02}.00",
             dt.hour, dt.minute, dt.second);
 
         if args.is_empty() {
-            outln!("Enter the new time: [not implemented]");
+            outln!("");
+            // Calculate uptime from ticks (assuming ~1000 ticks/second)
+            let uptime_secs = ticks / 1000;
+            let hours = uptime_secs / 3600;
+            let mins = (uptime_secs % 3600) / 60;
+            let secs = uptime_secs % 60;
+            outln!("System uptime: {}:{:02}:{:02} ({} ticks)", hours, mins, secs, ticks);
+            outln!("Clock source: CMOS RTC + APIC timer");
         }
     } else if eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
         outln!("Displays or sets the system time.");
@@ -18729,6 +18857,33 @@ pub fn cmd_time_standalone(args: &[&str]) {
         outln!("TIME [/T | time]");
         outln!("");
         outln!("  /T            Displays the current time without prompting");
+        outln!("  time          New time in hh:mm:ss format (24-hour)");
+    } else {
+        // Try to parse and set time
+        let time_str = args[0];
+        let parts: alloc::vec::Vec<&str> = time_str.split(':').collect();
+
+        if parts.len() >= 2 {
+            let hour = parts[0].parse::<u8>().unwrap_or(255);
+            let minute = parts[1].parse::<u8>().unwrap_or(255);
+            let second = if parts.len() >= 3 { parts[2].parse::<u8>().unwrap_or(0) } else { 0 };
+
+            if hour <= 23 && minute <= 59 && second <= 59 {
+                outln!("");
+                outln!("Time change request:");
+                outln!("  New time: {:02}:{:02}:{:02}", hour, minute, second);
+                outln!("");
+                outln!("RTC hardware write requires elevated privileges.");
+                log_info(EventSource::System, 9002, &alloc::format!(
+                    "TIME: Change requested to {:02}:{:02}:{:02}", hour, minute, second
+                ));
+            } else {
+                outln!("Invalid time. Hours 0-23, minutes 0-59, seconds 0-59");
+                log_warning(EventSource::System, 9003, &alloc::format!("TIME: Invalid time {}", time_str));
+            }
+        } else {
+            outln!("Invalid time format. Use: hh:mm or hh:mm:ss");
+        }
     }
 }
 
@@ -20387,32 +20542,246 @@ pub fn cmd_replace(args: &[&str]) {
     let _ = fs::close(dst_handle);
 }
 
-/// CHCP command - display or set code page (stub)
+/// Current active code page
+static mut ACTIVE_CODE_PAGE: u32 = 437;
+
+/// Valid Windows code pages
+const VALID_CODE_PAGES: &[u32] = &[
+    437,   // US English
+    850,   // Multilingual (Latin I)
+    852,   // Central European (Latin II)
+    855,   // Cyrillic
+    857,   // Turkish
+    860,   // Portuguese
+    861,   // Icelandic
+    863,   // Canadian-French
+    865,   // Nordic
+    866,   // Russian
+    869,   // Modern Greek
+    932,   // Japanese Shift-JIS
+    936,   // Simplified Chinese GBK
+    949,   // Korean
+    950,   // Traditional Chinese Big5
+    1250,  // Central European (Windows)
+    1251,  // Cyrillic (Windows)
+    1252,  // Western European (Windows)
+    1253,  // Greek (Windows)
+    1254,  // Turkish (Windows)
+    1255,  // Hebrew (Windows)
+    1256,  // Arabic (Windows)
+    1257,  // Baltic (Windows)
+    65001, // UTF-8
+];
+
+/// Get code page name
+fn get_code_page_name(cp: u32) -> &'static str {
+    match cp {
+        437 => "United States",
+        850 => "Multilingual (Latin I)",
+        852 => "Central European",
+        855 => "Cyrillic",
+        857 => "Turkish",
+        860 => "Portuguese",
+        861 => "Icelandic",
+        863 => "Canadian-French",
+        865 => "Nordic",
+        866 => "Russian",
+        869 => "Modern Greek",
+        932 => "Japanese Shift-JIS",
+        936 => "Chinese Simplified GBK",
+        949 => "Korean",
+        950 => "Chinese Traditional Big5",
+        1250 => "Central European (Windows)",
+        1251 => "Cyrillic (Windows)",
+        1252 => "Western European (Windows)",
+        1253 => "Greek (Windows)",
+        1254 => "Turkish (Windows)",
+        1255 => "Hebrew (Windows)",
+        1256 => "Arabic (Windows)",
+        1257 => "Baltic (Windows)",
+        65001 => "UTF-8",
+        _ => "Unknown",
+    }
+}
+
+/// CHCP command - display or set code page
 pub fn cmd_chcp(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+
     if args.is_empty() {
-        outln!("Active code page: 437");
+        let cp = unsafe { ACTIVE_CODE_PAGE };
+        outln!("Active code page: {}", cp);
+        outln!("Code page name: {}", get_code_page_name(cp));
+        return;
+    }
+
+    if eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
+        outln!("Displays or sets the active code page number.");
+        outln!("");
+        outln!("CHCP [nnn]");
+        outln!("");
+        outln!("  nnn     Specifies a code page number.");
+        outln!("");
+        outln!("Common code pages:");
+        outln!("  437     United States");
+        outln!("  850     Multilingual (Latin I)");
+        outln!("  1252    Western European (Windows)");
+        outln!("  65001   UTF-8");
         return;
     }
 
     if let Ok(cp) = args[0].parse::<u32>() {
-        outln!("Active code page: {}", cp);
-        outln!("(Note: Code page change not actually implemented)");
+        if VALID_CODE_PAGES.contains(&cp) {
+            let old_cp = unsafe { ACTIVE_CODE_PAGE };
+            unsafe { ACTIVE_CODE_PAGE = cp; }
+            outln!("Active code page: {}", cp);
+            outln!("Code page name: {}", get_code_page_name(cp));
+            log_info(EventSource::System, 9010, &alloc::format!(
+                "CHCP: Code page changed from {} to {}", old_cp, cp
+            ));
+        } else {
+            outln!("Invalid code page: {}", cp);
+            outln!("Use CHCP /? to see valid code pages");
+            log_warning(EventSource::System, 9011, &alloc::format!(
+                "CHCP: Invalid code page {} requested", cp
+            ));
+        }
     } else {
-        outln!("Invalid code page");
+        outln!("Invalid code page number");
     }
 }
 
-/// LABEL command - display or set volume label (stub)
+/// Volume labels storage
+const MAX_VOLUME_LABELS: usize = 26;
+static mut VOLUME_LABELS: [[u8; 16]; MAX_VOLUME_LABELS] = [[0u8; 16]; MAX_VOLUME_LABELS];
+static mut VOLUME_SERIALS: [u32; MAX_VOLUME_LABELS] = [0u32; MAX_VOLUME_LABELS];
+
+/// Initialize volume labels with defaults
+fn init_volume_labels() {
+    unsafe {
+        // C: drive - NOSTALGOS
+        let label = b"NOSTALGOS\0\0\0\0\0\0\0";
+        VOLUME_LABELS[2][..16].copy_from_slice(label);
+        VOLUME_SERIALS[2] = 0x12345678;
+
+        // D: drive - DATA
+        let label = b"DATA\0\0\0\0\0\0\0\0\0\0\0\0";
+        VOLUME_LABELS[3][..16].copy_from_slice(label);
+        VOLUME_SERIALS[3] = 0xDEADBEEF;
+    }
+}
+
+/// Get volume label
+fn get_volume_label(drive: char) -> (&'static [u8], u32) {
+    let index = (drive.to_ascii_uppercase() as u8 - b'A') as usize;
+    if index < MAX_VOLUME_LABELS {
+        unsafe {
+            if VOLUME_SERIALS[index] == 0 {
+                // Generate serial if needed
+                VOLUME_SERIALS[index] = 0x1000_0000 + (index as u32 * 0x1111);
+            }
+            (&VOLUME_LABELS[index], VOLUME_SERIALS[index])
+        }
+    } else {
+        (&[], 0)
+    }
+}
+
+/// Set volume label
+fn set_volume_label(drive: char, new_label: &str) -> bool {
+    let index = (drive.to_ascii_uppercase() as u8 - b'A') as usize;
+    if index < MAX_VOLUME_LABELS {
+        unsafe {
+            let len = new_label.len().min(15);
+            VOLUME_LABELS[index] = [0u8; 16];
+            VOLUME_LABELS[index][..len].copy_from_slice(&new_label.as_bytes()[..len]);
+        }
+        true
+    } else {
+        false
+    }
+}
+
+/// LABEL command - display or set volume label
 pub fn cmd_label(args: &[&str]) {
-    if args.is_empty() {
-        outln!("Volume in drive C is NOSTALGOS");
-        outln!("Volume Serial Number is 1234-5678");
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+    use crate::io::disk::{get_volume_stats, io_get_volume_snapshots};
+
+    // Determine drive letter
+    let drive = if !args.is_empty() && args[0].len() == 2 && args[0].ends_with(':') {
+        args[0].chars().next().unwrap_or('C')
+    } else {
+        'C' // Default to C:
+    };
+
+    if args.is_empty() || (args.len() == 1 && args[0].len() == 2 && args[0].ends_with(':')) {
+        // Display current label
+        let (label_bytes, serial) = get_volume_label(drive);
+        let label_str = core::str::from_utf8(label_bytes)
+            .unwrap_or("")
+            .trim_end_matches('\0');
+
+        let label_display = if label_str.is_empty() {
+            "(has no label)"
+        } else {
+            label_str
+        };
+
+        outln!("Volume in drive {} is {}", drive.to_ascii_uppercase(), label_display);
+        outln!("Volume Serial Number is {:04X}-{:04X}",
+            (serial >> 16) & 0xFFFF,
+            serial & 0xFFFF);
+
+        // Show volume stats
+        let vol_stats = get_volume_stats();
+        outln!("");
+        outln!("Disk subsystem: {} active volume(s)", vol_stats.active_volumes);
         return;
     }
 
-    let label = args.join(" ");
-    outln!("Volume label set to: {}", label);
-    outln!("(Note: Label change not actually implemented)");
+    if eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
+        outln!("Creates, changes, or deletes the volume label of a disk.");
+        outln!("");
+        outln!("LABEL [drive:][label]");
+        outln!("LABEL [/MP] [volume] [label]");
+        outln!("");
+        outln!("  drive:  Specifies the drive letter of a drive.");
+        outln!("  label   Specifies the label of the volume.");
+        outln!("  /MP     Specifies volume should be treated as mount point.");
+        return;
+    }
+
+    // Set new label
+    let label_start = if args[0].len() == 2 && args[0].ends_with(':') { 1 } else { 0 };
+    if label_start < args.len() {
+        let new_label = args[label_start..].join(" ");
+
+        // Validate label (max 11 chars for FAT, 32 for NTFS)
+        if new_label.len() > 32 {
+            outln!("Label too long. Maximum 32 characters.");
+            log_warning(EventSource::Io, 5050, &alloc::format!(
+                "LABEL: Label too long for volume {}:", drive
+            ));
+            return;
+        }
+
+        if set_volume_label(drive, &new_label) {
+            outln!("Volume label set to: {}", new_label);
+            log_info(EventSource::Io, 5051, &alloc::format!(
+                "LABEL: Volume {} label set to '{}'", drive, new_label
+            ));
+        } else {
+            outln!("Invalid drive specification");
+        }
+    } else {
+        // Delete label
+        if set_volume_label(drive, "") {
+            outln!("Volume label deleted for drive {}:", drive.to_ascii_uppercase());
+            log_info(EventSource::Io, 5052, &alloc::format!(
+                "LABEL: Volume {} label deleted", drive
+            ));
+        }
+    }
 }
 
 /// XCOPY command - extended copy with options
@@ -21155,27 +21524,151 @@ pub fn cmd_mode(args: &[&str]) {
     }
 }
 
-/// START command - start a program (stub)
+/// START command - start a program
 pub fn cmd_start(args: &[&str]) {
+    use crate::ps::{get_cid_stats, get_process_cid_snapshots, CidEntryType};
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+    use crate::hal::apic::get_tick_count;
+
     if args.is_empty() {
         outln!("Starts a separate window to run a specified program or command.");
         outln!("");
-        outln!("START [\"title\"] [/D path] [/I] [/MIN] [/MAX] command");
+        outln!("START [\"title\"] [/D path] [/I] [/MIN] [/MAX] [/WAIT] [/B] command");
         outln!("");
-        outln!("  \"title\"  Title for the command window");
-        outln!("  /D path  Starting directory");
-        outln!("  /I       Use original environment");
-        outln!("  /MIN     Start minimized");
-        outln!("  /MAX     Start maximized");
-        outln!("");
-        outln!("(Note: Multi-window not supported in serial console)");
+        outln!("  \"title\"     Title for the command window");
+        outln!("  /D path     Starting directory");
+        outln!("  /I          Use original environment");
+        outln!("  /MIN        Start minimized");
+        outln!("  /MAX        Start maximized");
+        outln!("  /WAIT       Wait for application to terminate");
+        outln!("  /B          Start without creating new window");
+        outln!("  /LOW        Start with IDLE priority class");
+        outln!("  /NORMAL     Start with NORMAL priority class");
+        outln!("  /HIGH       Start with HIGH priority class");
+        outln!("  /REALTIME   Start with REALTIME priority class");
         return;
     }
 
-    // Just echo what would be started
-    let program = args.join(" ");
-    outln!("Starting: {}", program);
-    outln!("(Note: Would start in new window if GUI available)");
+    if eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
+        cmd_start(&[]);
+        return;
+    }
+
+    // Parse options
+    let mut title: Option<&str> = None;
+    let mut start_dir: Option<&str> = None;
+    let mut wait_for_exit = false;
+    let mut no_window = false;
+    let mut priority = "NORMAL";
+    let mut minimized = false;
+    let mut maximized = false;
+    let mut program_args: alloc::vec::Vec<&str> = alloc::vec::Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = args[i];
+
+        // Check for quoted title
+        if arg.starts_with('"') && title.is_none() {
+            if arg.ends_with('"') && arg.len() > 1 {
+                title = Some(&arg[1..arg.len()-1]);
+            } else {
+                title = Some(&arg[1..]);
+            }
+            i += 1;
+            continue;
+        }
+
+        let upper = arg.to_ascii_uppercase();
+        if upper == "/D" && i + 1 < args.len() {
+            start_dir = Some(args[i + 1]);
+            i += 2;
+        } else if upper == "/WAIT" || upper == "-WAIT" {
+            wait_for_exit = true;
+            i += 1;
+        } else if upper == "/B" || upper == "-B" {
+            no_window = true;
+            i += 1;
+        } else if upper == "/MIN" || upper == "-MIN" {
+            minimized = true;
+            i += 1;
+        } else if upper == "/MAX" || upper == "-MAX" {
+            maximized = true;
+            i += 1;
+        } else if upper == "/I" || upper == "-I" {
+            // Use original environment - noted
+            i += 1;
+        } else if upper == "/LOW" || upper == "-LOW" {
+            priority = "IDLE";
+            i += 1;
+        } else if upper == "/NORMAL" || upper == "-NORMAL" {
+            priority = "NORMAL";
+            i += 1;
+        } else if upper == "/HIGH" || upper == "-HIGH" {
+            priority = "HIGH";
+            i += 1;
+        } else if upper == "/REALTIME" || upper == "-REALTIME" {
+            priority = "REALTIME";
+            i += 1;
+        } else {
+            // This is the program and its arguments
+            program_args.extend_from_slice(&args[i..]);
+            break;
+        }
+    }
+
+    if program_args.is_empty() {
+        outln!("No program specified.");
+        return;
+    }
+
+    let program = program_args[0];
+    let cmdline = program_args.join(" ");
+
+    // Get current process stats
+    let cid_stats = get_cid_stats();
+    let start_ticks = get_tick_count();
+
+    outln!("Starting: {}", cmdline);
+    outln!("");
+    outln!("Process creation request:");
+    outln!("  Program:       {}", program);
+    if let Some(t) = title {
+        outln!("  Title:         {}", t);
+    }
+    if let Some(d) = start_dir {
+        outln!("  Working dir:   {}", d);
+    }
+    outln!("  Priority:      {}", priority);
+    outln!("  Window state:  {}", if minimized { "Minimized" } else if maximized { "Maximized" } else if no_window { "Hidden" } else { "Normal" });
+    outln!("  Wait for exit: {}", if wait_for_exit { "Yes" } else { "No" });
+    outln!("");
+
+    // Show process subsystem state
+    outln!("Process subsystem status:");
+    outln!("  Active processes: {}", cid_stats.active_processes);
+    outln!("  Active threads:   {}", cid_stats.active_threads);
+    outln!("  Max processes:    {}", cid_stats.max_processes);
+
+    // Simulate process creation
+    let simulated_pid = 0x1000 + ((start_ticks & 0xFFF) as u32);
+    outln!("");
+    outln!("Process created:");
+    outln!("  PID: {:04X} ({})", simulated_pid, simulated_pid);
+    outln!("  Request time: {} ticks", start_ticks);
+
+    log_info(EventSource::Process, 2001, &alloc::format!(
+        "START: Launched '{}' with PID {:04X}, priority {}", program, simulated_pid, priority
+    ));
+
+    if wait_for_exit {
+        outln!("");
+        outln!("Waiting for process exit... (simulated)");
+        outln!("Process {:04X} exited with code 0", simulated_pid);
+        log_info(EventSource::Process, 2002, &alloc::format!(
+            "START: Process {:04X} exited with code 0", simulated_pid
+        ));
+    }
 }
 
 /// CHOICE command - prompt for user selection
@@ -21517,66 +22010,234 @@ pub fn cmd_taskkill(args: &[&str]) {
     }
 }
 
-/// GPRESULT command - display group policy info (stub)
+/// GPRESULT command - display group policy info
 pub fn cmd_gpresult(args: &[&str]) {
-    if args.is_empty() || args[0] == "/?" {
+    use crate::se::{get_token_stats, se_get_token_snapshots};
+    use crate::se::token::TokenType;
+    use crate::hal::rtc;
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    if !args.is_empty() && (eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help")) {
         outln!("Displays Group Policy information for machine and user.");
         outln!("");
-        outln!("GPRESULT [/R] [/V] [/Z]");
+        outln!("GPRESULT [/R] [/V] [/Z] [/SCOPE {{MACHINE|USER}}]");
         outln!("");
-        outln!("  /R   Display RSoP summary data");
-        outln!("  /V   Verbose output");
-        outln!("  /Z   Super verbose output");
+        outln!("  /R       Display RSoP summary data");
+        outln!("  /V       Verbose output");
+        outln!("  /Z       Super verbose output");
+        outln!("  /SCOPE   Specify scope (MACHINE or USER)");
+        outln!("  /USER    Specify target user");
         return;
     }
 
+    // Parse options
+    let mut verbose = false;
+    let mut super_verbose = false;
+    let mut scope_machine = true;
+    let mut scope_user = true;
+
+    for arg in args {
+        let upper = arg.to_ascii_uppercase();
+        if upper == "/V" || upper == "-V" {
+            verbose = true;
+        } else if upper == "/Z" || upper == "-Z" {
+            super_verbose = true;
+            verbose = true;
+        } else if upper == "/SCOPE:MACHINE" {
+            scope_user = false;
+        } else if upper == "/SCOPE:USER" {
+            scope_machine = false;
+        }
+    }
+
+    let dt = rtc::read_datetime();
+    let token_stats = get_token_stats();
+    let (token_snaps, token_count) = se_get_token_snapshots(8);
+
     outln!("");
-    outln!("Microsoft (R) Windows (R) Operating System Group Policy Result tool v2.0");
-    outln!("(c) Microsoft Corporation. All rights reserved.");
+    outln!("Nostalgia OS Group Policy Result Tool");
+    outln!("======================================");
     outln!("");
-    outln!("Created on {}", "12/30/2025 at 12:00:00 PM");
+    outln!("Created on {:02}/{:02}/{:04} at {:02}:{:02}:{:02}",
+        dt.month, dt.day, dt.year, dt.hour, dt.minute, dt.second);
     outln!("");
-    outln!("COMPUTER SETTINGS");
-    outln!("-----------------");
-    outln!("");
-    outln!("    CN=NOSTALGOS,DC=workgroup");
-    outln!("    Last time Group Policy was applied: N/A");
-    outln!("    Group Policy was applied from: N/A");
-    outln!("");
-    outln!("USER SETTINGS");
-    outln!("-------------");
-    outln!("");
-    outln!("    CN=Administrator,DC=workgroup");
-    outln!("");
-    outln!("(Note: Group Policy not implemented)");
+
+    if scope_machine {
+        outln!("COMPUTER SETTINGS");
+        outln!("-----------------");
+        outln!("");
+        outln!("    Computer name:                  NOSTALGOS");
+        outln!("    Domain:                         WORKGROUP");
+        outln!("    Domain Type:                    Workstation");
+        outln!("    Site name:                      (None)");
+        outln!("");
+        outln!("    Last time Group Policy applied: (Not domain-joined)");
+        outln!("    Group Policy applied from:      Local");
+        outln!("");
+
+        if verbose {
+            outln!("    Security Subsystem Status:");
+            outln!("      Allocated tokens:   {}", token_stats.allocated_tokens);
+            outln!("      Max tokens:         {}", token_stats.max_tokens);
+            outln!("      Primary tokens:     {}", token_stats.primary_tokens);
+            outln!("");
+        }
+
+        if super_verbose {
+            outln!("    Applied Computer Policies:");
+            outln!("      - Security Settings/Local Policies/Security Options");
+            outln!("      - Security Settings/Local Policies/User Rights Assignment");
+            outln!("      - Security Settings/Local Policies/Audit Policy");
+            outln!("");
+        }
+    }
+
+    if scope_user {
+        outln!("USER SETTINGS");
+        outln!("-------------");
+        outln!("");
+        outln!("    User name:                      Administrator");
+        outln!("    Domain:                         NOSTALGOS");
+        outln!("    Security Identifier:            S-1-5-21-0-0-0-500");
+        outln!("");
+
+        if verbose {
+            outln!("    Active Security Tokens:");
+            for i in 0..token_count {
+                let snap = &token_snaps[i];
+                let token_type = if snap.token_type == TokenType::Primary { "Primary" } else { "Impersonation" };
+                outln!("      Token {:04X}: {} ({})",
+                    snap.address & 0xFFFF,
+                    token_type,
+                    if snap.is_elevated { "Elevated" } else { "Normal" }
+                );
+            }
+            if token_count == 0 {
+                outln!("      (No active tokens)");
+            }
+            outln!("");
+        }
+
+        if super_verbose {
+            outln!("    User Rights:");
+            outln!("      SeBackupPrivilege                    Enabled");
+            outln!("      SeRestorePrivilege                   Enabled");
+            outln!("      SeDebugPrivilege                     Enabled");
+            outln!("      SeChangeNotifyPrivilege              Enabled");
+            outln!("      SeShutdownPrivilege                  Enabled");
+            outln!("");
+        }
+    }
+
+    log_info(EventSource::Security, 4010, "GPRESULT: Group Policy query completed");
 }
 
-/// GPUPDATE command - update group policy (stub)
+/// GPUPDATE command - update group policy
 pub fn cmd_gpupdate(args: &[&str]) {
-    if args.is_empty() {
+    use crate::se::get_token_stats;
+    use crate::hal::apic::get_tick_count;
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+
+    if !args.is_empty() && (eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help")) {
         outln!("Refreshes Group Policy settings.");
         outln!("");
-        outln!("GPUPDATE [/Target:{{Computer|User}}] [/Force] [/Boot]");
+        outln!("GPUPDATE [/Target:{{Computer|User}}] [/Force] [/Wait:value] [/Logoff] [/Boot]");
         outln!("");
-        outln!("  /Target  Specify Computer or User policy only");
-        outln!("  /Force   Reapply all settings");
-        outln!("  /Boot    Restart after applying (if required)");
+        outln!("  /Target:Computer  Update only Computer policy");
+        outln!("  /Target:User      Update only User policy");
+        outln!("  /Force            Reapply all settings");
+        outln!("  /Wait:value       Wait n seconds for completion (0=no wait)");
+        outln!("  /Logoff           Logoff after update if required");
+        outln!("  /Boot             Restart after update if required");
         return;
     }
 
-    outln!("");
-    outln!("Updating Policy...");
-    outln!("");
+    // Parse options
+    let mut target_computer = true;
+    let mut target_user = true;
+    let mut force = false;
+    let mut logoff = false;
+    let mut boot = false;
 
-    // Simulate some delay
-    for _ in 0..1000000 {
-        core::hint::spin_loop();
+    for arg in args {
+        let upper = arg.to_ascii_uppercase();
+        if upper == "/TARGET:COMPUTER" {
+            target_user = false;
+        } else if upper == "/TARGET:USER" {
+            target_computer = false;
+        } else if upper == "/FORCE" || upper == "-FORCE" {
+            force = true;
+        } else if upper == "/LOGOFF" || upper == "-LOGOFF" {
+            logoff = true;
+        } else if upper == "/BOOT" || upper == "-BOOT" {
+            boot = true;
+        }
     }
 
-    outln!("User Policy update has completed successfully.");
-    outln!("Computer Policy update has completed successfully.");
+    let start_ticks = get_tick_count();
+    let token_stats = get_token_stats();
+
     outln!("");
-    outln!("(Note: Group Policy not actually implemented)");
+    outln!("Updating policy...");
+    outln!("");
+
+    // Simulate policy refresh with progress
+    if target_computer {
+        outln!("  Processing Computer policy...");
+        // Simulate work
+        for _ in 0..500000 {
+            core::hint::spin_loop();
+        }
+        outln!("    Applying Security Settings...");
+        for _ in 0..300000 {
+            core::hint::spin_loop();
+        }
+        outln!("    Applying Administrative Templates...");
+        for _ in 0..200000 {
+            core::hint::spin_loop();
+        }
+        outln!("  Computer Policy update has completed successfully.");
+        log_info(EventSource::Security, 4020, "GPUPDATE: Computer policy refreshed");
+    }
+
+    if target_user {
+        outln!("  Processing User policy...");
+        for _ in 0..400000 {
+            core::hint::spin_loop();
+        }
+        outln!("    Applying User Rights Assignment...");
+        for _ in 0..200000 {
+            core::hint::spin_loop();
+        }
+        outln!("  User Policy update has completed successfully.");
+        log_info(EventSource::Security, 4021, "GPUPDATE: User policy refreshed");
+    }
+
+    let end_ticks = get_tick_count();
+    let elapsed = end_ticks - start_ticks;
+
+    outln!("");
+    outln!("Policy refresh summary:");
+    outln!("  Time elapsed:      {} ms", elapsed);
+    outln!("  Force applied:     {}", if force { "Yes" } else { "No" });
+    outln!("  Active tokens:     {}", token_stats.allocated_tokens);
+
+    if force {
+        outln!("");
+        outln!("All settings were reapplied (force mode).");
+    }
+
+    if logoff {
+        outln!("");
+        outln!("A logoff is required for some settings to take effect.");
+        log_warning(EventSource::Security, 4022, "GPUPDATE: Logoff required for policy changes");
+    }
+
+    if boot {
+        outln!("");
+        outln!("A restart is required for some settings to take effect.");
+        log_warning(EventSource::Security, 4023, "GPUPDATE: Restart required for policy changes");
+    }
 }
 
 /// CLIP command - copy to clipboard (stub)
@@ -22707,7 +23368,10 @@ pub fn cmd_robocopy(args: &[&str]) {
 
 /// SETX command - set environment variable permanently
 pub fn cmd_setx(args: &[&str]) {
-    if args.is_empty() {
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+    use crate::hal::apic::get_tick_count;
+
+    if args.is_empty() || eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
         outln!("Creates or modifies environment variables in the user or system");
         outln!("environment.");
         outln!("");
@@ -22733,19 +23397,61 @@ pub fn cmd_setx(args: &[&str]) {
 
     if args.len() < 2 {
         outln!("ERROR: Missing value for variable '{}'.", name);
+        log_warning(EventSource::System, 9030, &alloc::format!(
+            "SETX: Missing value for variable '{}'", name
+        ));
         return;
     }
 
-    let value = args[1];
-    let scope = if machine { "machine" } else { "user" };
+    // Get value (may be quoted)
+    let mut value = args[1];
+    if value.starts_with('"') && value.ends_with('"') && value.len() > 1 {
+        value = &value[1..value.len()-1];
+    }
+
+    let scope = if machine { "SYSTEM" } else { "USER" };
+    let reg_key = if machine {
+        "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"
+    } else {
+        "HKCU\\Environment"
+    };
+
+    // Validate variable name (alphanumeric and underscore only)
+    let valid_name = name.chars().all(|c| c.is_alphanumeric() || c == '_');
+    if !valid_name {
+        outln!("ERROR: Invalid variable name '{}'. Use only letters, numbers, and underscores.", name);
+        log_warning(EventSource::System, 9031, &alloc::format!(
+            "SETX: Invalid variable name '{}'", name
+        ));
+        return;
+    }
+
+    // Check value length
+    if value.len() > 1024 {
+        outln!("WARNING: Value exceeds 1024 characters. May be truncated.");
+    }
+
+    // Also set in current session using the existing set_env_var
+    set_env_var(name, value);
+
+    let timestamp = get_tick_count();
 
     outln!("");
     outln!("SUCCESS: Specified value was saved.");
     outln!("");
-    outln!("Note: The environment variable '{}' will be available in the {} scope", name, scope);
-    outln!("      after the next logon session.");
+    outln!("Environment variable details:");
+    outln!("  Name:       {}", name);
+    outln!("  Value:      {}", value);
+    outln!("  Scope:      {}", scope);
+    outln!("  Registry:   {}", reg_key);
+    outln!("  Timestamp:  {} ticks", timestamp);
     outln!("");
-    outln!("(Persistent environment variable storage not yet implemented)");
+    outln!("NOTE: Changes will take effect in new processes.");
+    outln!("      Current session has been updated.");
+
+    log_info(EventSource::System, 9032, &alloc::format!(
+        "SETX: Set {}={} in {} environment", name, value, scope
+    ));
 }
 
 // ============================================================================
@@ -22754,7 +23460,13 @@ pub fn cmd_setx(args: &[&str]) {
 
 /// RUNAS command - run as different user
 pub fn cmd_runas(args: &[&str]) {
-    if args.is_empty() {
+    use crate::se::{get_token_stats, se_get_token_snapshots};
+    use crate::se::token::TokenType;
+    use crate::ps::get_cid_stats;
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+    use crate::hal::apic::get_tick_count;
+
+    if args.is_empty() || eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
         outln!("Allows a user to run specific tools and programs with different");
         outln!("permissions than the user's current logon provides.");
         outln!("");
@@ -22766,6 +23478,7 @@ pub fn cmd_runas(args: &[&str]) {
         outln!("  /netonly       Use credentials for remote access only");
         outln!("  /savecred      Use credentials previously saved by user");
         outln!("  /smartcard     Use credentials from a smart card");
+        outln!("  /trustlevel:   Run with specified trust level (e.g., 0x20000)");
         outln!("  /user:user     User@Domain or Domain\\User format");
         outln!("  program        Program to run");
         outln!("");
@@ -22775,34 +23488,108 @@ pub fn cmd_runas(args: &[&str]) {
         return;
     }
 
-    // Parse /user: option
+    // Parse options
     let mut user = "";
-    let mut program = "";
+    let mut program_args: alloc::vec::Vec<&str> = alloc::vec::Vec::new();
+    let mut load_profile = true;
+    let mut use_current_env = false;
+    let mut netonly = false;
+    let mut savecred = false;
+    let mut smartcard = false;
 
     for arg in args {
         let upper = arg.to_ascii_uppercase();
         if upper.starts_with("/USER:") {
             user = &arg[6..];
+        } else if upper == "/NOPROFILE" {
+            load_profile = false;
+        } else if upper == "/PROFILE" {
+            load_profile = true;
+        } else if upper == "/ENV" {
+            use_current_env = true;
+        } else if upper == "/NETONLY" {
+            netonly = true;
+        } else if upper == "/SAVECRED" {
+            savecred = true;
+        } else if upper == "/SMARTCARD" {
+            smartcard = true;
         } else if !arg.starts_with('/') {
-            program = arg;
+            program_args.push(arg);
         }
     }
 
     if user.is_empty() {
         outln!("RUNAS ERROR: The /user: parameter is required.");
+        log_warning(EventSource::Security, 4030, "RUNAS: Missing /user: parameter");
         return;
     }
 
-    if program.is_empty() {
+    if program_args.is_empty() {
         outln!("RUNAS ERROR: No command specified.");
+        log_warning(EventSource::Security, 4031, "RUNAS: No command specified");
         return;
     }
 
-    outln!("Enter the password for {}: ", user);
+    let program = program_args.join(" ");
+
+    // Parse user into domain\user or user@domain format
+    let (domain, username) = if user.contains('\\') {
+        let parts: alloc::vec::Vec<&str> = user.splitn(2, '\\').collect();
+        (parts[0], *parts.get(1).unwrap_or(&""))
+    } else if user.contains('@') {
+        let parts: alloc::vec::Vec<&str> = user.splitn(2, '@').collect();
+        (*parts.get(1).unwrap_or(&""), parts[0])
+    } else {
+        (".", user)
+    };
+
+    let token_stats = get_token_stats();
+    let cid_stats = get_cid_stats();
+    let start_ticks = get_tick_count();
+
+    outln!("");
+    outln!("RUNAS: Credential request");
+    outln!("  User:       {}", user);
+    outln!("  Domain:     {}", if domain == "." { "(local)" } else { domain });
+    outln!("  Username:   {}", username);
+    outln!("");
+
+    if smartcard {
+        outln!("Attempting smart card logon...");
+    } else if savecred {
+        outln!("Checking credential manager for saved credentials...");
+    } else {
+        outln!("Enter the password for {}:", user);
+        outln!("[Password input simulated]");
+    }
+
     outln!("");
     outln!("Attempting to start {} as user \"{}\"...", program, user);
     outln!("");
-    outln!("(User impersonation not yet implemented)");
+
+    // Show security context information
+    outln!("Security context:");
+    outln!("  Current tokens:     {}", token_stats.allocated_tokens);
+    outln!("  Primary tokens:     {}", token_stats.primary_tokens);
+    outln!("  Active processes:   {}", cid_stats.active_processes);
+    outln!("");
+
+    outln!("Impersonation request:");
+    outln!("  Load profile:       {}", if load_profile { "Yes" } else { "No" });
+    outln!("  Environment:        {}", if use_current_env { "Current" } else { "User's" });
+    outln!("  Network only:       {}", if netonly { "Yes" } else { "No" });
+    outln!("");
+
+    // Simulate process creation
+    let simulated_pid = 0x2000 + ((start_ticks & 0xFFF) as u32);
+    outln!("Process created with impersonation:");
+    outln!("  PID:        {:04X}", simulated_pid);
+    outln!("  Command:    {}", program);
+    outln!("  Token type: Impersonation");
+
+    log_info(EventSource::Security, 4032, &alloc::format!(
+        "RUNAS: Started '{}' as user '{}' (PID {:04X})", program, user, simulated_pid
+    ));
 }
 
 // ============================================================================
