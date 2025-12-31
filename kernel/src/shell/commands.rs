@@ -3506,6 +3506,7 @@ pub fn cmd_rtl(args: &[&str]) {
         outln!("  random [count]     Generate random numbers");
         outln!("  crc32 <addr> <len> Calculate CRC32 of memory");
         outln!("  image <addr>       Show PE image info using RTL functions");
+        outln!("  8dot3 <name>       Generate 8.3 short name from long name");
         return;
     }
 
@@ -3633,6 +3634,70 @@ pub fn cmd_rtl(args: &[&str]) {
             let reloc_dir = rtl::rtl_image_relocation_directory(base, &mut reloc_size);
             outln!("  Relocation:  {:p} (size={:#x})", reloc_dir, reloc_size);
         }
+    } else if eq_ignore_case(cmd, "8dot3") {
+        if args.len() < 2 {
+            outln!("Usage: rtl 8dot3 <long-name>");
+            outln!("Example: rtl 8dot3 \"My Long Filename.txt\"");
+            return;
+        }
+
+        let long_name = args[1];
+
+        outln!("8.3 Name Generation");
+        outln!("");
+        outln!("  Long name: \"{}\"", long_name);
+        outln!("");
+
+        // Convert to UTF-16 for the RTL function
+        let mut name_utf16 = [0u16; 260];
+        let mut len = 0;
+        for ch in long_name.chars().take(259) {
+            name_utf16[len] = ch as u16;
+            len += 1;
+        }
+
+        // Check if name is already a valid 8.3 name
+        let mut has_spaces = false;
+        let is_legal = rtl::rtl_is_name_legal_dos8dot3(&name_utf16[..len], &mut has_spaces);
+        outln!("  Already 8.3 legal: {}", if is_legal { "Yes" } else { "No" });
+        if has_spaces {
+            outln!("  Contains spaces:   Yes");
+        }
+        outln!("");
+
+        // Generate short names
+        let mut ctx = rtl::Generate8dot3Context::new();
+        outln!("Generated short names:");
+
+        for i in 1..=5 {
+            let mut short_name = [0u16; 13];
+            let short_len = rtl::rtl_generate_8dot3_name(
+                &name_utf16[..len],
+                false,
+                &mut ctx,
+                &mut short_name,
+            );
+
+            if short_len == 0 {
+                outln!("  [{}] (failed)", i);
+                break;
+            }
+
+            // Convert back to string for display
+            let mut display = [0u8; 13];
+            let mut d_len = 0;
+            for j in 0..short_len {
+                if short_name[j] < 128 {
+                    display[d_len] = short_name[j] as u8;
+                    d_len += 1;
+                }
+            }
+            let short_str = core::str::from_utf8(&display[..d_len]).unwrap_or("?");
+
+            outln!("  [{}] {}", i, short_str);
+        }
+        outln!("");
+        outln!("Checksum: {:#06x}", rtl::rtl_compute_lfn_checksum(&name_utf16[..len]));
     } else {
         outln!("Unknown rtl command: {}", cmd);
     }
