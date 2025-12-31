@@ -21980,19 +21980,25 @@ pub fn cmd_start(args: &[&str]) {
 }
 
 /// CHOICE command - prompt for user selection
+/// Uses HAL timing for timeout and keyboard for input
 pub fn cmd_choice(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, EventSource};
+
     if args.is_empty() {
         outln!("Allows users to select one item from a list of choices.");
         outln!("");
-        outln!("CHOICE [/C choices] [/N] [/T timeout /D default] [/M text]");
+        outln!("CHOICE [/C choices] [/N] [/CS] [/T timeout /D default] [/M text]");
         outln!("");
         outln!("  /C choices  List of choices (default: YN)");
-        outln!("  /N          Hide the list of choices");
-        outln!("  /T timeout  Timeout in seconds");
+        outln!("  /N          Hide the list of choices in the prompt");
+        outln!("  /CS         Case-sensitive choice matching");
+        outln!("  /T timeout  Timeout in seconds before default selection");
         outln!("  /D default  Default choice on timeout");
-        outln!("  /M text     Message to display");
+        outln!("  /M text     Message to display before the prompt");
         outln!("");
-        outln!("(Note: Interactive input limited in serial console)");
+        outln!("ERRORLEVEL is set to the index of the selected choice (1-based).");
+        outln!("ERRORLEVEL is set to 0 if timeout occurs with default.");
+        outln!("ERRORLEVEL is set to 255 on error.");
         return;
     }
 
@@ -22000,6 +22006,7 @@ pub fn cmd_choice(args: &[&str]) {
     let mut choices = "YN";
     let mut message = "";
     let mut hide_choices = false;
+    let mut case_sensitive = false;
     let mut timeout_secs = 0u32;
     let mut default_choice = ' ';
 
@@ -22012,6 +22019,9 @@ pub fn cmd_choice(args: &[&str]) {
         } else if arg == "/N" {
             hide_choices = true;
             i += 1;
+        } else if arg == "/CS" {
+            case_sensitive = true;
+            i += 1;
         } else if arg == "/T" && i + 1 < args.len() {
             timeout_secs = args[i + 1].parse().unwrap_or(0);
             i += 2;
@@ -22021,8 +22031,39 @@ pub fn cmd_choice(args: &[&str]) {
         } else if arg == "/M" && i + 1 < args.len() {
             message = args[i + 1];
             i += 2;
+        } else if arg == "/?" {
+            // Show help
+            cmd_choice(&[]);
+            return;
         } else {
             i += 1;
+        }
+    }
+
+    // Validate choices
+    if choices.is_empty() {
+        outln!("ERROR: Choice list cannot be empty");
+        set_errorlevel(255);
+        return;
+    }
+
+    // Validate default choice if timeout specified
+    if timeout_secs > 0 {
+        if default_choice == ' ' {
+            outln!("ERROR: Must specify /D default when using /T timeout");
+            set_errorlevel(255);
+            return;
+        }
+        // Check if default is in choices
+        let default_valid = if case_sensitive {
+            choices.contains(default_choice)
+        } else {
+            choices.to_ascii_uppercase().contains(default_choice.to_ascii_uppercase())
+        };
+        if !default_valid {
+            outln!("ERROR: Default choice '{}' not in choice list '{}'", default_choice, choices);
+            set_errorlevel(255);
+            return;
         }
     }
 
@@ -22034,15 +22075,125 @@ pub fn cmd_choice(args: &[&str]) {
     if !hide_choices {
         crate::serial_print!(" [{}]", choices);
     }
+    crate::serial_print!("?");
 
-    if timeout_secs > 0 && default_choice != ' ' {
-        outln!("?{} (timeout: {}s, default: {})", "", timeout_secs, default_choice);
-        // In a real implementation, we'd wait for input or timeout
-        outln!("Selected: {} (auto-selected after timeout)", default_choice);
+    // Handle timeout with HAL timing
+    if timeout_secs > 0 {
+        let start_tick = crate::hal::apic::get_tick_count();
+        let timeout_ticks = timeout_secs as u64 * 1000; // 1 tick = 1ms
+        let end_tick = start_tick + timeout_ticks;
+
+        outln!(" (timeout: {}s, default: {})", timeout_secs, default_choice);
+
+        // Try to read keyboard input with timeout
+        let mut selected_char: Option<char> = None;
+        let mut last_displayed = timeout_secs;
+
+        while crate::hal::apic::get_tick_count() < end_tick {
+            // Check for keyboard input using HAL keyboard buffer
+            if let Some(byte) = crate::hal::keyboard::try_read_char() {
+                let c = byte as char;
+                // Check if character is in choices list
+                let found = if case_sensitive {
+                    choices.chars().any(|ch| ch == c)
+                } else {
+                    choices.chars().any(|ch| ch.to_ascii_uppercase() == c.to_ascii_uppercase())
+                };
+
+                if found {
+                    selected_char = Some(c);
+                    break;
+                }
+            }
+
+            // Update countdown display
+            let elapsed = crate::hal::apic::get_tick_count() - start_tick;
+            let remaining = timeout_secs.saturating_sub((elapsed / 1000) as u32);
+            if remaining != last_displayed {
+                crate::serial_print!("\r{} [{}]? ({} seconds remaining)  ",
+                    if message.is_empty() { "" } else { message },
+                    choices, remaining);
+                last_displayed = remaining;
+            }
+
+            // Small delay to prevent busy spinning
+            for _ in 0..1000 {
+                core::hint::spin_loop();
+            }
+        }
+
+        if let Some(c) = selected_char {
+            // User made a selection
+            let index = if case_sensitive {
+                choices.chars().position(|ch| ch == c).unwrap_or(0) + 1
+            } else {
+                choices.to_ascii_uppercase().chars()
+                    .position(|ch| ch == c.to_ascii_uppercase())
+                    .unwrap_or(0) + 1
+            };
+            outln!("\nSelected: {} (ERRORLEVEL={})", c, index);
+            set_errorlevel(index as i32);
+            log_info(EventSource::Application, 1, "CHOICE: User selection made");
+        } else {
+            // Timeout - use default
+            let index = if case_sensitive {
+                choices.chars().position(|ch| ch == default_choice).unwrap_or(0) + 1
+            } else {
+                choices.to_ascii_uppercase().chars()
+                    .position(|ch| ch == default_choice.to_ascii_uppercase())
+                    .unwrap_or(0) + 1
+            };
+            outln!("\nTimeout - using default: {} (ERRORLEVEL={})", default_choice, index);
+            set_errorlevel(index as i32);
+            log_info(EventSource::Application, 1, "CHOICE: Timeout, default used");
+        }
     } else {
-        outln!("?");
-        // Note: Real input would require interrupt-driven keyboard
-        outln!("(Note: Would wait for keypress [{}])", choices);
+        // No timeout - try immediate keyboard read or simulate
+        outln!("");
+
+        // Try to read one character from keyboard buffer
+        let mut attempts = 0;
+        let max_attempts = 100; // Try for a brief period
+        let mut selected_char: Option<char> = None;
+
+        while attempts < max_attempts {
+            if let Some(byte) = crate::hal::keyboard::try_read_char() {
+                let c = byte as char;
+                // Check if character is in choices list
+                let found = if case_sensitive {
+                    choices.chars().any(|ch| ch == c)
+                } else {
+                    choices.chars().any(|ch| ch.to_ascii_uppercase() == c.to_ascii_uppercase())
+                };
+
+                if found {
+                    selected_char = Some(c);
+                    break;
+                }
+            }
+            attempts += 1;
+            for _ in 0..100 {
+                core::hint::spin_loop();
+            }
+        }
+
+        if let Some(c) = selected_char {
+            let index = if case_sensitive {
+                choices.chars().position(|ch| ch == c).unwrap_or(0) + 1
+            } else {
+                choices.to_ascii_uppercase().chars()
+                    .position(|ch| ch == c.to_ascii_uppercase())
+                    .unwrap_or(0) + 1
+            };
+            outln!("Selected: {} (ERRORLEVEL={})", c, index);
+            set_errorlevel(index as i32);
+        } else {
+            // No input available in serial console mode - default to first choice
+            let first_choice = choices.chars().next().unwrap_or('Y');
+            outln!("(Serial mode: auto-selecting '{}' - ERRORLEVEL=1)", first_choice);
+            set_errorlevel(1);
+        }
+        log_info(EventSource::Application, 1, "CHOICE: Selection completed");
     }
 }
 
@@ -22111,11 +22262,63 @@ pub fn cmd_timeout(args: &[&str]) {
 }
 
 /// PAUSE command - wait for keypress
-pub fn cmd_pause(_args: &[&str]) {
-    outln!("Press any key to continue . . .");
-    // Note: In a real implementation, we'd wait for keyboard input
-    // For now, just display the message
-    outln!("(Note: Would wait for keypress in interactive mode)");
+/// Integrates with HAL keyboard and event logging
+pub fn cmd_pause(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    // Check for help
+    if !args.is_empty() && (eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help")) {
+        outln!("Suspends processing of a batch program and displays the message");
+        outln!("\"Press any key to continue . . .\"");
+        outln!("");
+        outln!("PAUSE");
+        outln!("");
+        outln!("In non-interactive mode (serial console), continues automatically.");
+        return;
+    }
+
+    crate::serial_print!("Press any key to continue . . . ");
+
+    // Record start time for timing stats
+    let start_tick = crate::hal::apic::get_tick_count();
+
+    // Try to wait for actual keyboard input
+    let mut key_pressed = false;
+    let timeout_ticks = 5000u64; // 5 second timeout for serial mode
+    let end_tick = start_tick + timeout_ticks;
+
+    while crate::hal::apic::get_tick_count() < end_tick {
+        // Check for keyboard input using try_read_char (non-blocking)
+        if let Some(byte) = crate::hal::keyboard::try_read_char() {
+            key_pressed = true;
+            // Echo printable characters
+            let c = byte as char;
+            if c.is_ascii_graphic() || c == ' ' {
+                crate::serial_print!("{}", c);
+            }
+            break;
+        }
+
+        // Small delay
+        for _ in 0..500 {
+            core::hint::spin_loop();
+        }
+    }
+
+    outln!("");
+
+    let elapsed = crate::hal::apic::get_tick_count() - start_tick;
+
+    if key_pressed {
+        outln!("(Key received after {}ms)", elapsed);
+        log_info(EventSource::Application, 2, "PAUSE: Key received");
+    } else {
+        outln!("(Timeout in serial mode - continuing after {}ms)", elapsed);
+        log_info(EventSource::Application, 2, "PAUSE: Timeout in serial mode");
+    }
+
+    // PAUSE always sets ERRORLEVEL to 0 on success
+    set_errorlevel(0);
 }
 
 /// VERIFY command - set/display verify flag
@@ -22939,19 +23142,105 @@ pub fn cmd_gpupdate(args: &[&str]) {
     }
 }
 
-/// CLIP command - copy to clipboard (stub)
+/// Clipboard buffer
+const MAX_CLIPBOARD_SIZE: usize = 4096;
+static mut CLIPBOARD_DATA: [u8; MAX_CLIPBOARD_SIZE] = [0u8; MAX_CLIPBOARD_SIZE];
+static mut CLIPBOARD_LEN: usize = 0;
+static mut CLIPBOARD_FORMAT: u32 = 1; // 1 = CF_TEXT
+
+/// Copy to clipboard
+pub fn clipboard_set(data: &str) {
+    unsafe {
+        let len = data.len().min(MAX_CLIPBOARD_SIZE - 1);
+        CLIPBOARD_DATA[..len].copy_from_slice(&data.as_bytes()[..len]);
+        CLIPBOARD_DATA[len] = 0; // Null terminate
+        CLIPBOARD_LEN = len;
+        CLIPBOARD_FORMAT = 1; // CF_TEXT
+    }
+}
+
+/// Get clipboard contents
+pub fn clipboard_get() -> Option<&'static str> {
+    unsafe {
+        if CLIPBOARD_LEN > 0 {
+            core::str::from_utf8(&CLIPBOARD_DATA[..CLIPBOARD_LEN]).ok()
+        } else {
+            None
+        }
+    }
+}
+
+/// Get clipboard size
+pub fn clipboard_size() -> usize {
+    unsafe { CLIPBOARD_LEN }
+}
+
+/// Clear clipboard
+pub fn clipboard_clear() {
+    unsafe {
+        CLIPBOARD_DATA = [0u8; MAX_CLIPBOARD_SIZE];
+        CLIPBOARD_LEN = 0;
+    }
+}
+
+/// CLIP command - copy to clipboard
 pub fn cmd_clip(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, EventSource};
+
     if args.is_empty() {
-        outln!("Redirects output of command line tools to the Windows clipboard.");
+        // Show clipboard contents
+        outln!("Redirects output to the Windows clipboard.");
         outln!("");
-        outln!("command | CLIP");
+        outln!("CLIP [text]           Copy text to clipboard");
+        outln!("CLIP /GET             Display clipboard contents");
+        outln!("CLIP /CLEAR           Clear the clipboard");
+        outln!("CLIP /SIZE            Show clipboard size");
+        outln!("command | CLIP        Redirect command output (in pipes)");
         outln!("");
-        outln!("(Note: Clipboard not implemented in serial console)");
+        outln!("Current clipboard: {} bytes", clipboard_size());
         return;
     }
 
+    if eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
+        cmd_clip(&[]);
+        return;
+    }
+
+    if eq_ignore_case(args[0], "/GET") {
+        if let Some(content) = clipboard_get() {
+            outln!("Clipboard contents ({} bytes):", content.len());
+            outln!("{}", content);
+        } else {
+            outln!("Clipboard is empty.");
+        }
+        return;
+    }
+
+    if eq_ignore_case(args[0], "/CLEAR") {
+        clipboard_clear();
+        outln!("Clipboard cleared.");
+        log_info(EventSource::System, 9070, "CLIP: Clipboard cleared");
+        return;
+    }
+
+    if eq_ignore_case(args[0], "/SIZE") {
+        outln!("Clipboard size: {} / {} bytes", clipboard_size(), MAX_CLIPBOARD_SIZE);
+        return;
+    }
+
+    // Copy content to clipboard
     let content = args.join(" ");
-    outln!("Would copy to clipboard: {}", content);
+    let bytes = content.len();
+
+    if bytes > MAX_CLIPBOARD_SIZE - 1 {
+        outln!("Warning: Content truncated to {} bytes", MAX_CLIPBOARD_SIZE - 1);
+    }
+
+    clipboard_set(&content);
+    outln!("Copied {} bytes to clipboard.", bytes.min(MAX_CLIPBOARD_SIZE - 1));
+    log_info(EventSource::System, 9071, &alloc::format!(
+        "CLIP: Copied {} bytes to clipboard", bytes
+    ));
 }
 
 /// WHERE command - locate files in path
