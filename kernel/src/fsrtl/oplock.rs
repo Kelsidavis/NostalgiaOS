@@ -11,8 +11,16 @@
 //! - Filter: For filter drivers, non-breaking level 2
 //!
 //! This implementation is NT 5.2 (Windows Server 2003) compatible.
+//!
+//! # Break Notification Flow
+//! 1. Operation that would conflict with oplock calls fsrtl_check_oplock_ex
+//! 2. If break needed, fsrtl_oplock_break_notify initiates the break
+//! 3. Break notification IRP is completed to notify oplock holder
+//! 4. Oplock holder flushes caches and calls fsrtl_oplock_break_acknowledge
+//! 5. Waiting IRPs are completed and operations can proceed
 
 use crate::ex::fast_mutex::FastMutex;
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 /// Oplock types
 #[repr(u32)]
@@ -52,6 +60,38 @@ pub mod oplock_flags {
     pub const OPLOCK_FLAG_BREAK_NOTIFY_SENT: u32 = 0x0004;
     /// Oplock is closing
     pub const OPLOCK_FLAG_CLOSING: u32 = 0x0008;
+    /// Oplock is exclusive (Level1, Batch, or Filter)
+    pub const OPLOCK_FLAG_EXCLUSIVE: u32 = 0x0010;
+    /// Pending close for batch oplock
+    pub const OPLOCK_FLAG_CLOSE_PENDING: u32 = 0x0020;
+}
+
+/// FSCTL codes for oplock operations
+pub mod fsctl_oplock {
+    /// Request a Level 1 oplock
+    pub const FSCTL_REQUEST_OPLOCK_LEVEL_1: u32 = 0x00090000;
+    /// Request a Level 2 oplock
+    pub const FSCTL_REQUEST_OPLOCK_LEVEL_2: u32 = 0x00090004;
+    /// Request a Batch oplock
+    pub const FSCTL_REQUEST_BATCH_OPLOCK: u32 = 0x00090008;
+    /// Request a Filter oplock
+    pub const FSCTL_REQUEST_FILTER_OPLOCK: u32 = 0x0009000C;
+    /// Acknowledge an oplock break
+    pub const FSCTL_OPLOCK_BREAK_ACKNOWLEDGE: u32 = 0x00090010;
+    /// Close pending (Batch oplock)
+    pub const FSCTL_OPBATCH_ACK_CLOSE_PENDING: u32 = 0x00090014;
+    /// Notify when oplock break occurs
+    pub const FSCTL_OPLOCK_BREAK_NOTIFY: u32 = 0x00090018;
+    /// Acknowledge break to no oplock
+    pub const FSCTL_OPLOCK_BREAK_ACK_NO_2: u32 = 0x00090050;
+}
+
+/// FILE_OPLOCK_BROKEN_TO_* constants for IoStatusBlock.Information
+pub mod oplock_break_info {
+    /// Oplock broken to Level 2
+    pub const FILE_OPLOCK_BROKEN_TO_LEVEL_2: usize = 0x00000007;
+    /// Oplock broken to None
+    pub const FILE_OPLOCK_BROKEN_TO_NONE: usize = 0x00000008;
 }
 
 /// Request types that can break an oplock
@@ -72,24 +112,51 @@ pub enum OplockBreakRequest {
     Close = 5,
 }
 
+/// Oplock wait completion callback type
+///
+/// Called when an oplock break completes and a waiting IRP can proceed.
+///
+/// # Arguments
+/// * `context` - User-provided context pointer
+/// * `irp` - The IRP that was waiting (pointer as usize for FFI compatibility)
+pub type OplockWaitCompleteRoutine = fn(context: usize, irp: usize);
+
+/// Oplock pre-post IRP routine
+///
+/// Called before an IRP is queued to wait for oplock break.
+/// Allows filesystem to save any necessary state.
+pub type OplockPrePostIrpRoutine = fn(context: usize, irp: usize);
+
 /// Information about an oplock wait
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct OplockWaitInfo {
     /// File object waiting for oplock break
     pub file_object: usize,
+    /// IRP associated with this wait (pointer as usize)
+    pub irp: usize,
     /// Request that caused the break
     pub break_request: OplockBreakRequest,
     /// Whether the waiter has been signaled
     pub signaled: bool,
+    /// Completion routine to call when break acknowledged
+    pub completion_routine: Option<OplockWaitCompleteRoutine>,
+    /// Context for completion routine
+    pub completion_context: usize,
+    /// Timestamp when wait was queued (for timeout handling)
+    pub queue_time: u64,
 }
 
 impl OplockWaitInfo {
     pub const fn new() -> Self {
         Self {
             file_object: 0,
+            irp: 0,
             break_request: OplockBreakRequest::Read,
             signaled: false,
+            completion_routine: None,
+            completion_context: 0,
+            queue_time: 0,
         }
     }
 }
@@ -102,6 +169,78 @@ impl Default for OplockWaitInfo {
 
 /// Maximum waiters for oplock break
 const MAX_OPLOCK_WAITERS: usize = 16;
+
+/// Maximum Level 2 oplock holders
+const MAX_LEVEL2_HOLDERS: usize = 32;
+
+/// Level 2 oplock holder info
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Level2OplockInfo {
+    /// File object holding Level 2 oplock
+    pub file_object: usize,
+    /// IRP for break notification
+    pub irp: usize,
+    /// Process ID
+    pub process_id: usize,
+}
+
+impl Level2OplockInfo {
+    pub const fn new() -> Self {
+        Self {
+            file_object: 0,
+            irp: 0,
+            process_id: 0,
+        }
+    }
+}
+
+/// Oplock statistics for monitoring
+#[derive(Debug, Clone, Copy, Default)]
+pub struct OplockStats {
+    /// Total oplocks granted
+    pub total_granted: u64,
+    /// Level 1 oplocks granted
+    pub level1_granted: u64,
+    /// Batch oplocks granted
+    pub batch_granted: u64,
+    /// Filter oplocks granted
+    pub filter_granted: u64,
+    /// Level 2 oplocks granted
+    pub level2_granted: u64,
+    /// Total oplock breaks initiated
+    pub total_breaks: u64,
+    /// Breaks to Level 2
+    pub breaks_to_level2: u64,
+    /// Breaks to None
+    pub breaks_to_none: u64,
+    /// Break acknowledgements received
+    pub break_acks: u64,
+    /// Waiters queued for break completion
+    pub waiters_queued: u64,
+    /// Waiters completed
+    pub waiters_completed: u64,
+}
+
+/// Global oplock statistics
+static OPLOCK_STATS: spin::Mutex<OplockStats> = spin::Mutex::new(OplockStats {
+    total_granted: 0,
+    level1_granted: 0,
+    batch_granted: 0,
+    filter_granted: 0,
+    level2_granted: 0,
+    total_breaks: 0,
+    breaks_to_level2: 0,
+    breaks_to_none: 0,
+    break_acks: 0,
+    waiters_queued: 0,
+    waiters_completed: 0,
+});
+
+/// Get current oplock statistics
+pub fn fsrtl_get_oplock_stats() -> OplockStats {
+    *OPLOCK_STATS.lock()
+}
 
 /// Oplock structure
 ///
@@ -122,18 +261,23 @@ pub struct Oplock {
     break_status: OplockBreakStatus,
     /// Number of Level 2 oplock holders
     level2_count: u32,
-    /// Pending IRP for oplock break notification
+    /// Level 2 holders (for breaking all Level 2 oplocks)
+    level2_holders: [Level2OplockInfo; MAX_LEVEL2_HOLDERS],
+    /// Pending IRP for oplock break notification (exclusive holder)
     pending_break_irp: usize,
     /// Waiters for oplock break completion
     waiters: [OplockWaitInfo; MAX_OPLOCK_WAITERS],
     /// Number of waiters
     waiter_count: u32,
+    /// Oplock break timeout in milliseconds (0 = default)
+    break_timeout_ms: u32,
 }
 
 impl Oplock {
     /// Create a new empty oplock structure
     pub const fn new() -> Self {
         const EMPTY_WAITER: OplockWaitInfo = OplockWaitInfo::new();
+        const EMPTY_LEVEL2: Level2OplockInfo = Level2OplockInfo::new();
         Self {
             mutex: FastMutex::new(),
             oplock_type: OplockType::None,
@@ -142,9 +286,11 @@ impl Oplock {
             exclusive_process_id: 0,
             break_status: OplockBreakStatus::None,
             level2_count: 0,
+            level2_holders: [EMPTY_LEVEL2; MAX_LEVEL2_HOLDERS],
             pending_break_irp: 0,
             waiters: [EMPTY_WAITER; MAX_OPLOCK_WAITERS],
             waiter_count: 0,
+            break_timeout_ms: 35000, // Default 35 second timeout
         }
     }
 
@@ -156,6 +302,29 @@ impl Oplock {
     /// Check if a break is in progress
     pub fn is_break_in_progress(&self) -> bool {
         self.flags & oplock_flags::OPLOCK_FLAG_BREAK_IN_PROGRESS != 0
+    }
+
+    /// Check if this is an exclusive oplock (Level 1, Batch, or Filter)
+    pub fn is_exclusive(&self) -> bool {
+        matches!(
+            self.oplock_type,
+            OplockType::Level1 | OplockType::Batch | OplockType::Filter
+        )
+    }
+
+    /// Get current oplock type
+    pub fn get_type(&self) -> OplockType {
+        self.oplock_type
+    }
+
+    /// Get break status
+    pub fn get_break_status(&self) -> OplockBreakStatus {
+        self.break_status
+    }
+
+    /// Get waiter count
+    pub fn get_waiter_count(&self) -> u32 {
+        self.waiter_count
     }
 }
 
@@ -178,8 +347,12 @@ pub fn fsrtl_initialize_oplock(oplock: &mut Oplock) {
     oplock.exclusive_process_id = 0;
     oplock.break_status = OplockBreakStatus::None;
     oplock.level2_count = 0;
+    for i in 0..MAX_LEVEL2_HOLDERS {
+        oplock.level2_holders[i] = Level2OplockInfo::new();
+    }
     oplock.pending_break_irp = 0;
     oplock.waiter_count = 0;
+    oplock.break_timeout_ms = 35000;
 }
 
 /// Uninitialize an oplock structure
@@ -499,23 +672,302 @@ pub fn fsrtl_oplock_is_fast_io_possible(oplock: &Oplock) -> bool {
 }
 
 // ============================================================================
+// FSCTL Handler
+// ============================================================================
+
+/// NT Status codes for oplock operations
+pub mod oplock_status {
+    /// Success
+    pub const STATUS_SUCCESS: i32 = 0;
+    /// IRP is pending
+    pub const STATUS_PENDING: i32 = 0x00000103u32 as i32;
+    /// Oplock not granted
+    pub const STATUS_OPLOCK_NOT_GRANTED: i32 = 0xC00000E2u32 as i32;
+    /// Oplock break in progress
+    pub const STATUS_OPLOCK_BREAK_IN_PROGRESS: i32 = 0x00000108u32 as i32;
+    /// Invalid oplock protocol
+    pub const STATUS_INVALID_OPLOCK_PROTOCOL: i32 = 0xC00000E3u32 as i32;
+    /// Cancelled
+    pub const STATUS_CANCELLED: i32 = 0xC0000120u32 as i32;
+}
+
+/// Handle FSCTL oplock operations
+///
+/// This is the main entry point for filesystem oplock FSCTL handling.
+///
+/// # Arguments
+/// * `oplock` - The oplock structure
+/// * `fsctl_code` - The FSCTL code (FSCTL_REQUEST_OPLOCK_*, etc.)
+/// * `file_object` - File object for this operation
+/// * `process_id` - Process ID of caller
+/// * `open_count` - Number of open handles to this file
+///
+/// # Returns
+/// NTSTATUS code
+pub fn fsrtl_oplock_fsctrl(
+    oplock: &mut Oplock,
+    fsctl_code: u32,
+    file_object: usize,
+    process_id: usize,
+    open_count: u32,
+) -> i32 {
+    use fsctl_oplock::*;
+
+    match fsctl_code {
+        FSCTL_REQUEST_OPLOCK_LEVEL_1 => {
+            // Level 1 requires single opener
+            if open_count != 1 {
+                return oplock_status::STATUS_OPLOCK_NOT_GRANTED;
+            }
+            if fsrtl_request_oplock(oplock, file_object, process_id, OplockType::Level1) {
+                update_stats(|s| {
+                    s.total_granted += 1;
+                    s.level1_granted += 1;
+                });
+                oplock_status::STATUS_PENDING
+            } else {
+                oplock_status::STATUS_OPLOCK_NOT_GRANTED
+            }
+        }
+
+        FSCTL_REQUEST_BATCH_OPLOCK => {
+            if open_count != 1 {
+                return oplock_status::STATUS_OPLOCK_NOT_GRANTED;
+            }
+            if fsrtl_request_oplock(oplock, file_object, process_id, OplockType::Batch) {
+                update_stats(|s| {
+                    s.total_granted += 1;
+                    s.batch_granted += 1;
+                });
+                oplock_status::STATUS_PENDING
+            } else {
+                oplock_status::STATUS_OPLOCK_NOT_GRANTED
+            }
+        }
+
+        FSCTL_REQUEST_FILTER_OPLOCK => {
+            if open_count != 1 {
+                return oplock_status::STATUS_OPLOCK_NOT_GRANTED;
+            }
+            if fsrtl_request_oplock(oplock, file_object, process_id, OplockType::Filter) {
+                update_stats(|s| {
+                    s.total_granted += 1;
+                    s.filter_granted += 1;
+                });
+                oplock_status::STATUS_PENDING
+            } else {
+                oplock_status::STATUS_OPLOCK_NOT_GRANTED
+            }
+        }
+
+        FSCTL_REQUEST_OPLOCK_LEVEL_2 => {
+            if fsrtl_request_oplock(oplock, file_object, process_id, OplockType::Level2) {
+                update_stats(|s| {
+                    s.total_granted += 1;
+                    s.level2_granted += 1;
+                });
+                oplock_status::STATUS_PENDING
+            } else {
+                oplock_status::STATUS_OPLOCK_NOT_GRANTED
+            }
+        }
+
+        FSCTL_OPLOCK_BREAK_ACKNOWLEDGE => {
+            // Acknowledge break and transition to Level 2
+            if fsrtl_oplock_break_acknowledge(oplock, file_object, OplockType::Level2) {
+                update_stats(|s| s.break_acks += 1);
+                oplock_status::STATUS_SUCCESS
+            } else {
+                oplock_status::STATUS_INVALID_OPLOCK_PROTOCOL
+            }
+        }
+
+        FSCTL_OPLOCK_BREAK_ACK_NO_2 => {
+            // Acknowledge break to None
+            if fsrtl_oplock_break_acknowledge(oplock, file_object, OplockType::None) {
+                update_stats(|s| s.break_acks += 1);
+                oplock_status::STATUS_SUCCESS
+            } else {
+                oplock_status::STATUS_INVALID_OPLOCK_PROTOCOL
+            }
+        }
+
+        FSCTL_OPBATCH_ACK_CLOSE_PENDING => {
+            // Batch oplock close pending
+            oplock.mutex.acquire();
+            if oplock.oplock_type == OplockType::Batch
+                && oplock.exclusive_file_object == file_object
+            {
+                oplock.flags |= oplock_flags::OPLOCK_FLAG_CLOSE_PENDING;
+            }
+            oplock.mutex.release();
+            oplock_status::STATUS_SUCCESS
+        }
+
+        FSCTL_OPLOCK_BREAK_NOTIFY => {
+            // Request notification when oplock break occurs
+            oplock.mutex.acquire();
+            let result = if oplock.is_break_in_progress() {
+                // Break already in progress, return immediately
+                oplock_status::STATUS_SUCCESS
+            } else if oplock.oplock_type == OplockType::None {
+                // No oplock, return immediately
+                oplock_status::STATUS_SUCCESS
+            } else {
+                // Queue for notification
+                oplock_status::STATUS_PENDING
+            };
+            oplock.mutex.release();
+            result
+        }
+
+        _ => oplock_status::STATUS_INVALID_OPLOCK_PROTOCOL,
+    }
+}
+
+/// Extended oplock check with wait capability
+///
+/// Checks if an operation would break an oplock and optionally waits
+/// for the break to complete.
+///
+/// # Arguments
+/// * `oplock` - The oplock structure
+/// * `file_object` - File object performing operation
+/// * `request` - Type of operation
+/// * `irp` - IRP to queue if wait needed (pointer as usize)
+/// * `completion_routine` - Callback when wait completes
+/// * `completion_context` - Context for callback
+///
+/// # Returns
+/// NTSTATUS code (STATUS_SUCCESS or STATUS_PENDING)
+pub fn fsrtl_check_oplock_ex(
+    oplock: &mut Oplock,
+    file_object: usize,
+    request: OplockBreakRequest,
+    irp: usize,
+    completion_routine: Option<OplockWaitCompleteRoutine>,
+    completion_context: usize,
+) -> i32 {
+    oplock.mutex.acquire();
+
+    // Check what break is needed
+    let break_status = fsrtl_check_oplock(oplock, file_object, request);
+
+    let result = match break_status {
+        OplockBreakStatus::None => {
+            // No break needed
+            oplock.mutex.release();
+            return oplock_status::STATUS_SUCCESS;
+        }
+        OplockBreakStatus::ToLevel2 | OplockBreakStatus::ToNone => {
+            // Need to break
+            if !oplock.is_break_in_progress() {
+                // Initiate the break
+                oplock.flags |= oplock_flags::OPLOCK_FLAG_BREAK_IN_PROGRESS;
+                oplock.break_status = break_status;
+
+                update_stats(|s| {
+                    s.total_breaks += 1;
+                    match break_status {
+                        OplockBreakStatus::ToLevel2 => s.breaks_to_level2 += 1,
+                        OplockBreakStatus::ToNone => s.breaks_to_none += 1,
+                        _ => {}
+                    }
+                });
+
+                // Complete the pending IRP to notify oplock holder
+                if oplock.pending_break_irp != 0 {
+                    // In a full implementation, we'd complete this IRP here
+                    // with FILE_OPLOCK_BROKEN_TO_LEVEL_2 or _TO_NONE
+                    oplock.flags |= oplock_flags::OPLOCK_FLAG_BREAK_NOTIFY_SENT;
+                }
+            }
+
+            // Queue the caller to wait for break completion
+            if add_waiter_ex(oplock, file_object, irp, request, completion_routine, completion_context) {
+                update_stats(|s| s.waiters_queued += 1);
+                oplock_status::STATUS_PENDING
+            } else {
+                // Couldn't add waiter - wait synchronously is required
+                oplock_status::STATUS_OPLOCK_BREAK_IN_PROGRESS
+            }
+        }
+    };
+
+    oplock.mutex.release();
+    result
+}
+
+/// Break all Level 2 oplocks
+///
+/// Called when an operation requires breaking all shared oplocks.
+pub fn fsrtl_break_level2_oplocks(oplock: &mut Oplock) {
+    oplock.mutex.acquire();
+
+    if oplock.oplock_type == OplockType::Level2 && oplock.level2_count > 0 {
+        // Notify all Level 2 holders
+        for i in 0..oplock.level2_count as usize {
+            if i < MAX_LEVEL2_HOLDERS {
+                let holder = &oplock.level2_holders[i];
+                if holder.irp != 0 {
+                    // In a full implementation, complete this IRP with
+                    // FILE_OPLOCK_BROKEN_TO_NONE
+                }
+            }
+        }
+
+        // Clear all Level 2 oplocks
+        oplock.level2_count = 0;
+        oplock.oplock_type = OplockType::None;
+        for i in 0..MAX_LEVEL2_HOLDERS {
+            oplock.level2_holders[i] = Level2OplockInfo::new();
+        }
+
+        update_stats(|s| s.total_breaks += 1);
+    }
+
+    oplock.mutex.release();
+}
+
+// ============================================================================
 // Internal Helper Functions
 // ============================================================================
+
+/// Update global oplock statistics
+fn update_stats<F: FnOnce(&mut OplockStats)>(f: F) {
+    let mut stats = OPLOCK_STATS.lock();
+    f(&mut stats);
+}
 
 /// Signal all waiters that the oplock break is complete
 fn signal_waiters(oplock: &mut Oplock) {
     for i in 0..oplock.waiter_count as usize {
-        oplock.waiters[i].signaled = true;
-        // TODO: Signal actual wait event/complete IRP
+        let waiter = &mut oplock.waiters[i];
+        waiter.signaled = true;
+
+        // Call completion routine if present
+        if let Some(routine) = waiter.completion_routine {
+            routine(waiter.completion_context, waiter.irp);
+        }
+
+        update_stats(|s| s.waiters_completed += 1);
+    }
+
+    // Clear all waiters
+    for i in 0..oplock.waiter_count as usize {
+        oplock.waiters[i] = OplockWaitInfo::new();
     }
     oplock.waiter_count = 0;
 }
 
-/// Add a waiter for oplock break completion
-fn add_waiter(
+/// Add a waiter for oplock break completion (extended version)
+fn add_waiter_ex(
     oplock: &mut Oplock,
     file_object: usize,
+    irp: usize,
     request: OplockBreakRequest,
+    completion_routine: Option<OplockWaitCompleteRoutine>,
+    completion_context: usize,
 ) -> bool {
     if oplock.waiter_count >= MAX_OPLOCK_WAITERS as u32 {
         return false;
@@ -524,10 +976,23 @@ fn add_waiter(
     let idx = oplock.waiter_count as usize;
     oplock.waiters[idx] = OplockWaitInfo {
         file_object,
+        irp,
         break_request: request,
         signaled: false,
+        completion_routine,
+        completion_context,
+        queue_time: crate::hal::rtc::get_system_time(),
     };
     oplock.waiter_count += 1;
 
     true
+}
+
+/// Add a waiter for oplock break completion (simple version)
+fn add_waiter(
+    oplock: &mut Oplock,
+    file_object: usize,
+    request: OplockBreakRequest,
+) -> bool {
+    add_waiter_ex(oplock, file_object, 0, request, None, 0)
 }

@@ -260,28 +260,31 @@ pub fn nt_time_to_unix_time(nt_time: i64) -> i64 {
     (nt_time - TICKS_1601_TO_1970) / TICKS_PER_SECOND
 }
 
-/// Get current system time in NT format
+/// Get current system time in NT format (FILETIME - 100ns intervals since 1601)
 ///
-/// Note: This is a placeholder that returns 0. In a real implementation,
-/// this would read from the hardware clock or a time source.
+/// Reads from the hardware RTC via the HAL and returns the current time
+/// in Windows FILETIME format.
 pub fn rtl_get_system_time() -> i64 {
-    // TODO: Implement actual time retrieval from hardware
-    // For now, return a fixed time (January 1, 2024, 00:00:00)
-    // This is just for testing purposes
-    let mut tf = TimeFields::new();
-    tf.year = 2024;
-    tf.month = 1;
-    tf.day = 1;
-    tf.hour = 0;
-    tf.minute = 0;
-    tf.second = 0;
-    tf.milliseconds = 0;
+    // Get current time from the hardware RTC
+    crate::hal::rtc::get_system_time() as i64
+}
 
-    let mut time: i64 = 0;
+/// Get local time in NT format
+///
+/// Currently returns the same as system time (no timezone adjustment).
+/// In a full implementation, this would apply timezone offset.
+pub fn rtl_get_local_time() -> i64 {
+    // TODO: Apply timezone offset
+    // For now, return UTC time
+    rtl_get_system_time()
+}
+
+/// Query system time and return it in a TimeFields structure
+pub fn rtl_query_system_time(time_fields: &mut TimeFields) {
+    let time = rtl_get_system_time();
     unsafe {
-        rtl_time_fields_to_time(&tf, &mut time);
+        rtl_time_to_time_fields(time, time_fields);
     }
-    time
 }
 
 // ============================================================================

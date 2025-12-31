@@ -69,10 +69,19 @@ pub use tunnel::{
 };
 
 pub use oplock::{
+    // Types
     Oplock, OplockType, OplockBreakStatus, OplockBreakRequest,
+    OplockWaitInfo, OplockStats, Level2OplockInfo,
+    OplockWaitCompleteRoutine, OplockPrePostIrpRoutine,
+    // Flag modules
+    oplock_flags, fsctl_oplock, oplock_break_info, oplock_status,
+    // Core functions
     fsrtl_initialize_oplock, fsrtl_uninitialize_oplock,
     fsrtl_request_oplock, fsrtl_check_oplock,
     fsrtl_oplock_break_notify, fsrtl_oplock_break_acknowledge,
     fsrtl_oplock_release, fsrtl_get_oplock_type,
     fsrtl_oplock_is_fast_io_possible, fsrtl_current_batch_oplock,
+    // Extended functions
+    fsrtl_oplock_fsctrl, fsrtl_check_oplock_ex, fsrtl_break_level2_oplocks,
+    fsrtl_get_oplock_stats,
 };

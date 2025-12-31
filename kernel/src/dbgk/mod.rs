@@ -17,10 +17,24 @@ pub mod notify;
 
 // Re-export main types and functions
 pub use debug_object::{
-    DebugObject, DEBUG_OBJECT_DELETE_PENDING, DEBUG_OBJECT_KILL_ON_CLOSE,
+    // Types
+    DebugObject, DbgkStats,
+    // Constants
+    DEBUG_OBJECT_DELETE_PENDING, DEBUG_OBJECT_KILL_ON_CLOSE,
+    STATUS_PORT_NOT_SET, STATUS_SUCCESS, DEBUG_ALL_ACCESS,
+    // Session management
     dbgk_create_debug_object, dbgk_set_process_debug_object,
     dbgk_clear_process_debug_object, dbgk_wait_for_debug_event,
     dbgk_debug_continue,
+    // Debug port lookups (NT 5.2 API)
+    dbgk_open_process_debug_port, dbgk_reference_process_debug_port,
+    dbgk_dereference_process_debug_port, dbgk_is_process_being_debugged,
+    dbgk_get_process_debug_object, dbgk_get_debugged_processes,
+    // Process tracking
+    dbgk_register_debugged_process, dbgk_unregister_debugged_process,
+    // Statistics
+    dbgk_get_stats, dbgk_log_event_generated, dbgk_log_continue,
+    dbgk_log_session_created, dbgk_log_session_closed,
 };
 
 pub use event::{

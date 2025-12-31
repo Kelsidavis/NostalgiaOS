@@ -33272,6 +33272,7 @@ pub fn cmd_fsrtl(args: &[&str]) {
         outln!("");
         outln!("Commands:");
         outln!("  info        Show FsRtl components overview");
+        outln!("  oplock      Show oplock statistics");
         outln!("  test        Run FsRtl function tests");
         return;
     }
@@ -33305,6 +33306,34 @@ pub fn cmd_fsrtl(args: &[&str]) {
         outln!("Change Notifications:");
         outln!("  Directory change monitoring");
         outln!("  FILE_NOTIFY_CHANGE_* flags support");
+
+    } else if eq_ignore_case(cmd, "oplock") {
+        use crate::fsrtl;
+
+        outln!("Oplock Statistics");
+        outln!("=================");
+        outln!("");
+
+        let stats = fsrtl::fsrtl_get_oplock_stats();
+
+        outln!("Oplocks Granted:");
+        outln!("  Total:   {}", stats.total_granted);
+        outln!("  Level 1: {} (exclusive read/write cache)", stats.level1_granted);
+        outln!("  Batch:   {} (exclusive with delayed close)", stats.batch_granted);
+        outln!("  Filter:  {} (non-breaking shared)", stats.filter_granted);
+        outln!("  Level 2: {} (shared read cache)", stats.level2_granted);
+        outln!("");
+
+        outln!("Oplock Breaks:");
+        outln!("  Total:        {}", stats.total_breaks);
+        outln!("  To Level 2:   {} (exclusive -> shared)", stats.breaks_to_level2);
+        outln!("  To None:      {} (any -> none)", stats.breaks_to_none);
+        outln!("  Acknowledged: {}", stats.break_acks);
+        outln!("");
+
+        outln!("Waiters:");
+        outln!("  Queued:    {} (waiting for break acknowledgement)", stats.waiters_queued);
+        outln!("  Completed: {} (break acknowledged, resumed)", stats.waiters_completed);
 
     } else if eq_ignore_case(cmd, "test") {
         use crate::fsrtl;
@@ -33570,5 +33599,105 @@ pub fn cmd_strace(args: &[&str]) {
     } else {
         outln!("Unknown strace command: {}", cmd);
         outln!("Use 'strace' for usage information");
+    }
+}
+
+// ============================================================================
+// DBGK (Kernel Debugger) Command
+// ============================================================================
+
+/// DBGK diagnostic command
+pub fn cmd_dbgk(args: &[&str]) {
+    use crate::dbgk;
+
+    if args.is_empty() {
+        outln!("Kernel Debugger (DBGK) Subsystem");
+        outln!("=================================");
+        outln!("");
+        outln!("Usage: dbgk <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  stats       Show DBGK statistics");
+        outln!("  processes   List debugged processes");
+        outln!("  info        Show DBGK subsystem info");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "stats") {
+        let stats = dbgk::dbgk_get_stats();
+
+        outln!("DBGK Statistics");
+        outln!("===============");
+        outln!("");
+
+        outln!("Sessions:");
+        outln!("  Created: {}", stats.sessions_created);
+        outln!("  Closed:  {}", stats.sessions_closed);
+        outln!("  Active:  {}", stats.active_sessions);
+        outln!("");
+
+        outln!("Processes:");
+        outln!("  Attached:  {}", stats.processes_attached);
+        outln!("  Detached:  {}", stats.processes_detached);
+        outln!("  Currently: {} being debugged", stats.debugged_processes);
+        outln!("");
+
+        outln!("Debug Events:");
+        outln!("  Generated: {}", stats.events_generated);
+        outln!("  Delivered: {}", stats.events_delivered);
+        outln!("  Continues: {}", stats.continue_calls);
+        outln!("");
+
+        outln!("Event Types:");
+        outln!("  Thread Create:  {}", stats.thread_create_events);
+        outln!("  Thread Exit:    {}", stats.thread_exit_events);
+        outln!("  Process Exit:   {}", stats.process_exit_events);
+        outln!("  Exception:      {}", stats.exception_events);
+        outln!("  Module Load:    {}", stats.module_load_events);
+        outln!("  Module Unload:  {}", stats.module_unload_events);
+
+    } else if eq_ignore_case(cmd, "processes") {
+        let processes = dbgk::dbgk_get_debugged_processes();
+
+        if processes.is_empty() {
+            outln!("No processes currently being debugged.");
+            return;
+        }
+
+        outln!("Debugged Processes");
+        outln!("==================");
+        outln!("");
+        outln!("{:<10} {:<18} {:<18}", "PID", "PROCESS", "DEBUG_OBJ");
+        outln!("{}", "-".repeat(50).as_str());
+
+        for (pid, process, debug_obj) in processes {
+            outln!("{:<10} 0x{:<16x} 0x{:<16x}", pid, process, debug_obj);
+        }
+
+    } else if eq_ignore_case(cmd, "info") {
+        outln!("DBGK Subsystem Info");
+        outln!("===================");
+        outln!("");
+        outln!("The DBGK (Kernel Debugger) subsystem provides:");
+        outln!("");
+        outln!("- Debug Object management for debug sessions");
+        outln!("- Process attach/detach for debugging");
+        outln!("- Debug event notification to debuggers:");
+        outln!("  - CREATE_PROCESS/CREATE_THREAD events");
+        outln!("  - EXIT_PROCESS/EXIT_THREAD events");
+        outln!("  - LOAD_DLL/UNLOAD_DLL events");
+        outln!("  - EXCEPTION events for unhandled exceptions");
+        outln!("");
+        outln!("NT 5.2 APIs:");
+        outln!("  dbgk_open_process_debug_port() - Open handle to debug port");
+        outln!("  dbgk_reference_process_debug_port() - Reference debug port");
+        outln!("  dbgk_wait_for_debug_event() - Wait for debug events");
+        outln!("  dbgk_debug_continue() - Continue debugged thread");
+
+    } else {
+        outln!("Unknown dbgk command: {}", cmd);
+        outln!("Use 'dbgk' for usage information");
     }
 }

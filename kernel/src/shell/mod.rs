@@ -1685,6 +1685,9 @@ impl Shell {
         // STRACE - System call tracing
         } else if eq_ignore_case(cmd, "strace") {
             commands::cmd_strace(&args[1..argc]);
+        // DBGK - Kernel debugger subsystem
+        } else if eq_ignore_case(cmd, "dbgk") {
+            commands::cmd_dbgk(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
