@@ -32958,3 +32958,137 @@ pub fn cmd_lpc(args: &[&str]) {
         outln!("Use 'lpc' for usage information");
     }
 }
+
+// =============================================================================
+// ETW (Event Tracing for Windows) Command
+// =============================================================================
+
+/// ETW diagnostic command
+pub fn cmd_etw(args: &[&str]) {
+    use crate::etw;
+
+    if args.is_empty() {
+        outln!("Event Tracing for Windows (ETW)");
+        outln!("");
+        outln!("Usage: etw <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  stats       Show ETW tracing statistics");
+        outln!("  info        Show ETW subsystem information");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "stats") {
+        let stats = etw::etw_get_statistics();
+
+        outln!("ETW Tracing Statistics");
+        outln!("");
+        outln!("Sessions & Providers:");
+        outln!("  Active Sessions:      {}", stats.active_sessions);
+        outln!("  Registered Providers: {}", stats.registered_providers);
+        outln!("");
+        outln!("Event Statistics:");
+        outln!("  Total Events:  {}", stats.total_events);
+        outln!("  Total Bytes:   {} bytes", stats.total_bytes);
+        outln!("  Events Dropped: {}", stats.events_dropped);
+        if stats.total_events > 0 && stats.total_bytes > 0 {
+            outln!("  Avg Event Size: {} bytes", stats.total_bytes / stats.total_events);
+        }
+        if stats.events_dropped > 0 && stats.total_events > 0 {
+            let drop_rate = (stats.events_dropped * 100) / (stats.total_events + stats.events_dropped);
+            outln!("  Drop Rate:      {}%", drop_rate);
+        }
+
+    } else if eq_ignore_case(cmd, "info") {
+        outln!("ETW Subsystem Information");
+        outln!("");
+        outln!("Overview:");
+        outln!("  Event Tracing for Windows (ETW) provides a low-overhead,");
+        outln!("  high-throughput event tracing infrastructure for the kernel");
+        outln!("  and user-mode components.");
+        outln!("");
+        outln!("Components:");
+        outln!("  Logger Sessions  - Named trace sessions that collect events");
+        outln!("  Providers        - Components that generate trace events");
+        outln!("  Controllers      - Manage sessions (start, stop, query)");
+        outln!("  Consumers        - Read trace events from sessions");
+        outln!("");
+        outln!("Use Cases:");
+        outln!("  - Performance analysis and profiling");
+        outln!("  - System debugging and diagnostics");
+        outln!("  - Security auditing and monitoring");
+        outln!("  - Application telemetry");
+        outln!("");
+        outln!("Built-in Sessions:");
+        outln!("  NT Kernel Logger - System events (process, thread, disk I/O)");
+
+    } else {
+        outln!("Unknown etw command: {}", cmd);
+        outln!("Use 'etw' for usage information");
+    }
+}
+
+// =============================================================================
+// PnP (Plug and Play) Command
+// =============================================================================
+
+/// PnP diagnostic command
+pub fn cmd_pnp(args: &[&str]) {
+    use crate::pnp;
+
+    if args.is_empty() {
+        outln!("Plug and Play (PnP) Manager");
+        outln!("");
+        outln!("Usage: pnp <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  stats       Show PnP device statistics");
+        outln!("  info        Show PnP subsystem information");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "stats") {
+        let stats = pnp::pnp_get_statistics();
+
+        outln!("Plug and Play Statistics");
+        outln!("");
+        outln!("Device Counts:");
+        outln!("  Total Devices:   {}", stats.total_devices);
+        outln!("  Started:         {}", stats.started_devices);
+        outln!("  Stopped:         {}", stats.stopped_devices);
+        outln!("  Failed:          {}", stats.failed_devices);
+        outln!("");
+        outln!("Enumeration:");
+        outln!("  Pending Enumerations: {}", stats.pending_enumerations);
+
+    } else if eq_ignore_case(cmd, "info") {
+        outln!("PnP Subsystem Information");
+        outln!("");
+        outln!("Overview:");
+        outln!("  Plug and Play (PnP) manages device discovery, installation,");
+        outln!("  and configuration. It enables automatic detection and setup");
+        outln!("  of hardware devices.");
+        outln!("");
+        outln!("Device States:");
+        outln!("  Uninitialized  - Device node created");
+        outln!("  Initialized    - Basic setup complete");
+        outln!("  ResourcesAssigned - Resources allocated");
+        outln!("  Started        - Device is running");
+        outln!("  Stopped        - Device paused");
+        outln!("  Failed         - Device has problems");
+        outln!("");
+        outln!("Key Operations:");
+        outln!("  Enumeration    - Detect child devices");
+        outln!("  Resource Alloc - Assign IRQ, I/O, memory");
+        outln!("  Driver Loading - Match and load drivers");
+        outln!("  Power Mgmt     - Handle power transitions");
+
+    } else {
+        outln!("Unknown pnp command: {}", cmd);
+        outln!("Use 'pnp' for usage information");
+    }
+}
