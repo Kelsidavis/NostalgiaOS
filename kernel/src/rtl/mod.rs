@@ -52,6 +52,7 @@ pub mod environ;
 pub mod gentable;
 pub mod prefix;
 pub mod range;
+pub mod remlock;
 pub mod splay;
 pub mod version;
 
@@ -77,5 +78,6 @@ pub use environ::*;
 pub use gentable::*;
 pub use prefix::*;
 pub use range::*;
+pub use remlock::*;
 pub use splay::*;
 pub use version::*;

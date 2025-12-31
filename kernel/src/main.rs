@@ -488,6 +488,11 @@ fn phase1_init(boot_info: &BootInfo) {
     rtl::gentable::rtl_gentable_init();
     kprintln!("  Generic tables initialized");
 
+    // Initialize Remove Lock subsystem
+    kprintln!("  Initializing remove locks...");
+    rtl::remlock::rtl_remlock_init();
+    kprintln!("  Remove locks initialized");
+
     // Initialize Service Control Manager
     kprintln!("  Initializing Service Control Manager...");
     svc::scm_initialize();
