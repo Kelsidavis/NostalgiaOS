@@ -463,6 +463,11 @@ fn phase1_init(boot_info: &BootInfo) {
     rtl::environ::rtl_environ_init();
     kprintln!("  Environment variables initialized");
 
+    // Initialize Splay Trees subsystem
+    kprintln!("  Initializing splay trees...");
+    rtl::splay::rtl_splay_init();
+    kprintln!("  Splay trees initialized");
+
     // Initialize Service Control Manager
     kprintln!("  Initializing Service Control Manager...");
     svc::scm_initialize();

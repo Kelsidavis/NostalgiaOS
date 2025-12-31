@@ -49,7 +49,7 @@ pub mod string;
 pub mod time;
 pub mod uuid;
 pub mod environ;
-// pub mod splay;  // TODO: Splay trees
+pub mod splay;
 
 // Re-exports for convenience
 pub use atom::*;
@@ -70,3 +70,4 @@ pub use string::*;
 pub use time::*;
 pub use uuid::{Uuid, create_uuid, create_sequential_uuid};
 pub use environ::*;
+pub use splay::*;
