@@ -172,6 +172,14 @@ pub use exception::{
     // Unhandled exception filter
     UnhandledExceptionFilter,
     rtl_set_unhandled_exception_filter, rtl_call_unhandled_exception_filter,
+    // Exception dispatch (NT 5.2 compatible)
+    ProcessorMode, ExceptionDispatchStats,
+    ke_get_exception_stats, ke_context_from_kframes, ke_context_to_kframes,
+    ki_dispatch_exception, ki_dispatch_exception_from_trap,
+    // Exception history
+    ExceptionHistoryEntry, EXCEPTION_HISTORY_SIZE,
+    record_exception, get_exception_history, clear_exception_history,
+    exception_code_name,
 };
 
 // Re-export debug types

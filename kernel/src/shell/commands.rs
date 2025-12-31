@@ -4510,6 +4510,7 @@ pub fn cmd_mm(args: &[&str]) {
         outln!("  physical           Show physical memory info");
         outln!("  vad                Show VAD statistics");
         outln!("  section            Show section statistics");
+        outln!("  ws                 Show working set statistics");
         return;
     }
 
@@ -4604,6 +4605,28 @@ pub fn cmd_mm(args: &[&str]) {
         outln!("  Total views:     {}", section_stats.total_views);
         outln!("");
         outln!("Max Sections:      {}", mm::MAX_SECTIONS);
+    } else if eq_ignore_case(cmd, "ws") || eq_ignore_case(cmd, "workingset") {
+        outln!("Working Set Statistics");
+        outln!("");
+
+        let ws_stats = mm::mm_get_ws_stats();
+        outln!("Global Working Set Tracking:");
+        outln!("  Total pages in working sets:  {}", ws_stats.total_working_set_pages);
+        outln!("  Peak working set pages:       {}", ws_stats.peak_total_working_set_pages);
+        outln!("");
+        outln!("Operations:");
+        outln!("  Total insertions:             {}", ws_stats.insertions);
+        outln!("  Total removals:               {}", ws_stats.removals);
+        outln!("  Pages faulted in:             {}", ws_stats.pages_faulted_in);
+        outln!("");
+        outln!("Trimming:");
+        outln!("  Trim operations:              {}", ws_stats.trim_count);
+        outln!("  Total pages trimmed:          {}", ws_stats.total_pages_trimmed);
+        outln!("");
+        outln!("Constants:");
+        outln!("  Max entries/process:          {}", mm::MAX_WSLE_PER_PROCESS);
+        outln!("  Default minimum WS:           {} pages", mm::DEFAULT_MINIMUM_WORKING_SET_SIZE);
+        outln!("  Default maximum WS:           {} pages", mm::DEFAULT_MAXIMUM_WORKING_SET_SIZE);
     } else {
         outln!("Unknown mm command: {}", cmd);
     }
@@ -10518,14 +10541,38 @@ fn show_exception_detail(index: usize) {
 }
 
 fn show_exception_stats() {
-    use crate::ke::exception::{get_exception_history, EXCEPTION_HISTORY_SIZE, ExceptionCode};
+    use crate::ke::exception::{get_exception_history, EXCEPTION_HISTORY_SIZE, ExceptionCode, ke_get_exception_stats};
+
+    // Show dispatch statistics first
+    let dispatch_stats = ke_get_exception_stats();
+
+    outln!("Exception Dispatch Statistics");
+    outln!("==============================");
+    outln!("");
+    outln!("Total dispatched:     {}", dispatch_stats.total_dispatched);
+    outln!("  Kernel exceptions:  {}", dispatch_stats.kernel_exceptions);
+    outln!("  User exceptions:    {}", dispatch_stats.user_exceptions);
+    outln!("");
+    outln!("Dispatch Details:");
+    outln!("  First chance:       {}", dispatch_stats.first_chance);
+    outln!("  Second chance:      {}", dispatch_stats.second_chance);
+    outln!("");
+    outln!("Handled By:");
+    outln!("  VEH handlers:       {}", dispatch_stats.handled_by_veh);
+    outln!("  SEH handlers:       {}", dispatch_stats.handled_by_seh);
+    outln!("  Debugger:           {}", dispatch_stats.handled_by_debugger);
+    outln!("  Unhandled:          {}", dispatch_stats.unhandled);
+
+    outln!("");
+    outln!("----");
+    outln!("");
 
     let (entries, _write_index, total_count) = get_exception_history();
 
     let valid_count = entries.iter().filter(|e| e.valid).count();
 
-    outln!("Exception Statistics");
-    outln!("====================");
+    outln!("Exception History Statistics");
+    outln!("============================");
     outln!("");
     outln!("Total recorded:    {}", total_count);
     outln!("In current buffer: {}", valid_count);

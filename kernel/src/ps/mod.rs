@@ -128,3 +128,43 @@ pub unsafe fn init() {
 
     crate::serial_println!("[PS] Process Manager initialized");
 }
+
+/// Get the current process (EPROCESS)
+///
+/// Returns a pointer to the EPROCESS of the current thread's process.
+/// Returns null if there is no current thread.
+pub fn get_current_process() -> *mut EProcess {
+    // Get the current thread from PRCB
+    let prcb = unsafe { crate::ke::prcb::get_current_prcb_mut() };
+    let thread = prcb.current_thread;
+
+    if thread.is_null() {
+        return core::ptr::null_mut();
+    }
+
+    // Get the process from the thread
+    // KThread.process points to KProcess, but KPROCESS is embedded at offset 0 in EPROCESS
+    // so we can safely cast between them
+    let kprocess = unsafe { (*thread).process };
+    if kprocess.is_null() {
+        return core::ptr::null_mut();
+    }
+    kprocess as *mut EProcess
+}
+
+/// Get the current thread (ETHREAD)
+///
+/// Returns a pointer to the ETHREAD of the current thread.
+/// Returns null if there is no current thread.
+pub fn get_current_thread() -> *mut EThread {
+    let prcb = unsafe { crate::ke::prcb::get_current_prcb_mut() };
+    let kthread = prcb.current_thread;
+
+    if kthread.is_null() {
+        return core::ptr::null_mut();
+    }
+
+    // The KTHREAD is embedded at the start of ETHREAD
+    // So we can cast the pointer directly
+    kthread as *mut EThread
+}

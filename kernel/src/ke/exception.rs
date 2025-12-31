@@ -1400,3 +1400,474 @@ pub fn exception_code_name(code: u32) -> &'static str {
         _ => "UNKNOWN",
     }
 }
+
+// =============================================================================
+// KiDispatchException - Main Exception Dispatch (NT 5.2 Compatible)
+// =============================================================================
+
+use crate::arch::x86_64::context::KTrapFrame;
+
+/// Processor mode enumeration
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProcessorMode {
+    /// Kernel mode (ring 0)
+    KernelMode = 0,
+    /// User mode (ring 3)
+    UserMode = 1,
+}
+
+/// Exception dispatch statistics
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ExceptionDispatchStats {
+    /// Total exceptions dispatched
+    pub total_dispatched: u64,
+    /// Kernel-mode exceptions
+    pub kernel_exceptions: u64,
+    /// User-mode exceptions
+    pub user_exceptions: u64,
+    /// First chance exceptions
+    pub first_chance: u64,
+    /// Second chance exceptions
+    pub second_chance: u64,
+    /// Exceptions handled by VEH
+    pub handled_by_veh: u64,
+    /// Exceptions handled by SEH
+    pub handled_by_seh: u64,
+    /// Exceptions handled by debugger
+    pub handled_by_debugger: u64,
+    /// Unhandled exceptions (bugcheck/terminate)
+    pub unhandled: u64,
+}
+
+/// Global exception dispatch statistics
+static EXCEPTION_DISPATCH_STATS: Mutex<ExceptionDispatchStats> =
+    Mutex::new(ExceptionDispatchStats {
+        total_dispatched: 0,
+        kernel_exceptions: 0,
+        user_exceptions: 0,
+        first_chance: 0,
+        second_chance: 0,
+        handled_by_veh: 0,
+        handled_by_seh: 0,
+        handled_by_debugger: 0,
+        unhandled: 0,
+    });
+
+/// Get exception dispatch statistics
+pub fn ke_get_exception_stats() -> ExceptionDispatchStats {
+    *EXCEPTION_DISPATCH_STATS.lock()
+}
+
+/// Convert trap frame to CONTEXT structure
+///
+/// This function moves the selected contents of the specified trap frame
+/// into the specified context frame according to the specified context flags.
+///
+/// # Arguments
+/// * `trap_frame` - Pointer to the trap frame
+/// * `context` - Pointer to the context frame to fill
+///
+/// # Safety
+/// Both pointers must be valid
+pub unsafe fn ke_context_from_kframes(
+    trap_frame: *const KTrapFrame,
+    context: *mut Context,
+) {
+    if trap_frame.is_null() || context.is_null() {
+        return;
+    }
+
+    let tf = &*trap_frame;
+    let ctx = &mut *context;
+
+    // Always set full context flags
+    ctx.context_flags = ContextFlags::CONTEXT_FULL | ContextFlags::CONTEXT_SEGMENTS;
+
+    // Control registers (RIP, RSP, RFLAGS, CS, SS)
+    ctx.rip = tf.rip;
+    ctx.rsp = tf.rsp;
+    ctx.e_flags = tf.rflags as u32;
+    ctx.seg_cs = tf.cs as u16;
+    ctx.seg_ss = tf.ss as u16;
+
+    // Segment registers
+    ctx.seg_ds = tf.seg_ds;
+    ctx.seg_es = tf.seg_es;
+    ctx.seg_fs = tf.seg_fs;
+    ctx.seg_gs = tf.seg_gs;
+
+    // Integer registers (volatile/caller-saved)
+    ctx.rax = tf.rax;
+    ctx.rcx = tf.rcx;
+    ctx.rdx = tf.rdx;
+    ctx.r8 = tf.r8;
+    ctx.r9 = tf.r9;
+    ctx.r10 = tf.r10;
+    ctx.r11 = tf.r11;
+
+    // Integer registers (non-volatile/callee-saved)
+    ctx.rbx = tf.rbx;
+    ctx.rbp = tf.rbp;
+    ctx.rsi = tf.rsi;
+    ctx.rdi = tf.rdi;
+    ctx.r12 = tf.r12;
+    ctx.r13 = tf.r13;
+    ctx.r14 = tf.r14;
+    ctx.r15 = tf.r15;
+}
+
+/// Convert CONTEXT structure back to trap frame
+///
+/// This function moves the selected contents of the specified context frame
+/// back into the specified trap frame according to the context flags.
+///
+/// # Arguments
+/// * `context` - Pointer to the context frame
+/// * `trap_frame` - Pointer to the trap frame to fill
+/// * `previous_mode` - Kernel or user mode
+///
+/// # Safety
+/// Both pointers must be valid
+pub unsafe fn ke_context_to_kframes(
+    context: *const Context,
+    trap_frame: *mut KTrapFrame,
+    previous_mode: ProcessorMode,
+) {
+    if context.is_null() || trap_frame.is_null() {
+        return;
+    }
+
+    let ctx = &*context;
+    let tf = &mut *trap_frame;
+    let flags = ctx.context_flags;
+
+    // Control registers
+    if (flags & ContextFlags::CONTEXT_CONTROL) != 0 {
+        // Sanitize RFLAGS - user mode can't change certain flags
+        let mut rflags = ctx.e_flags as u64;
+        if previous_mode == ProcessorMode::UserMode {
+            // Preserve system flags, allow user-modifiable flags
+            const USER_FLAGS_MASK: u64 = 0x3C0CD5; // CF, PF, AF, ZF, SF, TF, DF, OF
+            rflags = (tf.rflags & !USER_FLAGS_MASK) | (rflags & USER_FLAGS_MASK);
+            // Always keep IF set for user mode
+            rflags |= 0x200;
+        }
+        tf.rflags = rflags;
+        tf.rip = ctx.rip;
+        tf.rsp = ctx.rsp;
+    }
+
+    // Segment registers are fixed for user/kernel mode
+    if previous_mode == ProcessorMode::UserMode {
+        tf.cs = 0x33;  // User code segment | RPL 3
+        tf.ss = 0x2B;  // User data segment | RPL 3
+    } else {
+        tf.cs = 0x08;  // Kernel code segment
+        tf.ss = 0x10;  // Kernel data segment
+    }
+
+    // Integer registers
+    if (flags & ContextFlags::CONTEXT_INTEGER) != 0 {
+        tf.rax = ctx.rax;
+        tf.rcx = ctx.rcx;
+        tf.rdx = ctx.rdx;
+        tf.r8 = ctx.r8;
+        tf.r9 = ctx.r9;
+        tf.r10 = ctx.r10;
+        tf.r11 = ctx.r11;
+        tf.rbx = ctx.rbx;
+        tf.rbp = ctx.rbp;
+        tf.rsi = ctx.rsi;
+        tf.rdi = ctx.rdi;
+        tf.r12 = ctx.r12;
+        tf.r13 = ctx.r13;
+        tf.r14 = ctx.r14;
+        tf.r15 = ctx.r15;
+    }
+}
+
+/// Main exception dispatch function (KiDispatchException equivalent)
+///
+/// This function is called to dispatch an exception to the proper mode and
+/// to cause the exception dispatcher to be called.
+///
+/// For kernel mode:
+/// - Give debugger first chance
+/// - Call RtlDispatchException (VEH + SEH)
+/// - Give debugger second chance
+/// - Bugcheck if still unhandled
+///
+/// For user mode:
+/// - Send to debug port (if present)
+/// - Transfer exception info to user stack
+/// - Redirect execution to user exception dispatcher
+///
+/// # Arguments
+/// * `exception_record` - The exception that occurred
+/// * `trap_frame` - The trap frame at time of exception
+/// * `previous_mode` - Whether exception occurred in kernel or user mode
+/// * `first_chance` - True if this is the first chance
+///
+/// # Safety
+/// Must be called from interrupt/exception context with valid pointers
+pub unsafe fn ki_dispatch_exception(
+    exception_record: *mut ExceptionRecord,
+    trap_frame: *mut KTrapFrame,
+    previous_mode: ProcessorMode,
+    first_chance: bool,
+) {
+    if exception_record.is_null() || trap_frame.is_null() {
+        return;
+    }
+
+    // Update statistics
+    {
+        let mut stats = EXCEPTION_DISPATCH_STATS.lock();
+        stats.total_dispatched += 1;
+        if previous_mode == ProcessorMode::KernelMode {
+            stats.kernel_exceptions += 1;
+        } else {
+            stats.user_exceptions += 1;
+        }
+        if first_chance {
+            stats.first_chance += 1;
+        } else {
+            stats.second_chance += 1;
+        }
+    }
+
+    // Build context from trap frame
+    let mut context = Context::new();
+    ke_context_from_kframes(trap_frame, &mut context);
+
+    // If the exception is a breakpoint, convert to fault (decrement RIP)
+    if (*exception_record).exception_code == ExceptionCode::EXCEPTION_BREAKPOINT {
+        context.rip = context.rip.wrapping_sub(1);
+    }
+
+    // Record exception in history
+    record_exception(
+        (*exception_record).exception_code,
+        (*exception_record).exception_address as u64,
+        if (*exception_record).number_parameters > 0 {
+            (*exception_record).exception_information[0]
+        } else {
+            0
+        },
+        context.rsp,
+        (*exception_record).exception_flags,
+        first_chance,
+        false, // Will update if handled
+    );
+
+    let exception_code = (*exception_record).exception_code;
+    let exception_addr = (*exception_record).exception_address as u64;
+
+    match previous_mode {
+        ProcessorMode::KernelMode => {
+            // ================================================================
+            // Kernel Mode Exception Dispatch
+            // ================================================================
+
+            if first_chance {
+                // First chance: Try debugger, then VEH/SEH
+
+                // Step 1: Give kernel debugger first chance
+                // TODO: Call KiDebugRoutine if connected
+                let debugger_handled = false;
+                if debugger_handled {
+                    EXCEPTION_DISPATCH_STATS.lock().handled_by_debugger += 1;
+                    ke_context_to_kframes(&context, trap_frame, previous_mode);
+                    return;
+                }
+
+                // Step 2: Call VEH handlers
+                if rtl_call_vectored_exception_handlers(exception_record, &mut context) {
+                    crate::serial_println!(
+                        "[EXCEPTION] Kernel exception handled by VEH: code={:#x} addr={:#x}",
+                        exception_code, exception_addr
+                    );
+                    EXCEPTION_DISPATCH_STATS.lock().handled_by_veh += 1;
+                    ke_context_to_kframes(&context, trap_frame, previous_mode);
+                    return;
+                }
+
+                // Step 3: Dispatch to SEH chain
+                if rtl_dispatch_exception_seh(exception_record, &mut context) {
+                    crate::serial_println!(
+                        "[EXCEPTION] Kernel exception handled by SEH: code={:#x} addr={:#x}",
+                        exception_code, exception_addr
+                    );
+                    EXCEPTION_DISPATCH_STATS.lock().handled_by_seh += 1;
+                    ke_context_to_kframes(&context, trap_frame, previous_mode);
+                    return;
+                }
+            }
+
+            // Second chance or unhandled first chance
+            // TODO: Give kernel debugger second chance
+
+            // Exception not handled - this is a kernel bugcheck
+            EXCEPTION_DISPATCH_STATS.lock().unhandled += 1;
+            crate::serial_println!(
+                "*** KERNEL EXCEPTION NOT HANDLED ***"
+            );
+            crate::serial_println!(
+                "Exception: {} ({:#x}) at {:#x}",
+                exception_code_name(exception_code),
+                exception_code,
+                exception_addr
+            );
+            crate::serial_println!(
+                "RIP={:#x} RSP={:#x} RBP={:#x}",
+                context.rip, context.rsp, context.rbp
+            );
+            crate::serial_println!(
+                "RAX={:#x} RBX={:#x} RCX={:#x} RDX={:#x}",
+                context.rax, context.rbx, context.rcx, context.rdx
+            );
+
+            // In a real implementation, we would bugcheck here
+            // For now, we panic
+            panic!(
+                "KMODE_EXCEPTION_NOT_HANDLED: {} ({:#x}) at {:#x}",
+                exception_code_name(exception_code),
+                exception_code,
+                exception_addr
+            );
+        }
+
+        ProcessorMode::UserMode => {
+            // ================================================================
+            // User Mode Exception Dispatch
+            // ================================================================
+
+            if first_chance {
+                // First chance user mode exception
+
+                // Step 1: Check if process has a debugger attached
+                // If so, send to debugger via debug port
+                let process = crate::ps::get_current_process();
+                if !process.is_null() && crate::dbgk::dbgk_is_process_being_debugged(process as usize) {
+                    // Forward to debugger via DbgkForwardException
+                    // If debugger handles it, return
+                    // TODO: Implement DbgkForwardException
+                    crate::serial_println!(
+                        "[EXCEPTION] User exception forwarded to debugger: code={:#x}",
+                        exception_code
+                    );
+                }
+
+                // Step 2: Transfer exception to user mode
+                // This involves:
+                // 1. Allocating space on user stack for EXCEPTION_RECORD and CONTEXT
+                // 2. Copying the structures to user stack
+                // 3. Setting up trap frame to return to user exception dispatcher
+
+                // For now, we use kernel-side dispatch as user-mode dispatcher
+                // isn't set up yet. In a full implementation:
+                // - Copy exception record to user stack
+                // - Copy context to user stack
+                // - Set RIP to KiUserExceptionDispatcher
+                // - Return to let trap handler restore and IRETQ
+
+                // Step 3: Call VEH handlers (kernel-side for now)
+                if rtl_call_vectored_exception_handlers(exception_record, &mut context) {
+                    crate::serial_println!(
+                        "[EXCEPTION] User exception handled by VEH: code={:#x}",
+                        exception_code
+                    );
+                    EXCEPTION_DISPATCH_STATS.lock().handled_by_veh += 1;
+                    ke_context_to_kframes(&context, trap_frame, previous_mode);
+                    return;
+                }
+
+                // Step 4: Dispatch to SEH chain
+                if rtl_dispatch_exception_seh(exception_record, &mut context) {
+                    crate::serial_println!(
+                        "[EXCEPTION] User exception handled by SEH: code={:#x}",
+                        exception_code
+                    );
+                    EXCEPTION_DISPATCH_STATS.lock().handled_by_seh += 1;
+                    ke_context_to_kframes(&context, trap_frame, previous_mode);
+                    return;
+                }
+
+                // Unhandled first chance - will become second chance via NtRaiseException
+                crate::serial_println!(
+                    "[EXCEPTION] User exception unhandled on first chance: {} ({:#x}) at {:#x}",
+                    exception_code_name(exception_code),
+                    exception_code,
+                    exception_addr
+                );
+            }
+
+            // Second chance or unhandled first chance
+            // In a full implementation:
+            // - Send to debugger port (second chance)
+            // - Send to subsystem port
+            // - Terminate the thread/process
+
+            EXCEPTION_DISPATCH_STATS.lock().unhandled += 1;
+            crate::serial_println!(
+                "*** USER EXCEPTION NOT HANDLED (SECOND CHANCE) ***"
+            );
+            crate::serial_println!(
+                "Exception: {} ({:#x}) at {:#x}",
+                exception_code_name(exception_code),
+                exception_code,
+                exception_addr
+            );
+            crate::serial_println!("Thread would be terminated.");
+
+            // For now, restore context and let it crash naturally
+            // In a real implementation, we'd terminate the process
+            ke_context_to_kframes(&context, trap_frame, previous_mode);
+        }
+    }
+}
+
+/// Dispatch exception from interrupt handler
+///
+/// Convenience wrapper that determines processor mode from trap frame.
+///
+/// # Safety
+/// Must be called from interrupt context with valid pointers
+pub unsafe fn ki_dispatch_exception_from_trap(
+    exception_code: u32,
+    exception_address: u64,
+    trap_frame: *mut KTrapFrame,
+    first_chance: bool,
+    param0: u64,
+    param1: u64,
+) {
+    if trap_frame.is_null() {
+        return;
+    }
+
+    // Determine previous mode from CS in trap frame
+    let tf = &*trap_frame;
+    let previous_mode = if (tf.cs & 0x3) == 0 {
+        ProcessorMode::KernelMode
+    } else {
+        ProcessorMode::UserMode
+    };
+
+    // Build exception record
+    let mut exception_record = ExceptionRecord::new();
+    exception_record.exception_code = exception_code;
+    exception_record.exception_flags = 0;
+    exception_record.exception_record = ptr::null_mut();
+    exception_record.exception_address = exception_address as *mut u8;
+    exception_record.number_parameters = 2;
+    exception_record.exception_information[0] = param0;
+    exception_record.exception_information[1] = param1;
+
+    ki_dispatch_exception(
+        &mut exception_record,
+        trap_frame,
+        previous_mode,
+        first_chance,
+    );
+}

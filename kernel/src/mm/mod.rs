@@ -31,6 +31,7 @@ pub mod user;
 pub mod section;
 pub mod tlb;
 pub mod mdl;
+pub mod ws;
 
 // Re-export PFN types
 pub use pfn::{
@@ -263,6 +264,31 @@ pub use mdl::{
     mm_get_mdl_byte_offset,
     mm_get_mdl_virtual_address,
     get_mdl_stats,
+};
+
+// Re-export working set types
+pub use ws::{
+    MmSupportFlags,
+    MmWsle,
+    MmWsl,
+    MmSupport,
+    WorkingSetStats,
+    MAX_WSLE_PER_PROCESS,
+    DEFAULT_MINIMUM_WORKING_SET_SIZE,
+    DEFAULT_MAXIMUM_WORKING_SET_SIZE,
+    MM_MAXIMUM_WORKING_SET,
+    MM_FLUID_WORKING_SET,
+    mm_get_ws_stats,
+    mi_allocate_wsle,
+    mi_remove_wsle,
+    mi_trim_working_set,
+    mi_age_working_set,
+    mi_estimate_available,
+    mi_initialize_working_set_list,
+    mi_lock_wsle,
+    mi_unlock_wsle,
+    mi_find_wsle,
+    mi_record_page_fault,
 };
 
 /// Initialize the Memory Manager
