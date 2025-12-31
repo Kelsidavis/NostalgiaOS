@@ -33220,3 +33220,82 @@ pub fn cmd_kdinfo(args: &[&str]) {
         outln!("Use 'kdinfo help' for usage information");
     }
 }
+
+// =============================================================================
+// FsRtl (File System Runtime Library) Command
+// =============================================================================
+
+/// FsRtl diagnostic command
+pub fn cmd_fsrtl(args: &[&str]) {
+    if args.is_empty() {
+        outln!("File System Runtime Library (FsRtl)");
+        outln!("");
+        outln!("Usage: fsrtl <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  info        Show FsRtl components overview");
+        outln!("  test        Run FsRtl function tests");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "info") {
+        outln!("FsRtl Components");
+        outln!("");
+        outln!("Mapping Control Block (MCB):");
+        outln!("  Tracks Virtual Block Number to Logical Block Number mappings");
+        outln!("  Used by file systems to map file extents to disk locations");
+        outln!("");
+        outln!("File Locks:");
+        outln!("  Byte-range locking (exclusive and shared)");
+        outln!("  Mandatory and advisory lock support");
+        outln!("");
+        outln!("Name Utilities:");
+        outln!("  Path parsing and component extraction");
+        outln!("  Wildcard expression matching");
+        outln!("  FAT/NTFS legal name validation");
+        outln!("");
+        outln!("Opportunistic Locks (Oplocks):");
+        outln!("  Level I/II/Batch oplocks");
+        outln!("  Oplock break notification and acknowledgment");
+        outln!("");
+        outln!("Tunnel Cache:");
+        outln!("  Short name preservation across delete/rename");
+        outln!("  Ensures 8.3 name stability for legacy apps");
+        outln!("");
+        outln!("Change Notifications:");
+        outln!("  Directory change monitoring");
+        outln!("  FILE_NOTIFY_CHANGE_* flags support");
+
+    } else if eq_ignore_case(cmd, "test") {
+        use crate::fsrtl;
+
+        outln!("FsRtl Function Tests");
+        outln!("");
+
+        // Test name functions
+        outln!("Name Functions:");
+        let test_path = "\\Windows\\System32\\ntdll.dll";
+        let (first, rest) = fsrtl::fsrtl_dissect_name(test_path);
+        outln!("  Dissect '{}': first='{}', rest='{}'", test_path, first, rest);
+
+        let has_wild = fsrtl::fsrtl_does_name_contain_wild_cards("test*.txt");
+        outln!("  'test*.txt' has wildcards: {}", has_wild);
+
+        let is_match = fsrtl::fsrtl_is_name_in_expression("*.txt", "readme.txt", true);
+        outln!("  '*.txt' matches 'readme.txt': {}", is_match);
+
+        let fat_legal = fsrtl::fsrtl_is_fat_legal("FILE.TXT");
+        outln!("  'FILE.TXT' is FAT legal: {}", fat_legal);
+
+        let ntfs_legal = fsrtl::fsrtl_is_ntfs_legal("Long File Name.txt");
+        outln!("  'Long File Name.txt' is NTFS legal: {}", ntfs_legal);
+        outln!("");
+        outln!("Tests complete.");
+
+    } else {
+        outln!("Unknown fsrtl command: {}", cmd);
+        outln!("Use 'fsrtl' for usage information");
+    }
+}
