@@ -1328,6 +1328,9 @@ impl Shell {
         // RAWFS - RAW file system
         } else if eq_ignore_case(cmd, "rawfs") {
             commands::cmd_rawfs(&args[1..argc]);
+        // NLS - National Language Support
+        } else if eq_ignore_case(cmd, "nls") {
+            commands::cmd_nls(&args[1..argc]);
         // ARP cache
         } else if eq_ignore_case(cmd, "arp") {
             commands::cmd_arp(&args[1..argc]);

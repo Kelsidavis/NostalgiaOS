@@ -371,6 +371,11 @@ fn phase1_init(boot_info: &BootInfo) {
     raw::init();
     kprintln!("  RAW file system initialized");
 
+    // Initialize NLS (National Language Support)
+    kprintln!("  Initializing NLS...");
+    rtl::nls::init();
+    kprintln!("  NLS initialized");
+
     // Initialize object manager
     kprintln!("  Initializing object manager...");
     unsafe {

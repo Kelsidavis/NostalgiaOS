@@ -43,6 +43,7 @@ pub mod format;
 pub mod hex;
 pub mod image;
 pub mod memory;
+pub mod nls;
 pub mod random;
 pub mod string;
 pub mod time;

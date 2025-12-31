@@ -28435,6 +28435,133 @@ pub fn cmd_rawfs(args: &[&str]) {
 }
 
 // ============================================================================
+// NLS Command - National Language Support
+// ============================================================================
+
+/// NLS command - show NLS information
+pub fn cmd_nls(args: &[&str]) {
+    use crate::rtl::nls;
+
+    if args.iter().any(|a| *a == "/?") {
+        outln!("NLS - National Language Support Viewer");
+        outln!("");
+        outln!("Usage: nls [stats | codepage | test]");
+        outln!("");
+        outln!("  (no args)  Show NLS overview");
+        outln!("  stats      Show conversion statistics");
+        outln!("  codepage   Show active code pages");
+        outln!("  test       Run character conversion tests");
+        return;
+    }
+
+    let subcmd = if !args.is_empty() { args[0].to_ascii_lowercase() } else { "".into() };
+
+    if subcmd == "stats" {
+        let stats = nls::get_stats();
+        outln!("NLS Statistics:");
+        outln!("===============");
+        outln!("");
+        outln!("Conversions:");
+        outln!("  ANSI -> Unicode:  {}", stats.ansi_to_unicode);
+        outln!("  Unicode -> ANSI:  {}", stats.unicode_to_ansi);
+        outln!("  OEM -> Unicode:   {}", stats.oem_to_unicode);
+        outln!("  Unicode -> OEM:   {}", stats.unicode_to_oem);
+        outln!("");
+        outln!("Case Conversions:");
+        outln!("  Upcase ops:       {}", stats.upcase_ops);
+        outln!("  Downcase ops:     {}", stats.downcase_ops);
+        outln!("");
+        outln!("Errors:");
+        outln!("  Unmappable chars: {}", stats.unmappable_chars);
+    } else if subcmd == "codepage" {
+        let (acp, ocp) = nls::rtl_get_default_code_page();
+        outln!("Active Code Pages:");
+        outln!("==================");
+        outln!("");
+        outln!("  ANSI Code Page (ACP):  {}", acp);
+        outln!("  OEM Code Page (OCP):   {}", ocp);
+        outln!("");
+        outln!("  Multi-byte ACP:        {}", if nls::rtl_is_mb_code_page() { "Yes" } else { "No" });
+        outln!("");
+        outln!("Common Code Pages:");
+        outln!("  437  - US OEM (DOS)");
+        outln!("  850  - Multilingual Latin 1");
+        outln!("  1252 - Windows Latin 1");
+    } else if subcmd == "test" {
+        outln!("NLS Character Conversion Tests:");
+        outln!("================================");
+        outln!("");
+
+        // Test uppercase
+        outln!("Upcase Tests:");
+        let test_chars: [(u16, u16); 4] = [
+            (0x0061, 0x0041), // a -> A
+            (0x007A, 0x005A), // z -> Z
+            (0x00E9, 0x00C9), // e' -> E'
+            (0x03B1, 0x0391), // alpha -> ALPHA
+        ];
+        for (lower, expected_upper) in test_chars {
+            let result = nls::rtl_upcase_unicode_char(lower);
+            let status = if result == expected_upper { "PASS" } else { "FAIL" };
+            outln!("  U+{:04X} -> U+{:04X} (expected U+{:04X}): {}",
+                lower, result, expected_upper, status);
+        }
+
+        outln!("");
+        outln!("ANSI to Unicode Tests:");
+        let ansi_tests: [(u8, u16); 4] = [
+            (0x41, 0x0041), // A
+            (0x80, 0x20AC), // Euro sign (CP1252)
+            (0xE9, 0x00E9), // e'
+            (0xFC, 0x00FC), // u umlaut
+        ];
+        for (ansi, expected) in ansi_tests {
+            let result = nls::rtl_ansi_char_to_unicode(ansi);
+            let status = if result == expected { "PASS" } else { "FAIL" };
+            outln!("  0x{:02X} -> U+{:04X} (expected U+{:04X}): {}",
+                ansi, result, expected, status);
+        }
+
+        outln!("");
+        outln!("Character Classification:");
+        let classify_tests: [u16; 4] = [0x0041, 0x0030, 0x0020, 0x03B1];
+        for c in classify_tests {
+            outln!("  U+{:04X}: alpha={} digit={} space={} upper={} lower={}",
+                c,
+                nls::rtl_is_alpha(c),
+                nls::rtl_is_digit(c),
+                nls::rtl_is_space(c),
+                nls::rtl_is_upper(c),
+                nls::rtl_is_lower(c));
+        }
+    } else {
+        // Overview
+        let (acp, ocp) = nls::rtl_get_default_code_page();
+        let stats = nls::get_stats();
+
+        outln!("National Language Support Overview");
+        outln!("===================================");
+        outln!("");
+        outln!("Status: {}", if nls::is_initialized() { "Initialized" } else { "Not Initialized" });
+        outln!("");
+        outln!("Code Pages:");
+        outln!("  ANSI: {}  OEM: {}  Multi-byte: {}",
+            acp, ocp, if nls::rtl_is_mb_code_page() { "Yes" } else { "No" });
+        outln!("");
+        outln!("Statistics:");
+        outln!("  ANSI conversions: {}  OEM conversions: {}",
+            stats.ansi_to_unicode + stats.unicode_to_ansi,
+            stats.oem_to_unicode + stats.unicode_to_oem);
+        outln!("  Case conversions: {}",
+            stats.upcase_ops + stats.downcase_ops);
+        outln!("");
+        outln!("NLS provides Unicode/ANSI/OEM character conversions.");
+        outln!("");
+        outln!("Use 'nls <subcommand>' for detailed views.");
+    }
+}
+
+// ============================================================================
 // LOGMAN Command - Performance Logs and Alerts
 // ============================================================================
 
