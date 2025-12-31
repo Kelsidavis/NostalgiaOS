@@ -14547,6 +14547,12 @@ pub fn cmd_verifier(args: &[&str]) {
         show_verifier_pool();
     } else if eq_ignore_ascii_case(subcmd, "deadlock") {
         show_verifier_deadlock();
+    } else if eq_ignore_ascii_case(subcmd, "pnp") {
+        show_verifier_pnp();
+    } else if eq_ignore_ascii_case(subcmd, "power") {
+        show_verifier_power();
+    } else if eq_ignore_ascii_case(subcmd, "stack") {
+        show_verifier_stack();
     } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
         outln!("verifier - Driver Verifier");
         outln!("");
@@ -14558,6 +14564,9 @@ pub fn cmd_verifier(args: &[&str]) {
         outln!("  irp      - Show IRP tracking info");
         outln!("  pool     - Show pool allocation tracking");
         outln!("  deadlock - Show deadlock detection info");
+        outln!("  pnp      - Show PnP verification info");
+        outln!("  power    - Show Power verification info");
+        outln!("  stack    - Show stack verification info");
         outln!("");
         outln!("Driver Verifier validates driver behavior by tracking");
         outln!("IRPs, pool allocations, and lock acquisitions.");
@@ -14667,6 +14676,67 @@ fn show_verifier_deadlock() {
     outln!("  Total Held:     {}", stats.total_locks_held);
     outln!("");
     outln!("Resets:           {}", stats.resets);
+}
+
+fn show_verifier_pnp() {
+    use crate::verifier::pnp;
+
+    let (total_irps, violations, device_count) = pnp::vf_pnp_get_stats();
+
+    outln!("PnP Verification Statistics");
+    outln!("===========================");
+    outln!("");
+    outln!("IRPs:");
+    outln!("  Total Verified: {}", total_irps);
+    outln!("  Violations:     {}", violations);
+    outln!("");
+    outln!("Devices:");
+    outln!("  Tracked:        {}", device_count);
+    outln!("");
+    outln!("PnP IRP Types Monitored:");
+    outln!("  START_DEVICE, REMOVE_DEVICE, STOP_DEVICE");
+    outln!("  QUERY_CAPABILITIES, SURPRISE_REMOVAL");
+}
+
+fn show_verifier_power() {
+    use crate::verifier::power;
+
+    let (total_irps, violations, missing_start_next) = power::vf_power_get_stats();
+    let system_state = power::vf_power_get_system_state();
+
+    outln!("Power Verification Statistics");
+    outln!("=============================");
+    outln!("");
+    outln!("System State:     {}", system_state.name());
+    outln!("");
+    outln!("IRPs:");
+    outln!("  Total Verified: {}", total_irps);
+    outln!("  Violations:     {}", violations);
+    outln!("");
+    outln!("PoStartNextPowerIrp:");
+    outln!("  Missing Calls:  {}", missing_start_next);
+    outln!("");
+    outln!("Power IRP Types Monitored:");
+    outln!("  WAIT_WAKE, SET_POWER, QUERY_POWER");
+}
+
+fn show_verifier_stack() {
+    use crate::verifier::stack;
+
+    let (total_stacks, checks, overflow_warnings, stacks_in_danger) = stack::vf_stack_get_stats();
+
+    outln!("Stack Verification Statistics");
+    outln!("=============================");
+    outln!("");
+    outln!("Stacks:");
+    outln!("  Total Tracked:  {}", total_stacks);
+    outln!("  Checks Performed: {}", checks);
+    outln!("");
+    outln!("Issues:");
+    outln!("  Overflow Warnings: {}", overflow_warnings);
+    outln!("  In Danger Zone:    {}", stacks_in_danger);
+    outln!("");
+    outln!("Danger zone is {} bytes from stack limit.", stack::STACK_DANGER_ZONE);
 }
 
 // ============================================================================

@@ -25,13 +25,19 @@
 
 pub mod deadlock;
 pub mod irp;
+pub mod pnp;
 pub mod pool;
+pub mod power;
 pub mod settings;
+pub mod stack;
 
 pub use deadlock::*;
 pub use irp::*;
+pub use pnp::*;
 pub use pool::*;
+pub use power::*;
 pub use settings::*;
+pub use stack::*;
 
 use crate::ke::SpinLock;
 use alloc::collections::BTreeSet;
@@ -145,6 +151,9 @@ pub fn vf_initialize(flags: VerifierFlags) -> bool {
     vf_irp_init();
     vf_pool_init();
     vf_deadlock_init();
+    vf_pnp_init();
+    vf_power_init();
+    vf_stack_init();
 
     VERIFIER_ENABLED.store(flags.bits() != 0, Ordering::SeqCst);
 
