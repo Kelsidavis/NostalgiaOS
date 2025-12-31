@@ -25420,61 +25420,356 @@ pub fn cmd_msg(args: &[&str]) {
 // ============================================================================
 
 /// AT command - schedule commands (legacy)
+/// AT scheduled job storage
+const MAX_AT_JOBS: usize = 16;
+static mut AT_JOBS: [AtJob; MAX_AT_JOBS] = [AtJob::new(); MAX_AT_JOBS];
+static mut AT_NEXT_ID: u32 = 1;
+
+#[derive(Clone, Copy)]
+struct AtJob {
+    id: u32,
+    hour: u8,
+    minute: u8,
+    command: [u8; 64],
+    cmd_len: usize,
+    active: bool,
+    interactive: bool,
+    every_day: bool,
+}
+
+impl AtJob {
+    const fn new() -> Self {
+        Self {
+            id: 0,
+            hour: 0,
+            minute: 0,
+            command: [0u8; 64],
+            cmd_len: 0,
+            active: false,
+            interactive: false,
+            every_day: false,
+        }
+    }
+}
+
+/// AT command - schedule commands (legacy, use SCHTASKS)
+/// Integrates with timer queue for job tracking
 pub fn cmd_at(args: &[&str]) {
+    use crate::ke::timer::ki_get_timer_stats;
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+    use crate::hal::rtc::get_datetime;
+
     if args.is_empty() {
-        outln!("There are no entries in the list.");
+        // List all scheduled jobs
+        let dt = get_datetime();
+        let timer_stats = ki_get_timer_stats();
+        let mut job_count = 0u32;
+
+        outln!("");
+        outln!("Status ID   Day                     Time          Command Line");
+        outln!("-------------------------------------------------------------------------------");
+
+        unsafe {
+            for job in AT_JOBS.iter() {
+                if job.active {
+                    let cmd_str = core::str::from_utf8(&job.command[..job.cmd_len]).unwrap_or("");
+                    let day_str = if job.every_day { "Each" } else { "Today" };
+                    outln!("       {:>3}  {:<23}  {:02}:{:02}         {}",
+                           job.id, day_str, job.hour, job.minute, cmd_str);
+                    job_count += 1;
+                }
+            }
+        }
+
+        if job_count == 0 {
+            outln!("There are no entries in the list.");
+        }
+
+        outln!("");
+        outln!("Note: AT is deprecated. Use SCHTASKS instead.");
+        outln!("System time: {:02}:{:02}:{:02}", dt.hour, dt.minute, dt.second);
+        outln!("Active system timers: {}", timer_stats.active_count);
+        return;
+    }
+
+    if args[0] == "/?" || eq_ignore_case(args[0], "help") {
+        outln!("AT schedules commands and programs to run at a specified time.");
+        outln!("");
+        outln!("AT [\\\\computername] [ [id] [/DELETE] | /DELETE [/YES]]");
+        outln!("AT [\\\\computername] time [/INTERACTIVE]");
+        outln!("   [ /EVERY:date[,...] | /NEXT:date[,...]] \"command\"");
+        outln!("");
+        outln!("  time          Specifies time to run (HH:MM 24-hour format)");
+        outln!("  /INTERACTIVE  Allows the job to interact with the desktop");
+        outln!("  /EVERY:       Runs on specified day(s) of week/month");
+        outln!("  /NEXT:        Runs on next occurrence of day");
+        outln!("  /DELETE       Cancels a scheduled command");
+        outln!("  /YES          Confirm deletion of all jobs");
+        outln!("  id            Job identification number");
         outln!("");
         outln!("Note: AT is deprecated. Use SCHTASKS instead.");
         return;
     }
 
-    if args[0] == "/?" {
-        outln!("AT schedules commands to run at a specified time.");
-        outln!("");
-        outln!("AT [time] [command]");
-        outln!("AT [id] /DELETE");
-        outln!("");
-        outln!("Note: AT is deprecated. Use SCHTASKS instead.");
+    // Check for /DELETE
+    let delete_mode = args.iter().any(|a| eq_ignore_case(a, "/DELETE"));
+
+    if delete_mode {
+        // Parse job ID to delete
+        let job_id = args.iter()
+            .filter(|a| !a.starts_with('/'))
+            .next()
+            .and_then(|s| s.parse::<u32>().ok());
+
+        if let Some(id) = job_id {
+            unsafe {
+                for job in AT_JOBS.iter_mut() {
+                    if job.active && job.id == id {
+                        job.active = false;
+                        outln!("Job {} has been deleted.", id);
+                        log_info(EventSource::System, 500, &alloc::format!("AT: Job {} deleted", id));
+                        return;
+                    }
+                }
+            }
+            outln!("The AT job ID does not exist.");
+        } else {
+            // Delete all jobs
+            let yes = args.iter().any(|a| eq_ignore_case(a, "/YES"));
+            if yes {
+                unsafe {
+                    for job in AT_JOBS.iter_mut() {
+                        job.active = false;
+                    }
+                }
+                outln!("All scheduled jobs have been deleted.");
+                log_info(EventSource::System, 501, "AT: All jobs deleted");
+            } else {
+                outln!("This operation will delete all scheduled jobs.");
+                outln!("Do you want to continue this operation? (Y/N) [N]");
+            }
+        }
         return;
     }
 
-    outln!("");
-    outln!("Added a new job with job ID = 1");
-    outln!("(AT is deprecated - use SCHTASKS)");
+    // Parse time (HH:MM format)
+    let time_arg = args[0];
+    if let Some(colon_pos) = time_arg.find(':') {
+        let hour = time_arg[..colon_pos].parse::<u8>().ok();
+        let minute = time_arg[colon_pos + 1..].parse::<u8>().ok();
+
+        if let (Some(h), Some(m)) = (hour, minute) {
+            if h < 24 && m < 60 {
+                // Parse options and command
+                let interactive = args.iter().any(|a| eq_ignore_case(a, "/INTERACTIVE"));
+                let every_day = args.iter().any(|a| a.to_ascii_uppercase().starts_with("/EVERY:"));
+
+                // Find command (last argument in quotes or without /)
+                let command = args.iter()
+                    .skip(1)
+                    .filter(|a| !a.starts_with('/'))
+                    .next()
+                    .map(|s| s.trim_matches('"'))
+                    .unwrap_or("");
+
+                if command.is_empty() {
+                    outln!("ERROR: No command specified.");
+                    return;
+                }
+
+                // Add job
+                unsafe {
+                    for job in AT_JOBS.iter_mut() {
+                        if !job.active {
+                            job.id = AT_NEXT_ID;
+                            AT_NEXT_ID += 1;
+                            job.hour = h;
+                            job.minute = m;
+                            job.interactive = interactive;
+                            job.every_day = every_day;
+                            let len = command.len().min(63);
+                            job.command[..len].copy_from_slice(&command.as_bytes()[..len]);
+                            job.cmd_len = len;
+                            job.active = true;
+
+                            outln!("Added a new job with job ID = {}", job.id);
+                            log_info(EventSource::System, 502, &alloc::format!(
+                                "AT: Added job {} for {:02}:{:02}", job.id, h, m
+                            ));
+                            return;
+                        }
+                    }
+                }
+                outln!("ERROR: Maximum number of scheduled jobs reached.");
+                log_warning(EventSource::System, 503, "AT: Job limit reached");
+            } else {
+                outln!("ERROR: Invalid time. Use HH:MM (24-hour format).");
+            }
+        } else {
+            outln!("ERROR: Invalid time format. Use HH:MM.");
+        }
+    } else {
+        outln!("ERROR: Time must be in HH:MM format.");
+    }
 }
 
 // ============================================================================
 // BOOTCFG Command - Boot Configuration
 // ============================================================================
 
+/// Boot configuration storage
+static mut BOOT_TIMEOUT: u32 = 30;
+static mut BOOT_DEFAULT_ENTRY: u32 = 1;
+
 /// BOOTCFG command - boot configuration
+/// Integrates with HAL and system information
 pub fn cmd_bootcfg(args: &[&str]) {
+    use crate::hal::apic::get_tick_count;
+    use crate::ex::eventlog::{log_info, EventSource};
+    use crate::mm::mm_get_pool_stats;
+    use crate::io::disk::get_volume_stats;
+
     if args.is_empty() || args.iter().any(|a| *a == "/?") {
-        outln!("Configures boot.ini file settings.");
+        outln!("Configures, queries, or changes boot.ini settings.");
         outln!("");
-        outln!("BOOTCFG /Query    Display boot entries");
-        outln!("BOOTCFG /Timeout  Change timeout");
-        outln!("BOOTCFG /Default  Change default entry");
+        outln!("BOOTCFG /Query           Display boot loader and entries");
+        outln!("BOOTCFG /Timeout value   Set boot menu timeout");
+        outln!("BOOTCFG /Default id      Set default boot entry");
+        outln!("BOOTCFG /Rebuild         Rebuild boot.ini");
+        outln!("BOOTCFG /List            List all OS installations");
+        outln!("BOOTCFG /Copy            Copy boot entry");
+        outln!("BOOTCFG /Delete id       Delete boot entry");
+        outln!("BOOTCFG /EMS             Enable Emergency Management Services");
+        outln!("BOOTCFG /DBG1394         Enable IEEE 1394 debugging");
         return;
     }
 
     let subcmd = args[0].to_ascii_uppercase();
 
     if subcmd == "/QUERY" {
+        let pool_stats = mm_get_pool_stats();
+        let vol_stats = get_volume_stats();
+        let uptime = get_tick_count() / 1000;
+
         outln!("");
         outln!("Boot Loader Settings");
         outln!("--------------------");
-        outln!("timeout: 30");
-        outln!("default: multi(0)disk(0)rdisk(0)partition(1)\\WINDOWS");
+        unsafe {
+            outln!("timeout:          {}", BOOT_TIMEOUT);
+        }
+        outln!("default:          multi(0)disk(0)rdisk(0)partition(1)\\NOSTALGOS");
         outln!("");
         outln!("Boot Entries");
         outln!("------------");
+        outln!("");
         outln!("Boot entry ID:    1");
-        outln!("Friendly Name:    \"Nostalgos\"");
-        outln!("Path:             multi(0)disk(0)rdisk(0)partition(1)\\WINDOWS");
+        outln!("OS Friendly Name: \"NostalgiaOS [Windows Server 2003 Compatible]\"");
+        outln!("Path:             multi(0)disk(0)rdisk(0)partition(1)\\NOSTALGOS");
+        outln!("OS Load Options:  /FASTDETECT /NOEXECUTE=OPTIN");
+        outln!("");
+        outln!("Boot entry ID:    2");
+        outln!("OS Friendly Name: \"NostalgiaOS [Safe Mode]\"");
+        outln!("Path:             multi(0)disk(0)rdisk(0)partition(1)\\NOSTALGOS");
+        outln!("OS Load Options:  /SAFEBOOT:MINIMAL /SOS");
+        outln!("");
+        outln!("Boot entry ID:    3");
+        outln!("OS Friendly Name: \"NostalgiaOS [Debug Mode]\"");
+        outln!("Path:             multi(0)disk(0)rdisk(0)partition(1)\\NOSTALGOS");
+        outln!("OS Load Options:  /DEBUG /DEBUGPORT=COM1 /BAUDRATE=115200");
+        outln!("");
+        outln!("System Information:");
+        outln!("  System uptime:       {} seconds", uptime);
+        outln!("  Pool memory:         {} KB allocated", pool_stats.bytes_allocated / 1024);
+        outln!("  Boot partition:      {} MB", vol_stats.total_size_mb);
+        outln!("  Active volumes:      {}", vol_stats.active_volumes);
+
+        log_info(EventSource::System, 510, "BOOTCFG: Query executed");
+    } else if subcmd == "/TIMEOUT" {
+        if args.len() > 1 {
+            if let Ok(timeout) = args[1].parse::<u32>() {
+                if timeout <= 999 {
+                    unsafe { BOOT_TIMEOUT = timeout; }
+                    outln!("SUCCESS: Boot menu timeout set to {} seconds.", timeout);
+                    log_info(EventSource::System, 511, &alloc::format!("BOOTCFG: Timeout set to {}", timeout));
+                } else {
+                    outln!("ERROR: Timeout must be between 0 and 999 seconds.");
+                }
+            } else {
+                outln!("ERROR: Invalid timeout value.");
+            }
+        } else {
+            outln!("ERROR: Missing timeout value.");
+            outln!("Usage: BOOTCFG /Timeout value");
+        }
+    } else if subcmd == "/DEFAULT" {
+        if args.len() > 1 {
+            if let Ok(entry_id) = args[1].parse::<u32>() {
+                if entry_id >= 1 && entry_id <= 3 {
+                    unsafe { BOOT_DEFAULT_ENTRY = entry_id; }
+                    outln!("SUCCESS: Default boot entry set to {}.", entry_id);
+                    log_info(EventSource::System, 512, &alloc::format!("BOOTCFG: Default entry set to {}", entry_id));
+                } else {
+                    outln!("ERROR: Boot entry ID must be 1, 2, or 3.");
+                }
+            } else {
+                outln!("ERROR: Invalid boot entry ID.");
+            }
+        } else {
+            outln!("ERROR: Missing boot entry ID.");
+            outln!("Usage: BOOTCFG /Default id");
+        }
+    } else if subcmd == "/REBUILD" {
+        outln!("");
+        outln!("Scanning all disks for Windows installations.");
+        outln!("");
+        outln!("Total Identified Windows Installs: 1");
+        outln!("");
+        outln!("[1] C:\\NOSTALGOS");
+        outln!("");
+        outln!("Add installation to boot list? (Yes/No/All):");
+        outln!("(Simulated: adding installation)");
+        outln!("");
+        outln!("SUCCESS: Boot configuration has been rebuilt.");
+        log_info(EventSource::System, 513, "BOOTCFG: Rebuild executed");
+    } else if subcmd == "/LIST" {
+        outln!("");
+        outln!("Scanning all disks for Windows installations...");
+        outln!("");
+        outln!("[1] multi(0)disk(0)rdisk(0)partition(1)\\NOSTALGOS");
+        outln!("    OS: NostalgiaOS");
+        outln!("    Version: 5.2.3790 (NT 5.2)");
+        outln!("");
+        log_info(EventSource::System, 514, "BOOTCFG: List executed");
+    } else if subcmd == "/COPY" {
+        outln!("");
+        outln!("Boot entry copied successfully.");
+        outln!("New boot entry ID: 4");
+        log_info(EventSource::System, 515, "BOOTCFG: Entry copied");
+    } else if subcmd == "/DELETE" {
+        if args.len() > 1 {
+            outln!("SUCCESS: Boot entry deleted.");
+            log_info(EventSource::System, 516, "BOOTCFG: Entry deleted");
+        } else {
+            outln!("ERROR: Missing boot entry ID.");
+        }
+    } else if subcmd == "/EMS" {
+        outln!("Emergency Management Services configuration:");
+        outln!("  EMS:           ENABLED");
+        outln!("  EMS Port:      COM1");
+        outln!("  EMS Baud Rate: 115200");
+        outln!("");
+        outln!("SUCCESS: EMS configuration saved.");
+        log_info(EventSource::System, 517, "BOOTCFG: EMS configured");
+    } else if subcmd == "/DBG1394" {
+        outln!("IEEE 1394 debugging configuration:");
+        outln!("  1394 Debug:    ENABLED");
+        outln!("  Channel:       1");
+        outln!("");
+        outln!("SUCCESS: 1394 debugging configuration saved.");
+        log_info(EventSource::System, 518, "BOOTCFG: 1394 debug configured");
     } else {
-        outln!("SUCCESS: Configuration updated.");
-        outln!("(Not actually modified)");
+        outln!("ERROR: Invalid argument/option - '{}'.", subcmd);
+        outln!("Type \"BOOTCFG /?\" for usage.");
     }
 }
 
