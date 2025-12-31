@@ -28323,8 +28323,82 @@ pub fn cmd_prnjobs(args: &[&str]) {
     }
 }
 
+/// Printer storage
+const MAX_PRINTERS: usize = 8;
+static mut PRINTERS: [PrinterInfo; MAX_PRINTERS] = [PrinterInfo::new(); MAX_PRINTERS];
+static mut DEFAULT_PRINTER: usize = 0;
+
+#[derive(Clone, Copy)]
+struct PrinterInfo {
+    name: [u8; 32],
+    name_len: usize,
+    driver: [u8; 32],
+    driver_len: usize,
+    port: [u8; 16],
+    port_len: usize,
+    active: bool,
+    paused: bool,
+    jobs_printed: u32,
+}
+
+impl PrinterInfo {
+    const fn new() -> Self {
+        Self {
+            name: [0u8; 32],
+            name_len: 0,
+            driver: [0u8; 32],
+            driver_len: 0,
+            port: [0u8; 16],
+            port_len: 0,
+            active: false,
+            paused: false,
+            jobs_printed: 0,
+        }
+    }
+}
+
+/// Initialize default printers
+fn init_default_printers() {
+    unsafe {
+        if PRINTERS[0].active {
+            return; // Already initialized
+        }
+
+        // Add XPS Document Writer
+        let name = b"Microsoft XPS Document Writer";
+        let driver = b"Microsoft XPS Document Writer";
+        let port = b"PORTPROMPT:";
+
+        PRINTERS[0].name[..name.len()].copy_from_slice(name);
+        PRINTERS[0].name_len = name.len();
+        PRINTERS[0].driver[..driver.len()].copy_from_slice(driver);
+        PRINTERS[0].driver_len = driver.len();
+        PRINTERS[0].port[..port.len()].copy_from_slice(port);
+        PRINTERS[0].port_len = port.len();
+        PRINTERS[0].active = true;
+
+        // Add virtual LPT1 printer
+        let name2 = b"LPT1 Printer";
+        let driver2 = b"Generic / Text Only";
+        let port2 = b"LPT1:";
+
+        PRINTERS[1].name[..name2.len()].copy_from_slice(name2);
+        PRINTERS[1].name_len = name2.len();
+        PRINTERS[1].driver[..driver2.len()].copy_from_slice(driver2);
+        PRINTERS[1].driver_len = driver2.len();
+        PRINTERS[1].port[..port2.len()].copy_from_slice(port2);
+        PRINTERS[1].port_len = port2.len();
+        PRINTERS[1].active = true;
+    }
+}
+
 /// PRNMNGR command - printer manager
+/// Integrates with printer storage and print jobs
 pub fn cmd_prnmngr(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    init_default_printers();
+
     if args.is_empty() || args.iter().any(|a| *a == "/?") {
         outln!("Adds, deletes, and lists printers or printer connections.");
         outln!("");
@@ -28344,33 +28418,181 @@ pub fn cmd_prnmngr(args: &[&str]) {
         return;
     }
 
+    // Parse options
     let cmd = args[0];
+    let mut printer_name = "";
+    let mut driver_name = "";
+    let mut port_name = "";
+
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "-P" && i + 1 < args.len() {
+            printer_name = args[i + 1];
+            i += 2;
+        } else if args[i] == "-m" && i + 1 < args.len() {
+            driver_name = args[i + 1];
+            i += 2;
+        } else if args[i] == "-r" && i + 1 < args.len() {
+            port_name = args[i + 1];
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
     if cmd == "-l" {
         outln!("Server name \\\\NOSTALGOS");
-        outln!("Printer name                 Driver name                  Port name   Share name");
-        outln!("===========================  ===========================  ==========  ==========");
-        outln!("Microsoft XPS Document Writer Microsoft XPS Document Writ... PORTPROMPT:");
-    } else if cmd == "-g" {
-        outln!("Default printer");
         outln!("");
-        outln!("    Printer Name        Microsoft XPS Document Writer");
-        outln!("    Share Name");
-        outln!("    Driver Name         Microsoft XPS Document Writer");
-        outln!("    Port Name           PORTPROMPT:");
-        outln!("    Comment");
-        outln!("    Location");
-        outln!("    Separator File");
-        outln!("    Print Processor     winprint");
-        outln!("    Datatype            RAW");
-        outln!("    Parameters");
-        outln!("    Attributes          0x4844");
-        outln!("    Priority            1");
-        outln!("    Default Priority    0");
-        outln!("    Status              0");
-        outln!("    Jobs                0");
-        outln!("    Average Pages Per Minute 0");
+        outln!("Printer name                   Driver name                    Port       Status");
+        outln!("=============================  =============================  =========  ========");
+
+        let mut count = 0u32;
+        unsafe {
+            for (idx, printer) in PRINTERS.iter().enumerate() {
+                if printer.active {
+                    let name = core::str::from_utf8(&printer.name[..printer.name_len]).unwrap_or("");
+                    let driver = core::str::from_utf8(&printer.driver[..printer.driver_len]).unwrap_or("");
+                    let port = core::str::from_utf8(&printer.port[..printer.port_len]).unwrap_or("");
+                    let status = if printer.paused { "Paused" } else { "Ready" };
+                    let default = if idx == DEFAULT_PRINTER { " *" } else { "" };
+
+                    outln!("{:29}  {:29}  {:9}  {}{}",
+                           name, driver, port, status, default);
+                    count += 1;
+                }
+            }
+        }
+
+        if count == 0 {
+            outln!("(No printers installed)");
+        } else {
+            outln!("");
+            outln!("Total: {} printer(s). (* = default)", count);
+        }
+        log_info(EventSource::Io, 8020, "PRNMNGR: Listed printers");
+    } else if cmd == "-g" {
+        unsafe {
+            let printer = &PRINTERS[DEFAULT_PRINTER];
+            if printer.active {
+                let name = core::str::from_utf8(&printer.name[..printer.name_len]).unwrap_or("");
+                let driver = core::str::from_utf8(&printer.driver[..printer.driver_len]).unwrap_or("");
+                let port = core::str::from_utf8(&printer.port[..printer.port_len]).unwrap_or("");
+
+                outln!("Default printer");
+                outln!("");
+                outln!("    Printer Name        {}", name);
+                outln!("    Driver Name         {}", driver);
+                outln!("    Port Name           {}", port);
+                outln!("    Status              {}", if printer.paused { "Paused" } else { "Ready" });
+                outln!("    Jobs Printed        {}", printer.jobs_printed);
+                outln!("    Print Processor     winprint");
+                outln!("    Datatype            RAW");
+                outln!("    Priority            1");
+            } else {
+                outln!("No default printer set.");
+            }
+        }
+    } else if cmd == "-a" {
+        // Add printer
+        if printer_name.is_empty() {
+            outln!("ERROR: Printer name required (-P).");
+            return;
+        }
+
+        unsafe {
+            for printer in PRINTERS.iter_mut() {
+                if !printer.active {
+                    let name_bytes = printer_name.as_bytes();
+                    let len = name_bytes.len().min(31);
+                    printer.name[..len].copy_from_slice(&name_bytes[..len]);
+                    printer.name_len = len;
+
+                    if !driver_name.is_empty() {
+                        let drv_bytes = driver_name.as_bytes();
+                        let drv_len = drv_bytes.len().min(31);
+                        printer.driver[..drv_len].copy_from_slice(&drv_bytes[..drv_len]);
+                        printer.driver_len = drv_len;
+                    } else {
+                        let drv = b"Generic / Text Only";
+                        printer.driver[..drv.len()].copy_from_slice(drv);
+                        printer.driver_len = drv.len();
+                    }
+
+                    if !port_name.is_empty() {
+                        let port_bytes = port_name.as_bytes();
+                        let port_len = port_bytes.len().min(15);
+                        printer.port[..port_len].copy_from_slice(&port_bytes[..port_len]);
+                        printer.port_len = port_len;
+                    } else {
+                        let port = b"LPT1:";
+                        printer.port[..port.len()].copy_from_slice(port);
+                        printer.port_len = port.len();
+                    }
+
+                    printer.active = true;
+                    printer.paused = false;
+                    printer.jobs_printed = 0;
+
+                    outln!("Added printer \"{}\"", printer_name);
+                    log_info(EventSource::Io, 8021, &alloc::format!("PRNMNGR: Added printer {}", printer_name));
+                    return;
+                }
+            }
+        }
+        outln!("ERROR: Maximum number of printers reached.");
+    } else if cmd == "-d" {
+        // Delete printer
+        if printer_name.is_empty() {
+            outln!("ERROR: Printer name required (-P).");
+            return;
+        }
+
+        unsafe {
+            for printer in PRINTERS.iter_mut() {
+                if printer.active {
+                    let name = core::str::from_utf8(&printer.name[..printer.name_len]).unwrap_or("");
+                    if eq_ignore_case(name, printer_name) {
+                        printer.active = false;
+                        outln!("Deleted printer \"{}\"", printer_name);
+                        log_info(EventSource::Io, 8022, &alloc::format!("PRNMNGR: Deleted printer {}", printer_name));
+                        return;
+                    }
+                }
+            }
+        }
+        outln!("ERROR: Printer \"{}\" not found.", printer_name);
+    } else if cmd == "-t" {
+        // Set default printer
+        if printer_name.is_empty() {
+            outln!("ERROR: Printer name required (-P).");
+            return;
+        }
+
+        unsafe {
+            for (idx, printer) in PRINTERS.iter().enumerate() {
+                if printer.active {
+                    let name = core::str::from_utf8(&printer.name[..printer.name_len]).unwrap_or("");
+                    if eq_ignore_case(name, printer_name) {
+                        DEFAULT_PRINTER = idx;
+                        outln!("Default printer set to \"{}\"", printer_name);
+                        log_info(EventSource::Io, 8023, &alloc::format!("PRNMNGR: Default set to {}", printer_name));
+                        return;
+                    }
+                }
+            }
+        }
+        outln!("ERROR: Printer \"{}\" not found.", printer_name);
+    } else if cmd == "-x" {
+        // Delete all printers
+        unsafe {
+            for printer in PRINTERS.iter_mut() {
+                printer.active = false;
+            }
+        }
+        outln!("All printers deleted.");
+        log_info(EventSource::Io, 8024, "PRNMNGR: All printers deleted");
     } else {
-        outln!("Operation successful");
+        outln!("Unknown option: {}", cmd);
     }
 }
 
@@ -28405,7 +28627,12 @@ pub fn cmd_prnport(args: &[&str]) {
 }
 
 /// PRNQCTL command - printer queue control
+/// Uses printer storage and print job storage
 pub fn cmd_prnqctl(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    init_default_printers();
+
     if args.is_empty() || args.iter().any(|a| *a == "/?") {
         outln!("Pauses or resumes a printer, and prints a test page.");
         outln!("");
@@ -28421,5 +28648,110 @@ pub fn cmd_prnqctl(args: &[&str]) {
         return;
     }
 
-    outln!("Operation successful");
+    // Parse options
+    let cmd = args[0];
+    let mut printer_name = "";
+
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "-P" && i + 1 < args.len() {
+            printer_name = args[i + 1];
+            i += 2;
+        } else {
+            i += 1;
+        }
+    }
+
+    // Find printer or use default
+    let printer_idx = if printer_name.is_empty() {
+        unsafe { Some(DEFAULT_PRINTER) }
+    } else {
+        unsafe {
+            PRINTERS.iter().enumerate()
+                .find(|(_, p)| {
+                    if p.active {
+                        let name = core::str::from_utf8(&p.name[..p.name_len]).unwrap_or("");
+                        eq_ignore_case(name, printer_name)
+                    } else {
+                        false
+                    }
+                })
+                .map(|(idx, _)| idx)
+        }
+    };
+
+    let idx = match printer_idx {
+        Some(i) => i,
+        None => {
+            outln!("ERROR: Printer \"{}\" not found.", printer_name);
+            return;
+        }
+    };
+
+    if cmd == "-z" {
+        // Pause printer
+        unsafe {
+            PRINTERS[idx].paused = true;
+            let name = core::str::from_utf8(&PRINTERS[idx].name[..PRINTERS[idx].name_len]).unwrap_or("");
+            outln!("Printer \"{}\" paused.", name);
+            log_info(EventSource::Io, 8030, &alloc::format!("PRNQCTL: Printer {} paused", name));
+        }
+    } else if cmd == "-m" {
+        // Resume printer
+        unsafe {
+            PRINTERS[idx].paused = false;
+            let name = core::str::from_utf8(&PRINTERS[idx].name[..PRINTERS[idx].name_len]).unwrap_or("");
+            outln!("Printer \"{}\" resumed.", name);
+            log_info(EventSource::Io, 8031, &alloc::format!("PRNQCTL: Printer {} resumed", name));
+        }
+    } else if cmd == "-e" {
+        // Print test page
+        unsafe {
+            let name = core::str::from_utf8(&PRINTERS[idx].name[..PRINTERS[idx].name_len]).unwrap_or("");
+            let driver = core::str::from_utf8(&PRINTERS[idx].driver[..PRINTERS[idx].driver_len]).unwrap_or("");
+
+            outln!("");
+            outln!("Printing test page on \"{}\"...", name);
+            outln!("");
+            outln!("===== TEST PAGE =====");
+            outln!("Printer: {}", name);
+            outln!("Driver:  {}", driver);
+            outln!("Server:  \\\\NOSTALGOS");
+            outln!("Date:    (current)");
+            outln!("");
+            outln!("This test page was printed from the");
+            outln!("NostalgiaOS print subsystem.");
+            outln!("=====================");
+            outln!("");
+            outln!("Test page printed successfully.");
+
+            PRINTERS[idx].jobs_printed += 1;
+            log_info(EventSource::Io, 8032, &alloc::format!("PRNQCTL: Test page printed on {}", name));
+        }
+    } else if cmd == "-x" {
+        // Cancel all jobs on printer
+        let mut cancelled = 0u32;
+        unsafe {
+            let name = core::str::from_utf8(&PRINTERS[idx].name[..PRINTERS[idx].name_len]).unwrap_or("");
+            let port = core::str::from_utf8(&PRINTERS[idx].port[..PRINTERS[idx].port_len]).unwrap_or("");
+
+            // Cancel matching print jobs
+            for job in PRINT_JOBS.iter_mut() {
+                if job.status != PrintJobStatus::Empty && job.status != PrintJobStatus::Completed {
+                    let job_dev = core::str::from_utf8(&job.device[..job.dev_len]).unwrap_or("");
+                    // Match by port (e.g., LPT1 in job matches LPT1: in printer)
+                    if port.starts_with(job_dev) || job_dev.starts_with(&port[..port.len().saturating_sub(1)]) {
+                        job.status = PrintJobStatus::Empty;
+                        cancelled += 1;
+                    }
+                }
+            }
+
+            outln!("Cancelled {} job(s) on printer \"{}\".", cancelled, name);
+            log_info(EventSource::Io, 8033, &alloc::format!("PRNQCTL: Cancelled {} jobs on {}", cancelled, name));
+        }
+    } else {
+        outln!("Unknown option: {}", cmd);
+        outln!("Use -? for help.");
+    }
 }
