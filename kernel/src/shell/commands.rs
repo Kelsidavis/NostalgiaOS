@@ -33092,3 +33092,80 @@ pub fn cmd_pnp(args: &[&str]) {
         outln!("Use 'pnp' for usage information");
     }
 }
+
+// =============================================================================
+// WMI (Windows Management Instrumentation) Command
+// =============================================================================
+
+/// WMI diagnostic command
+pub fn cmd_wmi(args: &[&str]) {
+    use crate::wmi;
+
+    if args.is_empty() {
+        outln!("Windows Management Instrumentation (WMI)");
+        outln!("");
+        outln!("Usage: wmi <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  stats       Show WMI statistics");
+        outln!("  info        Show WMI subsystem information");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "stats") {
+        let stats = wmi::wmi_get_statistics();
+
+        outln!("WMI Statistics");
+        outln!("");
+        outln!("Components:");
+        outln!("  Data Blocks:       {}", stats.data_blocks);
+        outln!("  Providers:         {}", stats.providers);
+        outln!("  Trace Providers:   {}", stats.trace_providers);
+        outln!("  Registered Devices: {}", stats.registered_devices);
+        outln!("");
+        outln!("Operations:");
+        outln!("  Total Queries:  {}", stats.total_queries);
+        outln!("  Total Sets:     {}", stats.total_sets);
+        outln!("  Total Methods:  {}", stats.total_methods);
+        outln!("");
+        outln!("Events:");
+        outln!("  Total Events:   {}", stats.total_events);
+        outln!("  Events Dropped: {}", stats.events_dropped);
+        outln!("  Pending Events: {}", stats.pending_events);
+        outln!("");
+        outln!("Registrations:");
+        outln!("  Total Registrations:   {}", stats.total_registrations);
+        outln!("  Total Deregistrations: {}", stats.total_deregistrations);
+        outln!("");
+        outln!("Status: {}", if wmi::wmi_is_initialized() { "Initialized" } else { "Not initialized" });
+
+    } else if eq_ignore_case(cmd, "info") {
+        outln!("WMI Subsystem Information");
+        outln!("");
+        outln!("Overview:");
+        outln!("  WMI provides a uniform mechanism for accessing management");
+        outln!("  information from the operating system, devices, and apps.");
+        outln!("");
+        outln!("Components:");
+        outln!("  Data Blocks    - Named data items with GUIDs");
+        outln!("  Providers      - Drivers exposing management data");
+        outln!("  Methods        - Operations on data blocks");
+        outln!("  Events         - Notifications of state changes");
+        outln!("");
+        outln!("Operations:");
+        outln!("  Query   - Read data block values");
+        outln!("  Set     - Write data block values");
+        outln!("  Execute - Invoke methods on data blocks");
+        outln!("");
+        outln!("Integration:");
+        outln!("  WMI is the kernel-mode component that works with the");
+        outln!("  user-mode WMI service to enable CIM (Common Information");
+        outln!("  Model) based management of Windows systems.");
+
+    } else {
+        outln!("Unknown wmi command: {}", cmd);
+        outln!("Use 'wmi' for usage information");
+    }
+}
