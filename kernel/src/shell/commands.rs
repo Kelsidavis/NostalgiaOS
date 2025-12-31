@@ -28094,6 +28094,106 @@ pub fn cmd_perfmon(args: &[&str]) {
     }
 }
 
+/// ARBITER command - show resource arbiter information
+pub fn cmd_arbiter(args: &[&str]) {
+    use crate::arb;
+
+    if args.iter().any(|a| *a == "/?") {
+        outln!("ARBITER - Resource Arbiter Viewer");
+        outln!("");
+        outln!("Usage: arbiter [port | memory | irq | dma | bus]");
+        outln!("");
+        outln!("  (no args)  Show overall arbiter statistics");
+        outln!("  port       Show I/O port allocations");
+        outln!("  memory     Show memory range allocations");
+        outln!("  irq        Show IRQ allocations");
+        outln!("  dma        Show DMA channel allocations");
+        outln!("  bus        Show bus number allocations");
+        return;
+    }
+
+    let subcmd = if !args.is_empty() { args[0].to_ascii_lowercase() } else { "".into() };
+
+    if subcmd == "port" {
+        outln!("I/O Port Allocations:");
+        outln!("");
+        let ranges = arb::arbiter::list_ranges(arb::ResourceType::Port);
+        for range in ranges {
+            outln!("  {:#06x}-{:#06x}  attr={:#04x}  owner={:#x}",
+                range.start, range.end, range.attributes, range.owner);
+        }
+        outln!("");
+        outln!("Total: {} ranges allocated", arb::arbiter::get_port_range_count());
+    } else if subcmd == "memory" || subcmd == "mem" {
+        outln!("Memory Range Allocations:");
+        outln!("");
+        let ranges = arb::arbiter::list_ranges(arb::ResourceType::Memory);
+        for range in ranges {
+            outln!("  {:#010x}-{:#010x}  attr={:#04x}  owner={:#x}",
+                range.start, range.end, range.attributes, range.owner);
+        }
+        outln!("");
+        outln!("Total: {} ranges allocated", arb::arbiter::get_memory_range_count());
+    } else if subcmd == "irq" || subcmd == "interrupt" {
+        outln!("IRQ Allocations:");
+        outln!("");
+        let ranges = arb::arbiter::list_ranges(arb::ResourceType::Interrupt);
+        for range in ranges {
+            if range.start == range.end {
+                outln!("  IRQ {}  attr={:#04x}  owner={:#x}",
+                    range.start, range.attributes, range.owner);
+            } else {
+                outln!("  IRQ {}-{}  attr={:#04x}  owner={:#x}",
+                    range.start, range.end, range.attributes, range.owner);
+            }
+        }
+        outln!("");
+        outln!("Total: {} IRQs allocated", arb::arbiter::get_irq_range_count());
+    } else if subcmd == "dma" {
+        outln!("DMA Channel Allocations:");
+        outln!("");
+        let ranges = arb::arbiter::list_ranges(arb::ResourceType::Dma);
+        for range in ranges {
+            if range.start == range.end {
+                outln!("  DMA {}  attr={:#04x}  owner={:#x}",
+                    range.start, range.attributes, range.owner);
+            } else {
+                outln!("  DMA {}-{}  attr={:#04x}  owner={:#x}",
+                    range.start, range.end, range.attributes, range.owner);
+            }
+        }
+        outln!("");
+        outln!("Total: {} DMA channels allocated", arb::arbiter::get_dma_range_count());
+    } else if subcmd == "bus" {
+        outln!("Bus Number Allocations:");
+        outln!("");
+        let ranges = arb::arbiter::list_ranges(arb::ResourceType::BusNumber);
+        for range in ranges {
+            outln!("  Bus {}-{}  attr={:#04x}  owner={:#x}",
+                range.start, range.end, range.attributes, range.owner);
+        }
+    } else {
+        // Show overall stats
+        let stats = arb::get_stats();
+
+        outln!("Resource Arbiter Subsystem");
+        outln!("==========================");
+        outln!("");
+        outln!("Statistics:");
+        outln!("  Arbiters Registered: {}", stats.arbiters_registered);
+        outln!("  Total Allocations:   {}", stats.total_allocations);
+        outln!("  Conflicts Detected:  {}", stats.conflicts_detected);
+        outln!("");
+        outln!("Resource Usage:");
+        outln!("  I/O Port Ranges:     {}", stats.port_ranges_used);
+        outln!("  Memory Ranges:       {}", stats.memory_ranges_used);
+        outln!("  IRQ Ranges:          {}", stats.irq_ranges_used);
+        outln!("  DMA Ranges:          {}", stats.dma_ranges_used);
+        outln!("");
+        outln!("Use 'arbiter <type>' to see specific allocations.");
+    }
+}
+
 // ============================================================================
 // LOGMAN Command - Performance Logs and Alerts
 // ============================================================================

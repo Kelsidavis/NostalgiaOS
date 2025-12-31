@@ -146,7 +146,7 @@ const HISTORY_SIZE: usize = 32;
 
 /// List of available commands for tab completion
 const COMMANDS: &[&str] = &[
-    "acpi", "apic", "apcq", "arp", "assoc", "at", "attrib",
+    "acpi", "apic", "apcq", "arbiter", "arp", "assoc", "at", "attrib",
     "blocks", "bootcfg", "bt",
     "cacls", "cache", "call", "callback", "cat", "cc", "cd", "change", "chcp", "chkdsk", "choice", "cid", "cipher", "clear", "clip", "cls", "color", "comp", "compact", "convert", "copy", "cp", "cpufeatures", "cpuinfo",
     "date", "daytime", "debug", "defrag", "del", "desc", "descriptor", "devdrv", "dir", "discard", "disk", "diskpart", "dmi", "doskey", "dpcq", "driverquery", "dump", "echo", "echoserv", "endlocal", "erase", "eventcreate", "eventlog", "eventtriggers", "ex", "exception", "exit", "expand", "extrac32",
@@ -1319,6 +1319,9 @@ impl Shell {
         // Traceroute
         } else if eq_ignore_case(cmd, "tracert") || eq_ignore_case(cmd, "traceroute") {
             commands::cmd_tracert(&args[1..argc]);
+        // ARBITER - resource arbiter
+        } else if eq_ignore_case(cmd, "arbiter") {
+            commands::cmd_arbiter(&args[1..argc]);
         // ARP cache
         } else if eq_ignore_case(cmd, "arp") {
             commands::cmd_arp(&args[1..argc]);

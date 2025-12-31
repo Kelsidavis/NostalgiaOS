@@ -63,6 +63,7 @@
 
 // Subsystem modules
 pub mod arch;
+pub mod arb;
 pub mod cc;
 pub mod cm;
 pub mod dbgk;
@@ -358,6 +359,11 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing performance monitoring...");
     perf::init();
     kprintln!("  Performance monitoring initialized");
+
+    // Initialize resource arbiter subsystem
+    kprintln!("  Initializing resource arbiter...");
+    arb::init();
+    kprintln!("  Resource arbiter initialized");
 
     // Initialize object manager
     kprintln!("  Initializing object manager...");
