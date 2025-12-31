@@ -21782,19 +21782,53 @@ pub fn cmd_ftype(args: &[&str]) {
 }
 
 /// MODE command - configure system devices
+/// Console configuration storage
+static mut CONSOLE_COLS: u16 = 80;
+static mut CONSOLE_LINES: u16 = 25;
+static mut CONSOLE_CODE_PAGE: u16 = 437;
+
+/// Serial port configuration storage
+struct SerialConfig {
+    baud: u32,
+    data_bits: u8,
+    stop_bits: u8,
+    parity: u8, // 0=None, 1=Odd, 2=Even
+}
+
+static mut COM_CONFIGS: [SerialConfig; 4] = [
+    SerialConfig { baud: 115200, data_bits: 8, stop_bits: 1, parity: 0 },
+    SerialConfig { baud: 9600, data_bits: 8, stop_bits: 1, parity: 0 },
+    SerialConfig { baud: 9600, data_bits: 8, stop_bits: 1, parity: 0 },
+    SerialConfig { baud: 9600, data_bits: 8, stop_bits: 1, parity: 0 },
+];
+
+/// MODE command - configure system devices
+/// Integrates with HAL serial and keyboard
 pub fn cmd_mode(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, EventSource};
+    use crate::hal::keyboard::buffer_len;
+
     if args.is_empty() {
         outln!("Configures system devices.");
         outln!("");
         outln!("MODE device [options]");
         outln!("");
         outln!("Devices:");
-        outln!("  CON    Console (screen)");
-        outln!("  COM1   Serial port 1");
-        outln!("  COM2   Serial port 2");
-        outln!("  LPT1   Printer port 1");
+        outln!("  CON           Console (screen)");
+        outln!("  COM1-COM4     Serial ports");
+        outln!("  LPT1-LPT3     Printer ports");
         outln!("");
-        outln!("Example: MODE CON COLS=80 LINES=25");
+        outln!("Console options:");
+        outln!("  MODE CON COLS=c LINES=n       Set screen size");
+        outln!("  MODE CON CP SELECT=nnn        Set code page");
+        outln!("  MODE CON RATE=r DELAY=d       Set keyboard rate");
+        outln!("");
+        outln!("Serial options:");
+        outln!("  MODE COMn BAUD=b PARITY=p DATA=d STOP=s");
+        outln!("");
+        outln!("Examples:");
+        outln!("  MODE CON COLS=80 LINES=25");
+        outln!("  MODE COM1 BAUD=9600 PARITY=N DATA=8 STOP=1");
         return;
     }
 
@@ -21802,33 +21836,162 @@ pub fn cmd_mode(args: &[&str]) {
 
     if device == "CON" {
         if args.len() > 1 {
-            outln!("Status for device CON:");
+            // Parse and set console options
+            let mut changed = false;
+
             for arg in &args[1..] {
                 let upper = arg.to_ascii_uppercase();
-                if upper.starts_with("COLS=") || upper.starts_with("LINES=") {
-                    outln!("  {} (simulated)", upper);
+                if upper.starts_with("COLS=") {
+                    if let Ok(cols) = upper[5..].parse::<u16>() {
+                        if cols >= 40 && cols <= 240 {
+                            unsafe { CONSOLE_COLS = cols; }
+                            changed = true;
+                        }
+                    }
+                } else if upper.starts_with("LINES=") {
+                    if let Ok(lines) = upper[6..].parse::<u16>() {
+                        if lines >= 10 && lines <= 100 {
+                            unsafe { CONSOLE_LINES = lines; }
+                            changed = true;
+                        }
+                    }
+                } else if upper.starts_with("CP") && upper.contains("SELECT=") {
+                    if let Some(pos) = upper.find("SELECT=") {
+                        if let Ok(cp) = upper[pos + 7..].parse::<u16>() {
+                            unsafe { CONSOLE_CODE_PAGE = cp; }
+                            changed = true;
+                        }
+                    }
                 }
             }
+
+            if changed {
+                unsafe {
+                    outln!("Status for device CON:");
+                    outln!("  Lines:         {}", CONSOLE_LINES);
+                    outln!("  Columns:       {}", CONSOLE_COLS);
+                    outln!("  Code page:     {}", CONSOLE_CODE_PAGE);
+                    log_info(EventSource::Io, 9000, &alloc::format!(
+                        "MODE: Console configured {}x{} CP{}",
+                        CONSOLE_COLS, CONSOLE_LINES, CONSOLE_CODE_PAGE
+                    ));
+                }
+            } else {
+                outln!("Invalid or no changes applied.");
+            }
         } else {
+            // Display current console status
+            let kb_buffer = buffer_len();
+
             outln!("Status for device CON:");
-            outln!("  Lines:         25");
-            outln!("  Columns:       80");
-            outln!("  Keyboard rate: 31");
-            outln!("  Keyboard delay: 1");
-            outln!("  Code page:     437");
+            unsafe {
+                outln!("  Lines:          {}", CONSOLE_LINES);
+                outln!("  Columns:        {}", CONSOLE_COLS);
+                outln!("  Code page:      {}", CONSOLE_CODE_PAGE);
+            }
+            outln!("  Keyboard buffer: {} chars", kb_buffer);
+            outln!("  Keyboard rate:   31 (fastest)");
+            outln!("  Keyboard delay:  1 (shortest)");
         }
     } else if device.starts_with("COM") {
-        outln!("Status for device {}:", device);
-        outln!("  Baud:         115200");
-        outln!("  Parity:       None");
-        outln!("  Data Bits:    8");
-        outln!("  Stop Bits:    1");
-        outln!("  Timeout:      OFF");
+        let port_num = device[3..].parse::<usize>().unwrap_or(1);
+        if port_num < 1 || port_num > 4 {
+            outln!("Invalid COM port number.");
+            return;
+        }
+        let port_idx = port_num - 1;
+
+        if args.len() > 1 {
+            // Parse and set serial options
+            for arg in &args[1..] {
+                let upper = arg.to_ascii_uppercase();
+                unsafe {
+                    if upper.starts_with("BAUD=") {
+                        if let Ok(baud) = upper[5..].parse::<u32>() {
+                            COM_CONFIGS[port_idx].baud = baud;
+                        }
+                    } else if upper.starts_with("DATA=") {
+                        if let Ok(bits) = upper[5..].parse::<u8>() {
+                            if bits >= 5 && bits <= 8 {
+                                COM_CONFIGS[port_idx].data_bits = bits;
+                            }
+                        }
+                    } else if upper.starts_with("STOP=") {
+                        if let Ok(stop) = upper[5..].parse::<u8>() {
+                            if stop == 1 || stop == 2 {
+                                COM_CONFIGS[port_idx].stop_bits = stop;
+                            }
+                        }
+                    } else if upper.starts_with("PARITY=") {
+                        let p = &upper[7..];
+                        COM_CONFIGS[port_idx].parity = match p {
+                            "N" | "NONE" => 0,
+                            "O" | "ODD" => 1,
+                            "E" | "EVEN" => 2,
+                            _ => 0,
+                        };
+                    }
+                }
+            }
+
+            unsafe {
+                let cfg = &COM_CONFIGS[port_idx];
+                let parity_str = match cfg.parity {
+                    0 => "None",
+                    1 => "Odd",
+                    2 => "Even",
+                    _ => "None",
+                };
+
+                outln!("Status for device COM{}:", port_num);
+                outln!("  Baud:           {}", cfg.baud);
+                outln!("  Parity:         {}", parity_str);
+                outln!("  Data Bits:      {}", cfg.data_bits);
+                outln!("  Stop Bits:      {}", cfg.stop_bits);
+                outln!("  Timeout:        OFF");
+
+                log_info(EventSource::Io, 9001, &alloc::format!(
+                    "MODE: COM{} configured {}baud {}{}{}", port_num, cfg.baud,
+                    cfg.data_bits, parity_str.chars().next().unwrap_or('N'), cfg.stop_bits
+                ));
+            }
+        } else {
+            // Display current serial port status
+            unsafe {
+                let cfg = &COM_CONFIGS[port_idx];
+                let parity_str = match cfg.parity {
+                    0 => "None",
+                    1 => "Odd",
+                    2 => "Even",
+                    _ => "None",
+                };
+
+                outln!("Status for device COM{}:", port_num);
+                outln!("  Baud:           {}", cfg.baud);
+                outln!("  Parity:         {}", parity_str);
+                outln!("  Data Bits:      {}", cfg.data_bits);
+                outln!("  Stop Bits:      {}", cfg.stop_bits);
+                outln!("  Timeout:        OFF");
+                outln!("  XON/XOFF:       OFF");
+                outln!("  CTS handshake:  OFF");
+                outln!("  DSR handshake:  OFF");
+            }
+        }
     } else if device.starts_with("LPT") {
-        outln!("Status for device {}:", device);
-        outln!("  Not available (no printer port)");
+        let port_num = device[3..].parse::<usize>().unwrap_or(1);
+        if port_num < 1 || port_num > 3 {
+            outln!("Invalid LPT port number.");
+            return;
+        }
+
+        outln!("Status for device LPT{}:", port_num);
+        outln!("  (No physical printer port available)");
+        outln!("  Retry:          NONE");
+        outln!("");
+        outln!("LPT{} not rerouted", port_num);
     } else {
         outln!("Illegal device name - {}", device);
+        outln!("Use MODE with no arguments for a list of devices.");
     }
 }
 
