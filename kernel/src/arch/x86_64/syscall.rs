@@ -12444,7 +12444,7 @@ fn sys_lock_virtual_memory(
     _: usize, _: usize,
 ) -> isize {
     use crate::mm::{
-        mm_virtual_to_physical, mm_get_cr3, mm_lock_pages,
+        mm_virtual_to_physical, mm_get_cr3, mm_lock_pages, mm_unlock_physical_pages,
         PAGE_SIZE,
         address::{probe_for_write, is_valid_user_range},
     };
@@ -12505,7 +12505,7 @@ fn sys_lock_virtual_memory(
                     for j in 0..i {
                         let prev_virt = page_base + (j * PAGE_SIZE);
                         if let Some(prev_phys) = mm_virtual_to_physical(cr3, prev_virt as u64) {
-                            crate::mm::mm_unlock_pages(prev_phys, 1);
+                            mm_unlock_physical_pages(prev_phys, 1);
                         }
                     }
                     return STATUS_INSUFFICIENT_RESOURCES;
@@ -12515,7 +12515,7 @@ fn sys_lock_virtual_memory(
                 for j in 0..i {
                     let prev_virt = page_base + (j * PAGE_SIZE);
                     if let Some(prev_phys) = mm_virtual_to_physical(cr3, prev_virt as u64) {
-                        crate::mm::mm_unlock_pages(prev_phys, 1);
+                        mm_unlock_physical_pages(prev_phys, 1);
                     }
                 }
                 return STATUS_ACCESS_VIOLATION;
@@ -12548,7 +12548,7 @@ fn sys_unlock_virtual_memory(
     _: usize, _: usize,
 ) -> isize {
     use crate::mm::{
-        mm_virtual_to_physical, mm_get_cr3, mm_unlock_pages,
+        mm_virtual_to_physical, mm_get_cr3, mm_unlock_physical_pages,
         PAGE_SIZE,
         address::{probe_for_write, is_valid_user_range},
     };
@@ -12603,7 +12603,7 @@ fn sys_unlock_virtual_memory(
             // Translate virtual address to physical
             if let Some(phys_addr) = mm_virtual_to_physical(cr3, virt_addr as u64) {
                 // Unlock this page
-                mm_unlock_pages(phys_addr, 1);
+                mm_unlock_physical_pages(phys_addr, 1);
             }
             // Note: We silently skip unmapped pages during unlock (unlike lock)
         }

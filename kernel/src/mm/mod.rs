@@ -30,6 +30,7 @@ pub mod physical;
 pub mod user;
 pub mod section;
 pub mod tlb;
+pub mod mdl;
 
 // Re-export PFN types
 pub use pfn::{
@@ -171,7 +172,7 @@ pub use physical::{
     mm_free_large_page,
     mm_parse_memory_map,
     mm_lock_pages,
-    mm_unlock_pages,
+    mm_unlock_pages as mm_unlock_physical_pages,
 };
 
 // Re-export user mode types
@@ -231,6 +232,37 @@ pub use tlb::{
     tlb_shootdown_all,
     tlb_shootdown_handler,
     get_shootdown_stats,
+};
+
+// Re-export MDL types
+pub use mdl::{
+    Mdl,
+    MdlStats,
+    LockOperation,
+    MemoryCachingType,
+    // MDL flags
+    MDL_MAPPED_TO_SYSTEM_VA,
+    MDL_PAGES_LOCKED,
+    MDL_SOURCE_IS_NONPAGED_POOL,
+    MDL_ALLOCATED_FIXED_SIZE,
+    MDL_PARTIAL,
+    MDL_WRITE_OPERATION,
+    MDL_IO_SPACE,
+    MDL_MAPPING_CAN_FAIL,
+    // MDL functions
+    mm_size_of_mdl,
+    io_allocate_mdl,
+    io_free_mdl,
+    mm_initialize_mdl,
+    mm_probe_and_lock_pages,
+    mm_unlock_pages,
+    mm_map_locked_pages,
+    mm_unmap_locked_pages,
+    io_build_partial_mdl,
+    mm_get_mdl_byte_count,
+    mm_get_mdl_byte_offset,
+    mm_get_mdl_virtual_address,
+    get_mdl_stats,
 };
 
 /// Initialize the Memory Manager

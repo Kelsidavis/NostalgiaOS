@@ -33299,3 +33299,143 @@ pub fn cmd_fsrtl(args: &[&str]) {
         outln!("Use 'fsrtl' for usage information");
     }
 }
+
+// ============================================================================
+// MDL (Memory Descriptor List) Command
+// ============================================================================
+
+/// MDL diagnostic command
+pub fn cmd_mdl(args: &[&str]) {
+    use crate::mm::mdl;
+
+    if args.is_empty() {
+        outln!("Memory Descriptor List (MDL) Subsystem");
+        outln!("=======================================");
+        outln!("");
+        outln!("Usage: mdl <command>");
+        outln!("");
+        outln!("Commands:");
+        outln!("  stats       Show MDL statistics");
+        outln!("  info        Show MDL architecture overview");
+        outln!("  test        Run MDL allocation test");
+        outln!("");
+        outln!("MDLs are used for Direct I/O, DMA, and locked page management.");
+        return;
+    }
+
+    let cmd = args[0];
+
+    if eq_ignore_case(cmd, "stats") {
+        let stats = mdl::get_mdl_stats();
+
+        outln!("MDL Statistics");
+        outln!("==============");
+        outln!("");
+        outln!("Allocation:");
+        outln!("  Total Allocated:   {}", stats.allocated);
+        outln!("  Total Freed:       {}", stats.freed);
+        outln!("  Currently In Use:  {}", stats.in_use);
+        outln!("  Peak Usage:        {}", stats.peak_usage);
+        outln!("");
+        outln!("Page Locking:");
+        outln!("  Pages Locked:      {}", stats.pages_locked);
+        outln!("  Pages Unlocked:    {}", stats.pages_unlocked);
+        outln!("  Currently Locked:  {}", stats.pages_locked.saturating_sub(stats.pages_unlocked));
+        outln!("");
+        outln!("System Mappings:");
+        outln!("  Mappings Created:  {}", stats.system_mappings);
+        outln!("  Mappings Removed:  {}", stats.system_unmappings);
+        outln!("  Active Mappings:   {}", stats.system_mappings.saturating_sub(stats.system_unmappings));
+
+    } else if eq_ignore_case(cmd, "info") {
+        outln!("MDL Architecture Overview");
+        outln!("=========================");
+        outln!("");
+        outln!("Purpose:");
+        outln!("  MDLs (Memory Descriptor Lists) describe physical pages backing");
+        outln!("  a virtual memory buffer. Used for Direct I/O and DMA transfers.");
+        outln!("");
+        outln!("Structure:");
+        outln!("  ┌────────────────────────┐");
+        outln!("  │ MDL Header             │");
+        outln!("  │  - Next (chain ptr)    │");
+        outln!("  │  - Size                │");
+        outln!("  │  - MdlFlags            │");
+        outln!("  │  - Process             │");
+        outln!("  │  - MappedSystemVa      │");
+        outln!("  │  - StartVa             │");
+        outln!("  │  - ByteCount           │");
+        outln!("  │  - ByteOffset          │");
+        outln!("  ├────────────────────────┤");
+        outln!("  │ PFN[0]                 │");
+        outln!("  │ PFN[1]                 │");
+        outln!("  │ ...                    │");
+        outln!("  │ PFN[n]                 │");
+        outln!("  └────────────────────────┘");
+        outln!("");
+        outln!("Key Flags:");
+        outln!("  MDL_MAPPED_TO_SYSTEM_VA     0x0001  Mapped to system space");
+        outln!("  MDL_PAGES_LOCKED            0x0002  Pages are locked in memory");
+        outln!("  MDL_SOURCE_IS_NONPAGED_POOL 0x0004  Source is nonpaged pool");
+        outln!("  MDL_PARTIAL                 0x0010  This is a partial MDL");
+        outln!("  MDL_WRITE_OPERATION         0x0080  Write operation");
+        outln!("  MDL_IO_SPACE                0x0800  Pages in I/O space");
+        outln!("");
+        outln!("Key Functions:");
+        outln!("  IoAllocateMdl       Allocate MDL for a buffer");
+        outln!("  IoFreeMdl           Free an MDL");
+        outln!("  MmProbeAndLockPages Lock pages and fill PFN array");
+        outln!("  MmUnlockPages       Unlock pages");
+        outln!("  MmMapLockedPages    Map to system address space");
+        outln!("  MmUnmapLockedPages  Unmap from system space");
+        outln!("  IoBuildPartialMdl   Build partial MDL from existing");
+
+    } else if eq_ignore_case(cmd, "test") {
+        outln!("MDL Allocation Test");
+        outln!("===================");
+        outln!("");
+
+        // Test 1: Size calculation
+        let test_addr = 0x1000_usize;
+        let test_len = 0x3000_u32; // 3 pages
+        let mdl_size = mdl::mm_size_of_mdl(test_addr, test_len);
+        outln!("Test 1: Size Calculation");
+        outln!("  Buffer: 0x{:x}, Length: {} bytes", test_addr, test_len);
+        outln!("  MDL size needed: {} bytes", mdl_size);
+        outln!("");
+
+        // Test 2: Allocate and free MDL
+        outln!("Test 2: Allocate/Free MDL");
+        let mdl_ptr = mdl::io_allocate_mdl(test_addr, test_len, false, false, 0);
+        if mdl_ptr.is_null() {
+            outln!("  FAILED: Could not allocate MDL");
+        } else {
+            outln!("  SUCCESS: MDL allocated at {:p}", mdl_ptr);
+
+            // Read MDL info
+            unsafe {
+                let mdl_ref = &*mdl_ptr;
+                outln!("  MDL StartVa:    0x{:x}", mdl_ref.start_va);
+                outln!("  MDL ByteCount:  {}", mdl_ref.byte_count);
+                outln!("  MDL ByteOffset: {}", mdl_ref.byte_offset);
+                outln!("  MDL Flags:      0x{:04x}", mdl_ref.mdl_flags);
+
+                // Free it
+                mdl::io_free_mdl(mdl_ptr);
+                outln!("  MDL freed successfully");
+            }
+        }
+        outln!("");
+
+        // Show updated stats
+        let stats = mdl::get_mdl_stats();
+        outln!("Updated Stats:");
+        outln!("  Allocated: {}, Freed: {}, In Use: {}", stats.allocated, stats.freed, stats.in_use);
+        outln!("");
+        outln!("Test complete.");
+
+    } else {
+        outln!("Unknown mdl command: {}", cmd);
+        outln!("Use 'mdl' for usage information");
+    }
+}

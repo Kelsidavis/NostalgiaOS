@@ -1661,6 +1661,27 @@ impl Shell {
         // PRNQCTL - printer queue control
         } else if eq_ignore_case(cmd, "prnqctl") {
             commands::cmd_prnqctl(&args[1..argc]);
+        // LPC - Local Procedure Call
+        } else if eq_ignore_case(cmd, "lpc") {
+            commands::cmd_lpc(&args[1..argc]);
+        // ETW - Event Tracing for Windows
+        } else if eq_ignore_case(cmd, "etw") {
+            commands::cmd_etw(&args[1..argc]);
+        // PNP - Plug and Play
+        } else if eq_ignore_case(cmd, "pnp") {
+            commands::cmd_pnp(&args[1..argc]);
+        // WMI - Windows Management Instrumentation
+        } else if eq_ignore_case(cmd, "wmi") {
+            commands::cmd_wmi(&args[1..argc]);
+        // KDINFO - Kernel Debugger info
+        } else if eq_ignore_case(cmd, "kdinfo") {
+            commands::cmd_kdinfo(&args[1..argc]);
+        // FSRTL - File System Runtime Library
+        } else if eq_ignore_case(cmd, "fsrtl") {
+            commands::cmd_fsrtl(&args[1..argc]);
+        // MDL - Memory Descriptor List
+        } else if eq_ignore_case(cmd, "mdl") {
+            commands::cmd_mdl(&args[1..argc]);
         } else {
             serial_println!("'{}' is not recognized as a command.", args[0]);
             serial_println!("Type 'help' for available commands.");
