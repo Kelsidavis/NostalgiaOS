@@ -453,6 +453,11 @@ fn phase1_init(boot_info: &BootInfo) {
     ex::harderr::exp_harderr_init();
     kprintln!("  Hard error subsystem initialized");
 
+    // Initialize Non-Blocking Queue subsystem
+    kprintln!("  Initializing non-blocking queue subsystem...");
+    ex::nbqueue::exp_nbqueue_init();
+    kprintln!("  Non-blocking queue subsystem initialized");
+
     // Initialize Service Control Manager
     kprintln!("  Initializing Service Control Manager...");
     svc::scm_initialize();

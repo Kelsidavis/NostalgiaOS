@@ -32158,3 +32158,134 @@ fn enable_error_handler() {
         }
     }
 }
+
+// =============================================================================
+// Non-Blocking Queue Command
+// =============================================================================
+
+pub fn cmd_nbqueue(args: &[&str]) {
+    if args.is_empty() {
+        show_nbqueue_status();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "status") {
+        show_nbqueue_status();
+    } else if eq_ignore_ascii_case(subcmd, "test") {
+        test_nbqueue(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("nbqueue - Non-Blocking Queue");
+        outln!("");
+        outln!("Usage: nbqueue [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  status       - Show NBQueue status (default)");
+        outln!("  test [n]     - Run queue test with n operations");
+        outln!("");
+        outln!("Non-blocking queues provide lock-free FIFO operations");
+        outln!("using compare-and-swap atomics. Suitable for high-");
+        outln!("performance multi-producer/multi-consumer scenarios.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'nbqueue help' for usage information");
+    }
+}
+
+fn show_nbqueue_status() {
+    use crate::ex;
+
+    outln!("Non-Blocking Queue Status");
+    outln!("=========================");
+    outln!("");
+
+    let stats = ex::exp_nbqueue_get_stats();
+
+    outln!("Global Statistics:");
+    outln!("  Active Queues:   {}", stats.0);
+    outln!("  Total Inserts:   {}", stats.1);
+    outln!("  Total Removes:   {}", stats.2);
+}
+
+fn test_nbqueue(args: &[&str]) {
+    use crate::ex;
+
+    let count: usize = if args.is_empty() {
+        100
+    } else {
+        args[0].parse().unwrap_or(100)
+    };
+
+    outln!("Testing non-blocking queue with {} operations...", count);
+    outln!("");
+
+    // Create a test queue
+    let queue = match ex::ex_initialize_nbqueue(count + 16) {
+        Some(q) => q,
+        None => {
+            outln!("Failed to create queue");
+            return;
+        }
+    };
+
+    outln!("Queue created with {} node pool", count + 16);
+
+    // Insert values
+    outln!("Inserting {} values...", count);
+    for i in 0..count {
+        if !queue.insert_tail(i as u64) {
+            outln!("  Insert failed at {}", i);
+            break;
+        }
+    }
+
+    let stats = queue.statistics();
+    outln!("After inserts:");
+    outln!("  Active nodes:  {}", stats.active_nodes);
+    outln!("  CAS failures:  {}", stats.cas_failures);
+
+    // Verify values come out in order
+    outln!("");
+    outln!("Removing values...");
+    let mut success = true;
+    let mut removed = 0;
+
+    for i in 0..count {
+        match queue.remove_head() {
+            Some(v) => {
+                if v != i as u64 {
+                    outln!("  Mismatch at {}: expected {}, got {}", i, i, v);
+                    success = false;
+                }
+                removed += 1;
+            }
+            None => {
+                outln!("  Unexpected empty at {}", i);
+                success = false;
+                break;
+            }
+        }
+    }
+
+    // Verify queue is empty
+    if queue.remove_head().is_some() {
+        outln!("  Queue not empty after removing all items");
+        success = false;
+    }
+
+    let final_stats = queue.statistics();
+    outln!("");
+    outln!("Final Statistics:");
+    outln!("  Inserts:       {}", final_stats.inserts);
+    outln!("  Removes:       {}", final_stats.removes);
+    outln!("  Active nodes:  {}", final_stats.active_nodes);
+    outln!("  CAS failures:  {}", final_stats.cas_failures);
+    outln!("");
+
+    if success && removed == count {
+        outln!("Test PASSED: {} items processed correctly", count);
+    } else {
+        outln!("Test FAILED: only {} of {} items processed", removed, count);
+    }
+}

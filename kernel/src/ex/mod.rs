@@ -36,6 +36,7 @@ pub mod eventlog;
 pub mod profile;
 pub mod atom;
 pub mod harderr;
+pub mod nbqueue;
 // pub mod pool;      // Uses mm::pool
 // pub mod timer;     // Uses ke::timer
 
@@ -53,3 +54,4 @@ pub use worker::*;
 pub use profile::*;
 pub use atom::*;
 pub use harderr::*;
+pub use nbqueue::*;
