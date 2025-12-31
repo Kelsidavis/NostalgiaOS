@@ -28145,28 +28145,188 @@ pub fn cmd_print(args: &[&str]) {
 // ============================================================================
 
 /// PRNCNFG command - printer configuration
+/// Uses printer storage to display and modify printer configuration
 pub fn cmd_prncnfg(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    init_default_printers();
+    init_default_drivers();
+    init_default_ports();
+
     if args.is_empty() || args.iter().any(|a| *a == "/?") {
         outln!("Configures or displays configuration information about a printer.");
         outln!("");
-        outln!("Usage: prncnfg -g|s|x [-S server] [-P printer] [-u username]");
-        outln!("               [-w password]");
+        outln!("Usage: prncnfg -g|s|x [-S server] [-P printer] [-m driver]");
+        outln!("               [-r port] [-z comment] [-l location]");
         outln!("");
         outln!("  -g     Display configuration information.");
         outln!("  -s     Set configuration information.");
         outln!("  -x     Renames a printer.");
         outln!("  -S     Specifies the name of the remote server.");
         outln!("  -P     Specifies the printer name.");
-        outln!("  -u     Specifies the user account under which to run.");
-        outln!("  -w     Specifies the password for the user account.");
+        outln!("  -m     Specifies the driver name.");
+        outln!("  -r     Specifies the port name.");
+        outln!("  -z     Specifies the comment.");
+        outln!("  -l     Specifies the location.");
         return;
     }
 
-    outln!("Operation successful");
+    let cmd = args[0];
+    let mut printer_name = "";
+    let mut new_driver = "";
+    let mut new_port = "";
+    let mut new_name = "";
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i] {
+            "-P" if i + 1 < args.len() => { printer_name = args[i + 1]; i += 2; }
+            "-m" if i + 1 < args.len() => { new_driver = args[i + 1]; i += 2; }
+            "-r" if i + 1 < args.len() => { new_port = args[i + 1]; i += 2; }
+            "-x" if i + 1 < args.len() => { new_name = args[i + 1]; i += 2; }
+            _ => { i += 1; }
+        }
+    }
+
+    match cmd {
+        "-g" => {
+            // Display configuration
+            if printer_name.is_empty() {
+                // Show all printers config
+                outln!("Server name \\\\NOSTALGOS");
+                outln!("");
+                unsafe {
+                    for printer in PRINTERS.iter() {
+                        if printer.active {
+                            outln!("Printer name  {}", printer.get_name());
+                            outln!("Driver name   {}", printer.get_driver());
+                            outln!("Port name     {}", printer.get_port());
+                            outln!("Shared        No");
+                            outln!("Status        {}", if printer.paused { "Paused" } else { "Ready" });
+                            outln!("Jobs printed  {}", printer.jobs_printed);
+                            outln!("");
+                        }
+                    }
+                }
+            } else {
+                // Show specific printer config
+                unsafe {
+                    for printer in PRINTERS.iter() {
+                        if printer.active && eq_ignore_case(printer.get_name(), printer_name) {
+                            outln!("Server name   \\\\NOSTALGOS");
+                            outln!("Printer name  {}", printer.get_name());
+                            outln!("Driver name   {}", printer.get_driver());
+                            outln!("Port name     {}", printer.get_port());
+                            outln!("Shared        No");
+                            outln!("Share name    ");
+                            outln!("Comment       ");
+                            outln!("Location      ");
+                            outln!("Separator file");
+                            outln!("Print processor  winprint");
+                            outln!("Data type     RAW");
+                            outln!("Priority      1");
+                            outln!("Default priority  0");
+                            outln!("Start time    00:00");
+                            outln!("Until time    00:00");
+                            outln!("Status        {}", if printer.paused { "Paused" } else { "Ready" });
+                            outln!("Jobs printed  {}", printer.jobs_printed);
+                            return;
+                        }
+                    }
+                    outln!("Unable to find printer: {}", printer_name);
+                }
+            }
+        }
+        "-s" => {
+            // Set configuration
+            if printer_name.is_empty() {
+                outln!("ERROR: Printer name required (-P)");
+                return;
+            }
+
+            unsafe {
+                for printer in PRINTERS.iter_mut() {
+                    if printer.active && eq_ignore_case(printer.get_name(), printer_name) {
+                        let mut changed = false;
+
+                        if !new_driver.is_empty() {
+                            let driver_bytes = new_driver.as_bytes();
+                            let len = driver_bytes.len().min(32);
+                            printer.driver[..len].copy_from_slice(&driver_bytes[..len]);
+                            printer.driver_len = len;
+                            changed = true;
+                            outln!("Driver changed to: {}", new_driver);
+                        }
+
+                        if !new_port.is_empty() {
+                            let port_bytes = new_port.as_bytes();
+                            let len = port_bytes.len().min(16);
+                            printer.port[..len].copy_from_slice(&port_bytes[..len]);
+                            printer.port_len = len;
+                            changed = true;
+                            outln!("Port changed to: {}", new_port);
+                        }
+
+                        if changed {
+                            log_info(EventSource::Io, 8020, &alloc::format!(
+                                "PRNCNFG: Modified printer {}", printer.get_name()
+                            ));
+                            outln!("");
+                            outln!("Configured printer {}", printer.get_name());
+                        } else {
+                            outln!("No changes specified");
+                        }
+                        return;
+                    }
+                }
+                outln!("Unable to find printer: {}", printer_name);
+            }
+        }
+        "-x" => {
+            // Rename printer
+            if printer_name.is_empty() {
+                outln!("ERROR: Printer name required (-P)");
+                return;
+            }
+            if new_name.is_empty() {
+                outln!("ERROR: New name required (-x newname)");
+                return;
+            }
+
+            unsafe {
+                for printer in PRINTERS.iter_mut() {
+                    if printer.active && eq_ignore_case(printer.get_name(), printer_name) {
+                        let old_name = alloc::string::String::from(printer.get_name());
+                        let name_bytes = new_name.as_bytes();
+                        let len = name_bytes.len().min(32);
+                        printer.name = [0u8; 32];
+                        printer.name[..len].copy_from_slice(&name_bytes[..len]);
+                        printer.name_len = len;
+
+                        log_info(EventSource::Io, 8021, &alloc::format!(
+                            "PRNCNFG: Renamed printer {} to {}", old_name, new_name
+                        ));
+                        outln!("Renamed printer {} to {}", old_name, new_name);
+                        return;
+                    }
+                }
+                outln!("Unable to find printer: {}", printer_name);
+            }
+        }
+        _ => {
+            outln!("Invalid option: {}", cmd);
+            outln!("Use prncnfg /? for help");
+        }
+    }
 }
 
 /// PRNDRVR command - printer driver management
+/// Uses driver storage for add/delete/list operations
 pub fn cmd_prndrvr(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+
+    init_default_drivers();
+
     if args.is_empty() || args.iter().any(|a| *a == "/?") {
         outln!("Adds, deletes, and lists printer drivers.");
         outln!("");
@@ -28185,13 +28345,146 @@ pub fn cmd_prndrvr(args: &[&str]) {
     }
 
     let cmd = args[0];
-    if cmd == "-l" {
-        outln!("Printer Driver Name                    Version  Environment");
-        outln!("=====================================  =======  ============");
-        outln!("HP LaserJet 4                          3        Windows NT x86");
-        outln!("Microsoft XPS Document Writer          3        Windows NT x86");
-    } else {
-        outln!("Operation successful");
+    let mut driver_name = "";
+    let mut version: u8 = 3;
+    let mut environment = "Windows NT x86";
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i] {
+            "-m" if i + 1 < args.len() => { driver_name = args[i + 1]; i += 2; }
+            "-v" if i + 1 < args.len() => {
+                version = args[i + 1].parse().unwrap_or(3);
+                i += 2;
+            }
+            "-e" if i + 1 < args.len() => { environment = args[i + 1]; i += 2; }
+            _ => { i += 1; }
+        }
+    }
+
+    match cmd {
+        "-l" => {
+            outln!("Server name \\\\NOSTALGOS");
+            outln!("");
+            outln!("Printer Driver Name                            Version  Environment       In Use");
+            outln!("=============================================  =======  ================  ======");
+            unsafe {
+                let mut count = 0;
+                for driver in PRINTER_DRIVERS.iter() {
+                    if driver.active {
+                        outln!("{:<45}  {:>7}  {:<16}  {}",
+                            driver.get_name(),
+                            driver.version,
+                            driver.get_environment(),
+                            if driver.in_use { "Yes" } else { "No" }
+                        );
+                        count += 1;
+                    }
+                }
+                outln!("");
+                outln!("Total drivers: {}", count);
+            }
+        }
+        "-a" => {
+            if driver_name.is_empty() {
+                outln!("ERROR: Driver name required (-m)");
+                return;
+            }
+
+            unsafe {
+                // Check if already exists
+                for driver in PRINTER_DRIVERS.iter() {
+                    if driver.active && eq_ignore_case(driver.get_name(), driver_name) {
+                        outln!("Driver already exists: {}", driver_name);
+                        return;
+                    }
+                }
+
+                // Find empty slot
+                for driver in PRINTER_DRIVERS.iter_mut() {
+                    if !driver.active {
+                        let name_bytes = driver_name.as_bytes();
+                        let len = name_bytes.len().min(48);
+                        driver.name[..len].copy_from_slice(&name_bytes[..len]);
+                        driver.name_len = len;
+
+                        let env_bytes = environment.as_bytes();
+                        let env_len = env_bytes.len().min(24);
+                        driver.environment[..env_len].copy_from_slice(&env_bytes[..env_len]);
+                        driver.env_len = env_len;
+
+                        driver.version = version;
+                        driver.active = true;
+                        driver.in_use = false;
+
+                        log_info(EventSource::Io, 8030, &alloc::format!(
+                            "PRNDRVR: Added driver {}", driver_name
+                        ));
+                        outln!("Added printer driver: {}", driver_name);
+                        return;
+                    }
+                }
+                outln!("ERROR: Driver table full (max {})", MAX_DRIVERS);
+            }
+        }
+        "-d" => {
+            if driver_name.is_empty() {
+                outln!("ERROR: Driver name required (-m)");
+                return;
+            }
+
+            unsafe {
+                for driver in PRINTER_DRIVERS.iter_mut() {
+                    if driver.active && eq_ignore_case(driver.get_name(), driver_name) {
+                        if driver.in_use {
+                            outln!("Cannot delete driver {} - currently in use", driver_name);
+                            log_warning(EventSource::Io, 8031, &alloc::format!(
+                                "PRNDRVR: Cannot delete in-use driver {}", driver_name
+                            ));
+                            return;
+                        }
+
+                        let name = alloc::string::String::from(driver.get_name());
+                        *driver = PrinterDriverInfo::new();
+
+                        log_info(EventSource::Io, 8032, &alloc::format!(
+                            "PRNDRVR: Deleted driver {}", name
+                        ));
+                        outln!("Deleted printer driver: {}", name);
+                        return;
+                    }
+                }
+                outln!("Driver not found: {}", driver_name);
+            }
+        }
+        "-x" => {
+            // Delete all unused drivers
+            let mut deleted = 0;
+            unsafe {
+                for driver in PRINTER_DRIVERS.iter_mut() {
+                    if driver.active && !driver.in_use {
+                        let name = alloc::string::String::from(driver.get_name());
+                        *driver = PrinterDriverInfo::new();
+                        outln!("Deleted: {}", name);
+                        deleted += 1;
+                    }
+                }
+            }
+
+            if deleted > 0 {
+                log_info(EventSource::Io, 8033, &alloc::format!(
+                    "PRNDRVR: Deleted {} unused drivers", deleted
+                ));
+                outln!("");
+                outln!("Deleted {} unused driver(s)", deleted);
+            } else {
+                outln!("No unused drivers to delete");
+            }
+        }
+        _ => {
+            outln!("Invalid option: {}", cmd);
+            outln!("Use prndrvr /? for help");
+        }
     }
 }
 
@@ -28354,6 +28647,179 @@ impl PrinterInfo {
             paused: false,
             jobs_printed: 0,
         }
+    }
+
+    fn get_name(&self) -> &str {
+        core::str::from_utf8(&self.name[..self.name_len]).unwrap_or("Unknown")
+    }
+
+    fn get_driver(&self) -> &str {
+        core::str::from_utf8(&self.driver[..self.driver_len]).unwrap_or("Unknown")
+    }
+
+    fn get_port(&self) -> &str {
+        core::str::from_utf8(&self.port[..self.port_len]).unwrap_or("Unknown")
+    }
+}
+
+/// Printer driver storage
+const MAX_DRIVERS: usize = 8;
+static mut PRINTER_DRIVERS: [PrinterDriverInfo; MAX_DRIVERS] = [PrinterDriverInfo::new(); MAX_DRIVERS];
+
+#[derive(Clone, Copy)]
+struct PrinterDriverInfo {
+    name: [u8; 48],
+    name_len: usize,
+    version: u8,
+    environment: [u8; 24],
+    env_len: usize,
+    active: bool,
+    in_use: bool,
+}
+
+impl PrinterDriverInfo {
+    const fn new() -> Self {
+        Self {
+            name: [0u8; 48],
+            name_len: 0,
+            version: 3,
+            environment: [0u8; 24],
+            env_len: 0,
+            active: false,
+            in_use: false,
+        }
+    }
+
+    fn get_name(&self) -> &str {
+        core::str::from_utf8(&self.name[..self.name_len]).unwrap_or("Unknown")
+    }
+
+    fn get_environment(&self) -> &str {
+        core::str::from_utf8(&self.environment[..self.env_len]).unwrap_or("Windows NT x86")
+    }
+}
+
+/// Printer port storage
+const MAX_PORTS: usize = 16;
+static mut PRINTER_PORTS: [PrinterPortInfo; MAX_PORTS] = [PrinterPortInfo::new(); MAX_PORTS];
+
+#[derive(Clone, Copy, PartialEq)]
+#[repr(u8)]
+enum PortProtocol {
+    Raw = 0,
+    Lpr = 1,
+    Local = 2,
+}
+
+#[derive(Clone, Copy)]
+struct PrinterPortInfo {
+    name: [u8; 24],
+    name_len: usize,
+    host: [u8; 16],
+    host_len: usize,
+    protocol: PortProtocol,
+    port_number: u16,
+    snmp_enabled: bool,
+    active: bool,
+}
+
+impl PrinterPortInfo {
+    const fn new() -> Self {
+        Self {
+            name: [0u8; 24],
+            name_len: 0,
+            host: [0u8; 16],
+            host_len: 0,
+            protocol: PortProtocol::Local,
+            port_number: 9100,
+            snmp_enabled: false,
+            active: false,
+        }
+    }
+
+    fn get_name(&self) -> &str {
+        core::str::from_utf8(&self.name[..self.name_len]).unwrap_or("Unknown")
+    }
+
+    fn get_host(&self) -> &str {
+        core::str::from_utf8(&self.host[..self.host_len]).unwrap_or("")
+    }
+}
+
+/// Initialize default drivers
+fn init_default_drivers() {
+    unsafe {
+        if PRINTER_DRIVERS[0].active {
+            return;
+        }
+
+        // XPS Document Writer driver
+        let name = b"Microsoft XPS Document Writer";
+        let env = b"Windows NT x86";
+        PRINTER_DRIVERS[0].name[..name.len()].copy_from_slice(name);
+        PRINTER_DRIVERS[0].name_len = name.len();
+        PRINTER_DRIVERS[0].environment[..env.len()].copy_from_slice(env);
+        PRINTER_DRIVERS[0].env_len = env.len();
+        PRINTER_DRIVERS[0].version = 3;
+        PRINTER_DRIVERS[0].active = true;
+        PRINTER_DRIVERS[0].in_use = true;
+
+        // Generic Text driver
+        let name2 = b"Generic / Text Only";
+        PRINTER_DRIVERS[1].name[..name2.len()].copy_from_slice(name2);
+        PRINTER_DRIVERS[1].name_len = name2.len();
+        PRINTER_DRIVERS[1].environment[..env.len()].copy_from_slice(env);
+        PRINTER_DRIVERS[1].env_len = env.len();
+        PRINTER_DRIVERS[1].version = 3;
+        PRINTER_DRIVERS[1].active = true;
+        PRINTER_DRIVERS[1].in_use = true;
+
+        // HP LaserJet driver
+        let name3 = b"HP LaserJet 4";
+        PRINTER_DRIVERS[2].name[..name3.len()].copy_from_slice(name3);
+        PRINTER_DRIVERS[2].name_len = name3.len();
+        PRINTER_DRIVERS[2].environment[..env.len()].copy_from_slice(env);
+        PRINTER_DRIVERS[2].env_len = env.len();
+        PRINTER_DRIVERS[2].version = 3;
+        PRINTER_DRIVERS[2].active = true;
+        PRINTER_DRIVERS[2].in_use = false;
+    }
+}
+
+/// Initialize default ports
+fn init_default_ports() {
+    unsafe {
+        if PRINTER_PORTS[0].active {
+            return;
+        }
+
+        // LPT1 port
+        let name = b"LPT1:";
+        PRINTER_PORTS[0].name[..name.len()].copy_from_slice(name);
+        PRINTER_PORTS[0].name_len = name.len();
+        PRINTER_PORTS[0].protocol = PortProtocol::Local;
+        PRINTER_PORTS[0].active = true;
+
+        // LPT2 port
+        let name2 = b"LPT2:";
+        PRINTER_PORTS[1].name[..name2.len()].copy_from_slice(name2);
+        PRINTER_PORTS[1].name_len = name2.len();
+        PRINTER_PORTS[1].protocol = PortProtocol::Local;
+        PRINTER_PORTS[1].active = true;
+
+        // COM1 port
+        let name3 = b"COM1:";
+        PRINTER_PORTS[2].name[..name3.len()].copy_from_slice(name3);
+        PRINTER_PORTS[2].name_len = name3.len();
+        PRINTER_PORTS[2].protocol = PortProtocol::Local;
+        PRINTER_PORTS[2].active = true;
+
+        // PORTPROMPT
+        let name4 = b"PORTPROMPT:";
+        PRINTER_PORTS[3].name[..name4.len()].copy_from_slice(name4);
+        PRINTER_PORTS[3].name_len = name4.len();
+        PRINTER_PORTS[3].protocol = PortProtocol::Local;
+        PRINTER_PORTS[3].active = true;
     }
 }
 
@@ -28597,32 +29063,209 @@ pub fn cmd_prnmngr(args: &[&str]) {
 }
 
 /// PRNPORT command - printer port management
+/// Uses port storage for add/delete/list operations
 pub fn cmd_prnport(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    init_default_ports();
+
     if args.is_empty() || args.iter().any(|a| *a == "/?") {
         outln!("Creates, deletes, and lists standard TCP/IP printer ports.");
         outln!("");
         outln!("Usage: prnport -a|d|l|g [-S server] [-r port] [-h IPaddress]");
-        outln!("               [-o protocol] [-n SNMP] [-u username] [-w password]");
+        outln!("               [-o protocol] [-q portnumber] [-n snmp]");
         outln!("");
         outln!("  -a     Adds a standard TCP/IP printer port.");
         outln!("  -d     Deletes a standard TCP/IP printer port.");
-        outln!("  -l     Lists all standard TCP/IP printer ports.");
-        outln!("  -g     Displays the configuration of a standard TCP/IP printer port.");
+        outln!("  -l     Lists all printer ports.");
+        outln!("  -g     Displays the configuration of a printer port.");
         outln!("  -S     Specifies the name of the remote server.");
         outln!("  -r     Specifies the port name.");
-        outln!("  -h     Specifies the IP address.");
+        outln!("  -h     Specifies the IP address/host.");
         outln!("  -o     Specifies the protocol (RAW or LPR).");
-        outln!("  -n     Specifies the SNMP community name.");
+        outln!("  -q     Specifies the port number (default 9100).");
+        outln!("  -n     Enables SNMP (yes/no).");
         return;
     }
 
     let cmd = args[0];
-    if cmd == "-l" {
-        outln!("Server name \\\\NOSTALGOS");
-        outln!("Port name  Host address    Protocol  Port Number  SNMP Enabled  SNMP Community");
-        outln!("=========  ==============  ========  ===========  ============  ==============");
-    } else {
-        outln!("Operation successful");
+    let mut port_name = "";
+    let mut host = "";
+    let mut protocol = "RAW";
+    let mut port_number: u16 = 9100;
+    let mut snmp = false;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i] {
+            "-r" if i + 1 < args.len() => { port_name = args[i + 1]; i += 2; }
+            "-h" if i + 1 < args.len() => { host = args[i + 1]; i += 2; }
+            "-o" if i + 1 < args.len() => { protocol = args[i + 1]; i += 2; }
+            "-q" if i + 1 < args.len() => {
+                port_number = args[i + 1].parse().unwrap_or(9100);
+                i += 2;
+            }
+            "-n" if i + 1 < args.len() => {
+                snmp = args[i + 1].eq_ignore_ascii_case("yes");
+                i += 2;
+            }
+            _ => { i += 1; }
+        }
+    }
+
+    match cmd {
+        "-l" => {
+            outln!("Server name \\\\NOSTALGOS");
+            outln!("");
+            outln!("Port Name         Host Address     Protocol  Port   SNMP");
+            outln!("================  ===============  ========  =====  ====");
+            unsafe {
+                let mut count = 0;
+                for port in PRINTER_PORTS.iter() {
+                    if port.active {
+                        let proto_str = match port.protocol {
+                            PortProtocol::Raw => "RAW",
+                            PortProtocol::Lpr => "LPR",
+                            PortProtocol::Local => "Local",
+                        };
+                        let host_str = port.get_host();
+                        let port_num = if port.protocol == PortProtocol::Local {
+                            alloc::string::String::from("-")
+                        } else {
+                            alloc::format!("{}", port.port_number)
+                        };
+
+                        outln!("{:<16}  {:<15}  {:<8}  {:>5}  {}",
+                            port.get_name(),
+                            if host_str.is_empty() { "-" } else { host_str },
+                            proto_str,
+                            port_num,
+                            if port.snmp_enabled { "Yes" } else { "No" }
+                        );
+                        count += 1;
+                    }
+                }
+                outln!("");
+                outln!("Total ports: {}", count);
+            }
+        }
+        "-g" => {
+            if port_name.is_empty() {
+                outln!("ERROR: Port name required (-r)");
+                return;
+            }
+
+            unsafe {
+                for port in PRINTER_PORTS.iter() {
+                    if port.active && eq_ignore_case(port.get_name(), port_name) {
+                        outln!("Server name   \\\\NOSTALGOS");
+                        outln!("Port name     {}", port.get_name());
+                        let proto_str = match port.protocol {
+                            PortProtocol::Raw => "RAW",
+                            PortProtocol::Lpr => "LPR",
+                            PortProtocol::Local => "Local",
+                        };
+                        outln!("Protocol      {}", proto_str);
+                        if port.protocol != PortProtocol::Local {
+                            outln!("Host address  {}", port.get_host());
+                            outln!("Port number   {}", port.port_number);
+                        }
+                        outln!("SNMP enabled  {}", if port.snmp_enabled { "Yes" } else { "No" });
+                        return;
+                    }
+                }
+                outln!("Port not found: {}", port_name);
+            }
+        }
+        "-a" => {
+            if port_name.is_empty() {
+                outln!("ERROR: Port name required (-r)");
+                return;
+            }
+            if host.is_empty() {
+                outln!("ERROR: Host address required (-h)");
+                return;
+            }
+
+            unsafe {
+                // Check if already exists
+                for port in PRINTER_PORTS.iter() {
+                    if port.active && eq_ignore_case(port.get_name(), port_name) {
+                        outln!("Port already exists: {}", port_name);
+                        return;
+                    }
+                }
+
+                // Find empty slot
+                for port in PRINTER_PORTS.iter_mut() {
+                    if !port.active {
+                        let name_bytes = port_name.as_bytes();
+                        let len = name_bytes.len().min(24);
+                        port.name[..len].copy_from_slice(&name_bytes[..len]);
+                        port.name_len = len;
+
+                        let host_bytes = host.as_bytes();
+                        let host_len = host_bytes.len().min(16);
+                        port.host[..host_len].copy_from_slice(&host_bytes[..host_len]);
+                        port.host_len = host_len;
+
+                        port.protocol = if protocol.eq_ignore_ascii_case("LPR") {
+                            PortProtocol::Lpr
+                        } else {
+                            PortProtocol::Raw
+                        };
+                        port.port_number = port_number;
+                        port.snmp_enabled = snmp;
+                        port.active = true;
+
+                        log_info(EventSource::Io, 8040, &alloc::format!(
+                            "PRNPORT: Added port {} -> {}:{}", port_name, host, port_number
+                        ));
+                        outln!("Added printer port: {}", port_name);
+                        outln!("  Host: {}", host);
+                        outln!("  Port: {}", port_number);
+                        outln!("  Protocol: {}", protocol);
+                        return;
+                    }
+                }
+                outln!("ERROR: Port table full (max {})", MAX_PORTS);
+            }
+        }
+        "-d" => {
+            if port_name.is_empty() {
+                outln!("ERROR: Port name required (-r)");
+                return;
+            }
+
+            unsafe {
+                for port in PRINTER_PORTS.iter_mut() {
+                    if port.active && eq_ignore_case(port.get_name(), port_name) {
+                        // Check if port is in use by any printer
+                        for printer in PRINTERS.iter() {
+                            if printer.active && eq_ignore_case(printer.get_port(), port_name) {
+                                outln!("Cannot delete port {} - in use by printer {}",
+                                    port_name, printer.get_name());
+                                return;
+                            }
+                        }
+
+                        let name = alloc::string::String::from(port.get_name());
+                        *port = PrinterPortInfo::new();
+
+                        log_info(EventSource::Io, 8041, &alloc::format!(
+                            "PRNPORT: Deleted port {}", name
+                        ));
+                        outln!("Deleted printer port: {}", name);
+                        return;
+                    }
+                }
+                outln!("Port not found: {}", port_name);
+            }
+        }
+        _ => {
+            outln!("Invalid option: {}", cmd);
+            outln!("Use prnport /? for help");
+        }
     }
 }
 
