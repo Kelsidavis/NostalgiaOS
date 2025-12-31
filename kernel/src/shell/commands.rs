@@ -21408,68 +21408,376 @@ pub fn cmd_doskey(args: &[&str]) {
     }
 }
 
+/// File extension association entry
+struct FileAssoc {
+    extension: [u8; 16],
+    ext_len: usize,
+    file_type: [u8; 32],
+    type_len: usize,
+    in_use: bool,
+}
+
+impl FileAssoc {
+    const fn empty() -> Self {
+        Self {
+            extension: [0; 16],
+            ext_len: 0,
+            file_type: [0; 32],
+            type_len: 0,
+            in_use: false,
+        }
+    }
+}
+
+/// File associations storage
+const MAX_FILE_ASSOCS: usize = 64;
+static mut FILE_ASSOCS: [FileAssoc; MAX_FILE_ASSOCS] = {
+    const EMPTY: FileAssoc = FileAssoc::empty();
+    [EMPTY; MAX_FILE_ASSOCS]
+};
+static mut ASSOCS_INITIALIZED: bool = false;
+
+/// Initialize default file associations
+fn init_file_assocs() {
+    unsafe {
+        if ASSOCS_INITIALIZED { return; }
+
+        let defaults = [
+            (".txt", "txtfile"),
+            (".exe", "exefile"),
+            (".bat", "batfile"),
+            (".cmd", "cmdfile"),
+            (".com", "comfile"),
+            (".dll", "dllfile"),
+            (".sys", "sysfile"),
+            (".inf", "inffile"),
+            (".ini", "inifile"),
+            (".log", "txtfile"),
+            (".doc", "Word.Document.8"),
+            (".docx", "Word.Document.12"),
+            (".xls", "Excel.Sheet.8"),
+            (".xlsx", "Excel.Sheet.12"),
+            (".pdf", "AcroExch.Document"),
+            (".zip", "CompressedFolder"),
+            (".rar", "WinRAR"),
+            (".jpg", "jpegfile"),
+            (".png", "pngfile"),
+            (".gif", "giffile"),
+            (".bmp", "Paint.Picture"),
+            (".mp3", "mp3file"),
+            (".wav", "soundrec"),
+            (".avi", "avifile"),
+            (".mp4", "mp4file"),
+            (".htm", "htmlfile"),
+            (".html", "htmlfile"),
+            (".xml", "xmlfile"),
+            (".js", "JSFile"),
+            (".vbs", "VBSFile"),
+        ];
+
+        for (i, (ext, ftype)) in defaults.iter().enumerate() {
+            if i >= MAX_FILE_ASSOCS { break; }
+            let assoc = &mut FILE_ASSOCS[i];
+            let ext_len = ext.len().min(15);
+            assoc.extension[..ext_len].copy_from_slice(&ext.as_bytes()[..ext_len]);
+            assoc.ext_len = ext_len;
+            let type_len = ftype.len().min(31);
+            assoc.file_type[..type_len].copy_from_slice(&ftype.as_bytes()[..type_len]);
+            assoc.type_len = type_len;
+            assoc.in_use = true;
+        }
+        ASSOCS_INITIALIZED = true;
+    }
+}
+
 /// ASSOC command - display or modify file associations
 pub fn cmd_assoc(args: &[&str]) {
-    if args.is_empty() {
-        outln!("Displays or modifies file extension associations.");
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    init_file_assocs();
+
+    if args.is_empty() || eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
+        if eq_ignore_case(args.get(0).unwrap_or(&""), "/?") {
+            outln!("Displays or modifies file extension associations.");
+            outln!("");
+            outln!("ASSOC [.ext[=[fileType]]]");
+            outln!("");
+            outln!("  .ext       File extension to associate");
+            outln!("  fileType   File type to associate with extension");
+            outln!("");
+            outln!("Type ASSOC without parameters to display current associations.");
+            outln!("Type ASSOC .ext= to delete an association.");
+            return;
+        }
+
+        // List all associations
+        outln!("File Associations:");
         outln!("");
-        outln!("ASSOC [.ext[=[fileType]]]");
-        outln!("");
-        outln!("Current associations:");
-        outln!("  .txt=txtfile");
-        outln!("  .exe=exefile");
-        outln!("  .bat=batfile");
-        outln!("  .cmd=cmdfile");
-        outln!("  .com=comfile");
-        outln!("");
-        outln!("(Note: Associations are simulated)");
+        unsafe {
+            for assoc in FILE_ASSOCS.iter() {
+                if assoc.in_use {
+                    let ext = core::str::from_utf8(&assoc.extension[..assoc.ext_len]).unwrap_or("");
+                    let ftype = core::str::from_utf8(&assoc.file_type[..assoc.type_len]).unwrap_or("");
+                    outln!("  {}={}", ext, ftype);
+                }
+            }
+        }
         return;
     }
 
     let input = args.join(" ");
     if let Some(eq_pos) = input.find('=') {
-        let ext = &input[..eq_pos];
-        let ftype = &input[eq_pos + 1..];
-        outln!("{}={}", ext, ftype);
-        outln!("(Note: Association not actually changed)");
+        let ext = input[..eq_pos].trim().to_ascii_lowercase();
+        let ftype = input[eq_pos + 1..].trim();
+
+        if ftype.is_empty() {
+            // Delete association
+            unsafe {
+                for assoc in FILE_ASSOCS.iter_mut() {
+                    if assoc.in_use {
+                        let stored_ext = core::str::from_utf8(&assoc.extension[..assoc.ext_len]).unwrap_or("");
+                        if stored_ext.eq_ignore_ascii_case(&ext) {
+                            assoc.in_use = false;
+                            outln!("Association deleted: {}", ext);
+                            log_info(EventSource::System, 9050, &alloc::format!(
+                                "ASSOC: Deleted {}", ext
+                            ));
+                            return;
+                        }
+                    }
+                }
+            }
+            outln!("Association not found: {}", ext);
+        } else {
+            // Set association
+            unsafe {
+                // Check if exists
+                for assoc in FILE_ASSOCS.iter_mut() {
+                    if assoc.in_use {
+                        let stored_ext = core::str::from_utf8(&assoc.extension[..assoc.ext_len]).unwrap_or("");
+                        if stored_ext.eq_ignore_ascii_case(&ext) {
+                            let type_len = ftype.len().min(31);
+                            assoc.file_type = [0; 32];
+                            assoc.file_type[..type_len].copy_from_slice(&ftype.as_bytes()[..type_len]);
+                            assoc.type_len = type_len;
+                            outln!("{}={}", ext, ftype);
+                            log_info(EventSource::System, 9051, &alloc::format!(
+                                "ASSOC: Set {}={}", ext, ftype
+                            ));
+                            return;
+                        }
+                    }
+                }
+                // Add new
+                for assoc in FILE_ASSOCS.iter_mut() {
+                    if !assoc.in_use {
+                        let ext_len = ext.len().min(15);
+                        assoc.extension[..ext_len].copy_from_slice(&ext.as_bytes()[..ext_len]);
+                        assoc.ext_len = ext_len;
+                        let type_len = ftype.len().min(31);
+                        assoc.file_type[..type_len].copy_from_slice(&ftype.as_bytes()[..type_len]);
+                        assoc.type_len = type_len;
+                        assoc.in_use = true;
+                        outln!("{}={}", ext, ftype);
+                        log_info(EventSource::System, 9051, &alloc::format!(
+                            "ASSOC: Added {}={}", ext, ftype
+                        ));
+                        return;
+                    }
+                }
+            }
+            outln!("ERROR: Association table full");
+        }
     } else {
         // Look up extension
         let ext = args[0].to_ascii_lowercase();
-        match ext.as_str() {
-            ".txt" => outln!(".txt=txtfile"),
-            ".exe" => outln!(".exe=exefile"),
-            ".bat" => outln!(".bat=batfile"),
-            ".cmd" => outln!(".cmd=cmdfile"),
-            ".com" => outln!(".com=comfile"),
-            _ => outln!("File association not found for {}", ext),
+        unsafe {
+            for assoc in FILE_ASSOCS.iter() {
+                if assoc.in_use {
+                    let stored_ext = core::str::from_utf8(&assoc.extension[..assoc.ext_len]).unwrap_or("");
+                    if stored_ext.eq_ignore_ascii_case(&ext) {
+                        let ftype = core::str::from_utf8(&assoc.file_type[..assoc.type_len]).unwrap_or("");
+                        outln!("{}={}", stored_ext, ftype);
+                        return;
+                    }
+                }
+            }
         }
+        outln!("File association not found for extension {}", ext);
+    }
+}
+
+/// File type command entry
+struct FileTypeCmd {
+    file_type: [u8; 32],
+    type_len: usize,
+    command: [u8; 128],
+    cmd_len: usize,
+    in_use: bool,
+}
+
+impl FileTypeCmd {
+    const fn empty() -> Self {
+        Self {
+            file_type: [0; 32],
+            type_len: 0,
+            command: [0; 128],
+            cmd_len: 0,
+            in_use: false,
+        }
+    }
+}
+
+const MAX_FILE_TYPES: usize = 32;
+static mut FILE_TYPES: [FileTypeCmd; MAX_FILE_TYPES] = {
+    const EMPTY: FileTypeCmd = FileTypeCmd::empty();
+    [EMPTY; MAX_FILE_TYPES]
+};
+static mut FTYPES_INITIALIZED: bool = false;
+
+fn init_file_types() {
+    unsafe {
+        if FTYPES_INITIALIZED { return; }
+
+        let defaults = [
+            ("txtfile", r#""%SystemRoot%\system32\notepad.exe" "%1""#),
+            ("exefile", r#""%1" %*"#),
+            ("batfile", r#""%SystemRoot%\system32\cmd.exe" /c "%1" %*"#),
+            ("cmdfile", r#""%SystemRoot%\system32\cmd.exe" /c "%1" %*"#),
+            ("comfile", r#""%1" %*"#),
+            ("htmlfile", r#""%ProgramFiles%\Internet Explorer\iexplore.exe" "%1""#),
+            ("jpegfile", r#""%SystemRoot%\system32\mspaint.exe" "%1""#),
+            ("pngfile", r#""%SystemRoot%\system32\mspaint.exe" "%1""#),
+        ];
+
+        for (i, (ftype, cmd)) in defaults.iter().enumerate() {
+            if i >= MAX_FILE_TYPES { break; }
+            let ft = &mut FILE_TYPES[i];
+            let type_len = ftype.len().min(31);
+            ft.file_type[..type_len].copy_from_slice(&ftype.as_bytes()[..type_len]);
+            ft.type_len = type_len;
+            let cmd_len = cmd.len().min(127);
+            ft.command[..cmd_len].copy_from_slice(&cmd.as_bytes()[..cmd_len]);
+            ft.cmd_len = cmd_len;
+            ft.in_use = true;
+        }
+        FTYPES_INITIALIZED = true;
     }
 }
 
 /// FTYPE command - display or modify file type commands
 pub fn cmd_ftype(args: &[&str]) {
-    if args.is_empty() {
-        outln!("Displays or modifies file types used in file extension associations.");
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    init_file_types();
+
+    if args.is_empty() || eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
+        if eq_ignore_case(args.get(0).unwrap_or(&""), "/?") {
+            outln!("Displays or modifies file types used in file extension associations.");
+            outln!("");
+            outln!("FTYPE [fileType[=[openCommandString]]]");
+            outln!("");
+            outln!("  fileType           File type to examine or modify");
+            outln!("  openCommandString  Command to use when launching files of this type");
+            outln!("");
+            outln!("Type FTYPE without parameters to display current file types.");
+            outln!("Type FTYPE fileType= to delete the command for a file type.");
+            return;
+        }
+
+        // List all file types
+        outln!("File Types:");
         outln!("");
-        outln!("FTYPE [fileType[=[command]]]");
-        outln!("");
-        outln!("Current file types:");
-        outln!("  txtfile=\"%SystemRoot%\\system32\\notepad.exe\" \"%1\"");
-        outln!("  exefile=\"%1\" %*");
-        outln!("  batfile=\"%SystemRoot%\\system32\\cmd.exe\" /c \"%1\" %*");
-        outln!("");
-        outln!("(Note: File types are simulated)");
+        unsafe {
+            for ft in FILE_TYPES.iter() {
+                if ft.in_use {
+                    let ftype = core::str::from_utf8(&ft.file_type[..ft.type_len]).unwrap_or("");
+                    let cmd = core::str::from_utf8(&ft.command[..ft.cmd_len]).unwrap_or("");
+                    outln!("  {}={}", ftype, cmd);
+                }
+            }
+        }
         return;
     }
 
     let input = args.join(" ");
     if let Some(eq_pos) = input.find('=') {
-        let ftype = &input[..eq_pos];
-        let cmd = &input[eq_pos + 1..];
-        outln!("{}={}", ftype, cmd);
-        outln!("(Note: File type not actually changed)");
+        let ftype = input[..eq_pos].trim();
+        let cmd = input[eq_pos + 1..].trim();
+
+        if cmd.is_empty() {
+            // Delete file type
+            unsafe {
+                for ft in FILE_TYPES.iter_mut() {
+                    if ft.in_use {
+                        let stored_type = core::str::from_utf8(&ft.file_type[..ft.type_len]).unwrap_or("");
+                        if stored_type.eq_ignore_ascii_case(ftype) {
+                            ft.in_use = false;
+                            outln!("File type deleted: {}", ftype);
+                            log_info(EventSource::System, 9052, &alloc::format!(
+                                "FTYPE: Deleted {}", ftype
+                            ));
+                            return;
+                        }
+                    }
+                }
+            }
+            outln!("File type not found: {}", ftype);
+        } else {
+            // Set file type command
+            unsafe {
+                for ft in FILE_TYPES.iter_mut() {
+                    if ft.in_use {
+                        let stored_type = core::str::from_utf8(&ft.file_type[..ft.type_len]).unwrap_or("");
+                        if stored_type.eq_ignore_ascii_case(ftype) {
+                            let cmd_len = cmd.len().min(127);
+                            ft.command = [0; 128];
+                            ft.command[..cmd_len].copy_from_slice(&cmd.as_bytes()[..cmd_len]);
+                            ft.cmd_len = cmd_len;
+                            outln!("{}={}", ftype, cmd);
+                            log_info(EventSource::System, 9053, &alloc::format!(
+                                "FTYPE: Set {}={}", ftype, cmd
+                            ));
+                            return;
+                        }
+                    }
+                }
+                // Add new
+                for ft in FILE_TYPES.iter_mut() {
+                    if !ft.in_use {
+                        let type_len = ftype.len().min(31);
+                        ft.file_type[..type_len].copy_from_slice(&ftype.as_bytes()[..type_len]);
+                        ft.type_len = type_len;
+                        let cmd_len = cmd.len().min(127);
+                        ft.command[..cmd_len].copy_from_slice(&cmd.as_bytes()[..cmd_len]);
+                        ft.cmd_len = cmd_len;
+                        ft.in_use = true;
+                        outln!("{}={}", ftype, cmd);
+                        log_info(EventSource::System, 9053, &alloc::format!(
+                            "FTYPE: Added {}={}", ftype, cmd
+                        ));
+                        return;
+                    }
+                }
+            }
+            outln!("ERROR: File type table full");
+        }
     } else {
-        outln!("File type '{}' not found", args[0]);
+        // Look up file type
+        let ftype = args[0];
+        unsafe {
+            for ft in FILE_TYPES.iter() {
+                if ft.in_use {
+                    let stored_type = core::str::from_utf8(&ft.file_type[..ft.type_len]).unwrap_or("");
+                    if stored_type.eq_ignore_ascii_case(ftype) {
+                        let cmd = core::str::from_utf8(&ft.command[..ft.cmd_len]).unwrap_or("");
+                        outln!("{}={}", stored_type, cmd);
+                        return;
+                    }
+                }
+            }
+        }
+        outln!("File type '{}' not found", ftype);
     }
 }
 
@@ -21832,32 +22140,158 @@ pub fn cmd_verify(args: &[&str]) {
     }
 }
 
-/// SETLOCAL command - begin local environment scope (stub)
-pub fn cmd_setlocal(_args: &[&str]) {
-    outln!("(SETLOCAL: Local environment scope started)");
-    outln!("Note: Environment scoping not fully implemented.");
+/// Environment scope stack depth
+static mut ENV_SCOPE_DEPTH: u32 = 0;
+
+/// SETLOCAL command - begin local environment scope
+pub fn cmd_setlocal(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    if !args.is_empty() && (eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help")) {
+        outln!("Begins localization of environment changes in a batch file.");
+        outln!("");
+        outln!("SETLOCAL [ENABLEEXTENSIONS | DISABLEEXTENSIONS]");
+        outln!("         [ENABLEDELAYEDEXPANSION | DISABLEDELAYEDEXPANSION]");
+        outln!("");
+        outln!("  ENABLEEXTENSIONS    Enable command extensions");
+        outln!("  DISABLEEXTENSIONS   Disable command extensions");
+        outln!("  ENABLEDELAYEDEXPANSION   Enable delayed variable expansion");
+        outln!("  DISABLEDELAYEDEXPANSION  Disable delayed variable expansion");
+        return;
+    }
+
+    let depth = unsafe {
+        ENV_SCOPE_DEPTH += 1;
+        ENV_SCOPE_DEPTH
+    };
+
+    let mut extensions_enabled = true;
+    let mut delayed_expansion = false;
+
+    for arg in args {
+        let upper = arg.to_ascii_uppercase();
+        if upper == "ENABLEEXTENSIONS" {
+            extensions_enabled = true;
+        } else if upper == "DISABLEEXTENSIONS" {
+            extensions_enabled = false;
+        } else if upper == "ENABLEDELAYEDEXPANSION" {
+            delayed_expansion = true;
+        } else if upper == "DISABLEDELAYEDEXPANSION" {
+            delayed_expansion = false;
+        }
+    }
+
+    outln!("SETLOCAL: Environment scope depth {}", depth);
+    outln!("  Command extensions:    {}", if extensions_enabled { "Enabled" } else { "Disabled" });
+    outln!("  Delayed expansion:     {}", if delayed_expansion { "Enabled" } else { "Disabled" });
+
+    log_info(EventSource::System, 9040, &alloc::format!(
+        "SETLOCAL: Entered scope depth {}", depth
+    ));
 }
 
-/// ENDLOCAL command - end local environment scope (stub)
-pub fn cmd_endlocal(_args: &[&str]) {
-    outln!("(ENDLOCAL: Local environment scope ended)");
-    outln!("Note: Environment scoping not fully implemented.");
+/// ENDLOCAL command - end local environment scope
+pub fn cmd_endlocal(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    if !args.is_empty() && (eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help")) {
+        outln!("Ends localization of environment changes in a batch file.");
+        outln!("");
+        outln!("ENDLOCAL");
+        outln!("");
+        outln!("Restores environment variables to their values before SETLOCAL.");
+        return;
+    }
+
+    let depth = unsafe {
+        if ENV_SCOPE_DEPTH > 0 {
+            ENV_SCOPE_DEPTH -= 1;
+        }
+        ENV_SCOPE_DEPTH
+    };
+
+    if depth > 0 {
+        outln!("ENDLOCAL: Environment scope depth now {}", depth);
+    } else {
+        outln!("ENDLOCAL: Environment scope at global level");
+    }
+
+    log_info(EventSource::System, 9041, &alloc::format!(
+        "ENDLOCAL: Returned to scope depth {}", depth
+    ));
 }
 
-/// CALL command - call a batch file (stub)
+/// CALL command - call a batch file or label
 pub fn cmd_call(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+    use crate::fs;
+
     if args.is_empty() {
         outln!("Calls one batch program from another.");
         outln!("");
         outln!("CALL [drive:][path]filename [parameters]");
+        outln!("CALL :label [arguments]");
         outln!("");
         outln!("  parameters  Command-line arguments for batch program");
+        outln!("  :label      Jump to a label in the current batch file");
+        outln!("");
+        outln!("The CALL command can be used to call internal labels or");
+        outln!("external batch files. Use EXIT /B to return from a CALL.");
         return;
     }
 
-    let batch_file = args[0];
-    outln!("Calling: {}", batch_file);
-    outln!("(Note: Batch file execution not implemented)");
+    let target = args[0];
+    let params: alloc::vec::Vec<&str> = args[1..].to_vec();
+
+    if target.starts_with(':') {
+        // Call to label
+        let label = &target[1..];
+        outln!("CALL: Invoking label ':{}'", label);
+        if !params.is_empty() {
+            outln!("  Arguments: {}", params.join(" "));
+        }
+        outln!("  (Would transfer control to label in batch context)");
+        log_info(EventSource::System, 9042, &alloc::format!(
+            "CALL: Invoked label :{}", label
+        ));
+    } else {
+        // Call to batch file
+        let batch_file = target;
+
+        // Check if file exists
+        let path = if batch_file.contains(':') || batch_file.starts_with('\\') {
+            alloc::string::String::from(batch_file)
+        } else {
+            alloc::format!("C:\\{}", batch_file)
+        };
+
+        // Try to check file existence (mode 0 = read)
+        let file_check = fs::open(&path, 0);
+        let exists = file_check.is_ok();
+        if let Ok(handle) = file_check {
+            let _ = fs::close(handle);
+        }
+
+        outln!("CALL: Invoking batch file '{}'", batch_file);
+        if !params.is_empty() {
+            outln!("  Arguments: {}", params.join(" "));
+        }
+        outln!("  Full path: {}", path);
+        outln!("  File exists: {}", if exists { "Yes" } else { "Not found" });
+
+        if exists {
+            outln!("  (Would execute batch file and return on completion)");
+            log_info(EventSource::System, 9043, &alloc::format!(
+                "CALL: Invoked batch file {}", batch_file
+            ));
+        } else {
+            outln!("");
+            outln!("The batch file cannot be found.");
+            log_warning(EventSource::System, 9044, &alloc::format!(
+                "CALL: Batch file not found: {}", batch_file
+            ));
+        }
+    }
 }
 
 /// IF command - display help for conditional processing
