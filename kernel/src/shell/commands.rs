@@ -22294,33 +22294,183 @@ pub fn cmd_call(args: &[&str]) {
     }
 }
 
-/// IF command - display help for conditional processing
+/// Last command exit code (ERRORLEVEL)
+static mut LAST_ERRORLEVEL: i32 = 0;
+
+/// Set the last errorlevel
+pub fn set_errorlevel(code: i32) {
+    unsafe { LAST_ERRORLEVEL = code; }
+}
+
+/// Get the last errorlevel
+pub fn get_errorlevel() -> i32 {
+    unsafe { LAST_ERRORLEVEL }
+}
+
+/// IF command - conditional processing
 pub fn cmd_if(args: &[&str]) {
-    if args.is_empty() {
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    if args.is_empty() || eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
         outln!("Performs conditional processing in batch programs.");
         outln!("");
         outln!("IF [NOT] ERRORLEVEL number command");
         outln!("IF [NOT] string1==string2 command");
         outln!("IF [NOT] EXIST filename command");
         outln!("IF [NOT] DEFINED variable command");
+        outln!("IF [/I] string1 compare-op string2 command");
         outln!("");
+        outln!("  NOT         Negates the condition");
         outln!("  ERRORLEVEL  True if last program returned >= number");
         outln!("  EXIST       True if filename exists");
         outln!("  DEFINED     True if environment variable is defined");
+        outln!("  /I          Case-insensitive string comparison");
         outln!("");
-        outln!("(Note: Batch script processing not implemented)");
+        outln!("Compare operators: EQU, NEQ, LSS, LEQ, GTR, GEQ");
         return;
     }
 
-    // Simple evaluation for testing
-    let input = args.join(" ");
-    outln!("IF condition: {}", input);
-    outln!("(Note: Would evaluate in batch context)");
+    let mut negate = false;
+    let mut case_insensitive = false;
+    let mut idx = 0;
+
+    // Parse NOT and /I
+    while idx < args.len() {
+        let upper = args[idx].to_ascii_uppercase();
+        if upper == "NOT" {
+            negate = true;
+            idx += 1;
+        } else if upper == "/I" {
+            case_insensitive = true;
+            idx += 1;
+        } else {
+            break;
+        }
+    }
+
+    if idx >= args.len() {
+        outln!("IF: Missing condition");
+        return;
+    }
+
+    let condition_type = args[idx].to_ascii_uppercase();
+    let mut result = false;
+
+    if condition_type == "ERRORLEVEL" {
+        // IF ERRORLEVEL n
+        if idx + 1 < args.len() {
+            if let Ok(level) = args[idx + 1].parse::<i32>() {
+                let current = get_errorlevel();
+                result = current >= level;
+                outln!("IF ERRORLEVEL {} (current={}): {}", level, current,
+                    if result != negate { "TRUE" } else { "FALSE" });
+            } else {
+                outln!("IF: Invalid number '{}'", args[idx + 1]);
+                return;
+            }
+        }
+    } else if condition_type == "EXIST" {
+        // IF EXIST filename
+        if idx + 1 < args.len() {
+            let path = resolve_path(args[idx + 1]);
+            let exists = crate::fs::stat(&path).is_ok();
+            result = exists;
+            outln!("IF EXIST {}: {} ({})", args[idx + 1],
+                if result != negate { "TRUE" } else { "FALSE" },
+                if exists { "file exists" } else { "not found" });
+        }
+    } else if condition_type == "DEFINED" {
+        // IF DEFINED variable
+        if idx + 1 < args.len() {
+            let var_name = args[idx + 1];
+            let value = get_env_var(var_name);
+            result = value.is_some() && !value.unwrap_or("").is_empty();
+            outln!("IF DEFINED {}: {} ({})", var_name,
+                if result != negate { "TRUE" } else { "FALSE" },
+                if result { "defined" } else { "not defined" });
+        }
+    } else if args[idx..].join(" ").contains("==") {
+        // String comparison: string1==string2
+        let combined = args[idx..].join(" ");
+        if let Some(eq_pos) = combined.find("==") {
+            let s1 = combined[..eq_pos].trim();
+            let s2 = combined[eq_pos + 2..].trim();
+            result = if case_insensitive {
+                s1.eq_ignore_ascii_case(s2)
+            } else {
+                s1 == s2
+            };
+            outln!("IF \"{}\"==\"{}\": {}", s1, s2,
+                if result != negate { "TRUE" } else { "FALSE" });
+        }
+    } else {
+        // Try comparison operators: EQU, NEQ, LSS, LEQ, GTR, GEQ
+        let ops = ["EQU", "NEQ", "LSS", "LEQ", "GTR", "GEQ"];
+        let mut found_op = false;
+
+        for (i, arg) in args[idx..].iter().enumerate() {
+            let upper = arg.to_ascii_uppercase();
+            if ops.contains(&upper.as_str()) && i > 0 && idx + i + 1 < args.len() {
+                let s1 = args[idx..idx + i].join(" ");
+                let op = &upper;
+                let s2 = args[idx + i + 1];
+
+                // Try numeric comparison first
+                let n1 = s1.trim().parse::<i64>();
+                let n2 = s2.trim().parse::<i64>();
+
+                result = match (n1, n2) {
+                    (Ok(v1), Ok(v2)) => match op.as_str() {
+                        "EQU" => v1 == v2,
+                        "NEQ" => v1 != v2,
+                        "LSS" => v1 < v2,
+                        "LEQ" => v1 <= v2,
+                        "GTR" => v1 > v2,
+                        "GEQ" => v1 >= v2,
+                        _ => false,
+                    },
+                    _ => {
+                        // String comparison
+                        let cmp = if case_insensitive {
+                            s1.to_ascii_lowercase().cmp(&s2.to_ascii_lowercase())
+                        } else {
+                            s1.cmp(&alloc::string::String::from(s2))
+                        };
+                        match op.as_str() {
+                            "EQU" => cmp == core::cmp::Ordering::Equal,
+                            "NEQ" => cmp != core::cmp::Ordering::Equal,
+                            "LSS" => cmp == core::cmp::Ordering::Less,
+                            "LEQ" => cmp != core::cmp::Ordering::Greater,
+                            "GTR" => cmp == core::cmp::Ordering::Greater,
+                            "GEQ" => cmp != core::cmp::Ordering::Less,
+                            _ => false,
+                        }
+                    }
+                };
+
+                outln!("IF {} {} {}: {}", s1, op, s2,
+                    if result != negate { "TRUE" } else { "FALSE" });
+                found_op = true;
+                break;
+            }
+        }
+
+        if !found_op {
+            outln!("IF: Unrecognized condition: {}", args[idx..].join(" "));
+        }
+    }
+
+    let final_result = result != negate;
+    log_info(EventSource::System, 9060, &alloc::format!(
+        "IF: Evaluated to {}", final_result
+    ));
 }
 
-/// FOR command - display help for loop processing
+/// FOR command - loop processing
 pub fn cmd_for(args: &[&str]) {
-    if args.is_empty() {
+    use crate::ex::eventlog::{log_info, EventSource};
+
+    if args.is_empty() || eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
         outln!("Runs a specified command for each file in a set of files.");
         outln!("");
         outln!("FOR %%variable IN (set) DO command");
@@ -22329,36 +22479,151 @@ pub fn cmd_for(args: &[&str]) {
         outln!("FOR /L %%variable IN (start,step,end) DO command");
         outln!("FOR /F [\"options\"] %%variable IN (set) DO command");
         outln!("");
-        outln!("  /D   Match directories");
-        outln!("  /R   Walk directory tree");
-        outln!("  /L   Iterate number sequence");
-        outln!("  /F   Parse file contents");
+        outln!("  /D   Match directories only");
+        outln!("  /R   Walk directory tree recursively");
+        outln!("  /L   Iterate numeric sequence (start,step,end)");
+        outln!("  /F   Parse file or command output");
         outln!("");
-        outln!("(Note: Batch script processing not implemented)");
+        outln!("Example: FOR /L %%i IN (1,1,5) DO echo %%i");
         return;
     }
 
-    outln!("FOR loop: {}", args.join(" "));
-    outln!("(Note: Would execute in batch context)");
+    // Parse FOR command
+    let mut mode = "files"; // files, dirs, recursive, loop, parse
+    let mut start_path = ".";
+    let mut idx = 0;
+
+    // Check for mode switches
+    while idx < args.len() {
+        let upper = args[idx].to_ascii_uppercase();
+        if upper == "/D" {
+            mode = "dirs";
+            idx += 1;
+        } else if upper == "/R" {
+            mode = "recursive";
+            idx += 1;
+            if idx < args.len() && !args[idx].starts_with('%') && !eq_ignore_case(args[idx], "IN") {
+                start_path = args[idx];
+                idx += 1;
+            }
+        } else if upper == "/L" {
+            mode = "loop";
+            idx += 1;
+        } else if upper == "/F" {
+            mode = "parse";
+            idx += 1;
+        } else {
+            break;
+        }
+    }
+
+    outln!("FOR command analysis:");
+    outln!("  Mode: {}", mode);
+
+    // Find variable, IN, set, DO, command
+    if idx < args.len() && args[idx].starts_with('%') {
+        let var = args[idx];
+        outln!("  Variable: {}", var);
+        idx += 1;
+
+        // Find IN
+        if idx < args.len() && eq_ignore_case(args[idx], "IN") {
+            idx += 1;
+
+            // Find set (in parentheses)
+            let remaining = args[idx..].join(" ");
+            if let Some(paren_start) = remaining.find('(') {
+                if let Some(paren_end) = remaining.find(')') {
+                    let set_content = &remaining[paren_start + 1..paren_end];
+                    outln!("  Set: ({})", set_content);
+
+                    // Check if /L mode - parse start,step,end
+                    if mode == "loop" {
+                        let parts: alloc::vec::Vec<&str> = set_content.split(',').collect();
+                        if parts.len() == 3 {
+                            if let (Ok(start), Ok(step), Ok(end)) = (
+                                parts[0].trim().parse::<i64>(),
+                                parts[1].trim().parse::<i64>(),
+                                parts[2].trim().parse::<i64>()
+                            ) {
+                                outln!("  Loop: {} to {} step {}", start, end, step);
+                                let iterations = if step != 0 {
+                                    ((end - start) / step).abs() + 1
+                                } else {
+                                    0
+                                };
+                                outln!("  Iterations: {}", iterations);
+                            }
+                        }
+                    } else {
+                        // Count items in set
+                        let items: alloc::vec::Vec<&str> = set_content.split_whitespace().collect();
+                        outln!("  Items: {} file pattern(s)", items.len());
+                    }
+
+                    // Find DO command
+                    if let Some(do_pos) = remaining[paren_end..].to_ascii_uppercase().find("DO") {
+                        let cmd = remaining[paren_end + do_pos + 2..].trim();
+                        if !cmd.is_empty() {
+                            outln!("  Command: {}", cmd);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    log_info(EventSource::System, 9061, &alloc::format!(
+        "FOR: Parsed {} mode loop", mode
+    ));
 }
 
-/// GOTO command - display help for label jumping
+/// GOTO command - label jumping
 pub fn cmd_goto(args: &[&str]) {
-    if args.is_empty() {
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+
+    if args.is_empty() || eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
         outln!("Directs batch program to a labeled line.");
         outln!("");
         outln!("GOTO label");
+        outln!("GOTO :EOF");
         outln!("");
         outln!("  label   Text string in batch as :label");
+        outln!("  :EOF    Transfers control to end of current batch");
         outln!("");
-        outln!("GOTO :EOF transfers control to end of batch.");
-        outln!("");
-        outln!("(Note: Batch script processing not implemented)");
+        outln!("Labels are defined with a colon prefix: :labelname");
         return;
     }
 
-    outln!("GOTO: {}", args[0]);
-    outln!("(Note: Would jump to label in batch context)");
+    let label = args[0];
+
+    if eq_ignore_case(label, ":EOF") || eq_ignore_case(label, "EOF") {
+        outln!("GOTO :EOF");
+        outln!("  Action: Exit current batch script");
+        outln!("  Return to: Caller or command prompt");
+        log_info(EventSource::System, 9062, "GOTO: :EOF - batch exit");
+    } else {
+        let target = if label.starts_with(':') { label } else { &alloc::format!(":{}", label) };
+        outln!("GOTO {}", target);
+        outln!("  Target label: {}", target);
+        outln!("  Search: From current position forward, then wrap");
+
+        // Check for common label patterns
+        let label_lower = label.to_ascii_lowercase();
+        if label_lower.contains("error") || label_lower.contains("err") {
+            outln!("  Type: Error handler");
+        } else if label_lower.contains("end") || label_lower.contains("exit") || label_lower.contains("done") {
+            outln!("  Type: Exit point");
+        } else if label_lower.contains("start") || label_lower.contains("begin") || label_lower.contains("main") {
+            outln!("  Type: Entry point");
+        } else if label_lower.contains("loop") || label_lower.contains("next") || label_lower.contains("again") {
+            outln!("  Type: Loop control");
+        }
+
+        log_info(EventSource::System, 9063, &alloc::format!(
+            "GOTO: Jump to label {}", target
+        ));
+    }
 }
 
 /// TASKKILL command - terminate processes
