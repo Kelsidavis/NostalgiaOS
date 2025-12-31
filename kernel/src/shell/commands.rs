@@ -31996,3 +31996,165 @@ fn show_atom_info(args: &[&str]) {
         }
     }
 }
+
+// =============================================================================
+// Hard Error Command
+// =============================================================================
+
+pub fn cmd_harderr(args: &[&str]) {
+    if args.is_empty() {
+        show_harderr_status();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "status") {
+        show_harderr_status();
+    } else if eq_ignore_ascii_case(subcmd, "log") {
+        show_error_log();
+    } else if eq_ignore_ascii_case(subcmd, "clear") {
+        clear_error_log();
+    } else if eq_ignore_ascii_case(subcmd, "raise") {
+        raise_test_error(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "enable") {
+        enable_error_handler();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("harderr - Hard Error Handling");
+        outln!("");
+        outln!("Usage: harderr [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  status       - Show hard error status (default)");
+        outln!("  log          - Show error log");
+        outln!("  clear        - Clear error log");
+        outln!("  raise <code> - Raise test error (hex)");
+        outln!("  enable       - Enable console error handler");
+        outln!("");
+        outln!("Hard errors are critical system errors that may require");
+        outln!("user interaction or system shutdown.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'harderr help' for usage information");
+    }
+}
+
+fn show_harderr_status() {
+    use crate::ex;
+
+    outln!("Hard Error Status");
+    outln!("=================");
+    outln!("");
+
+    let stats = ex::exp_harderr_get_stats();
+
+    outln!("State:");
+    outln!("  Ready for Errors: {}", if stats.is_ready { "Yes" } else { "No" });
+    outln!("  Shutdown Mode:    {}", if stats.is_shutdown { "Yes" } else { "No" });
+    outln!("");
+
+    outln!("Statistics:");
+    outln!("  Errors Raised:    {}", stats.errors_raised);
+    outln!("  Errors Handled:   {}", stats.errors_handled);
+    outln!("  Errors Ignored:   {}", stats.errors_ignored);
+    outln!("  System Errors:    {}", stats.system_errors);
+    outln!("");
+
+    outln!("Queue:");
+    outln!("  Pending Errors:   {}", stats.pending_count);
+    outln!("  Log Entries:      {}", stats.log_count);
+}
+
+fn show_error_log() {
+    use crate::ex;
+
+    outln!("Hard Error Log");
+    outln!("==============");
+    outln!("");
+
+    let log = ex::exp_get_error_log();
+    if log.is_empty() {
+        outln!("(no errors logged)");
+        return;
+    }
+
+    outln!("Status       Time            Description");
+    outln!("-----------  --------------  -----------");
+
+    for (status, desc, time) in log.iter() {
+        outln!("0x{:08X}  {:>14}  {}", *status as u32, time, desc);
+    }
+
+    outln!("");
+    outln!("Total: {} errors", log.len());
+}
+
+fn clear_error_log() {
+    use crate::ex;
+
+    ex::exp_clear_error_log();
+    outln!("Error log cleared");
+}
+
+fn raise_test_error(args: &[&str]) {
+    use crate::ex;
+
+    if args.is_empty() {
+        outln!("Usage: harderr raise <status>");
+        outln!("  <status> in hex, e.g., 0xC0000001");
+        outln!("");
+        outln!("Common status codes:");
+        outln!("  0xC0000001  STATUS_UNSUCCESSFUL");
+        outln!("  0xC0000002  STATUS_NOT_IMPLEMENTED");
+        outln!("  0xC0000005  STATUS_ACCESS_VIOLATION");
+        outln!("  0xC0000022  STATUS_ACCESS_DENIED");
+        outln!("  0xC0000017  STATUS_NO_MEMORY");
+        return;
+    }
+
+    let status = if args[0].starts_with("0x") || args[0].starts_with("0X") {
+        i32::from_str_radix(&args[0][2..], 16).ok()
+    } else {
+        args[0].parse().ok()
+    };
+
+    let status = match status {
+        Some(s) => s,
+        None => {
+            outln!("Invalid status code");
+            return;
+        }
+    };
+
+    outln!("Raising hard error 0x{:08X}...", status as u32);
+
+    let response = ex::ex_raise_hard_error(
+        status,
+        0,
+        0,
+        &[],
+        ex::HardErrorResponseOption::Ok,
+    );
+
+    match response {
+        Ok(r) => {
+            outln!("Response: {:?}", r);
+        }
+        Err(e) => {
+            outln!("Error: 0x{:08X}", e as u32);
+        }
+    }
+}
+
+fn enable_error_handler() {
+    use crate::ex;
+
+    match ex::nt_set_default_hard_error_port(ex::exp_console_error_handler) {
+        Ok(()) => {
+            outln!("Console error handler enabled");
+        }
+        Err(e) => {
+            outln!("Failed to enable handler: 0x{:08X}", e as u32);
+        }
+    }
+}

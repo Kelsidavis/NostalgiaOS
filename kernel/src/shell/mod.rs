@@ -1283,6 +1283,9 @@ impl Shell {
         // Atom Table
         } else if eq_ignore_case(cmd, "atom") {
             commands::cmd_atom(&args[1..argc]);
+        // Hard Error
+        } else if eq_ignore_case(cmd, "harderr") || eq_ignore_case(cmd, "error") {
+            commands::cmd_harderr(&args[1..argc]);
         // Disk/Partition viewer
         } else if eq_ignore_case(cmd, "disk") || eq_ignore_case(cmd, "partition") {
             commands::cmd_disk(&args[1..argc]);

@@ -448,6 +448,11 @@ fn phase1_init(boot_info: &BootInfo) {
     ex::atom::exp_atom_init();
     kprintln!("  Atom table initialized");
 
+    // Initialize Hard Error subsystem
+    kprintln!("  Initializing hard error subsystem...");
+    ex::harderr::exp_harderr_init();
+    kprintln!("  Hard error subsystem initialized");
+
     // Initialize Service Control Manager
     kprintln!("  Initializing Service Control Manager...");
     svc::scm_initialize();
