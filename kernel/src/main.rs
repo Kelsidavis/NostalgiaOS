@@ -483,6 +483,11 @@ fn phase1_init(boot_info: &BootInfo) {
     rtl::range::rtl_range_init();
     kprintln!("  Range lists initialized");
 
+    // Initialize Generic Table subsystem
+    kprintln!("  Initializing generic tables...");
+    rtl::gentable::rtl_gentable_init();
+    kprintln!("  Generic tables initialized");
+
     // Initialize Service Control Manager
     kprintln!("  Initializing Service Control Manager...");
     svc::scm_initialize();
