@@ -33169,3 +33169,54 @@ pub fn cmd_wmi(args: &[&str]) {
         outln!("Use 'wmi' for usage information");
     }
 }
+
+// =============================================================================
+// KD (Kernel Debugger) Command
+// =============================================================================
+
+/// Kernel debugger diagnostic command
+pub fn cmd_kdinfo(args: &[&str]) {
+    use crate::kd;
+
+    if args.is_empty() || eq_ignore_case(args[0], "status") {
+        outln!("Kernel Debugger Status");
+        outln!("");
+        outln!("State:");
+        outln!("  Debugger Enabled: {}", if kd::kd_debugger_enabled() { "Yes" } else { "No" });
+        outln!("  Debugger Present: {}", if !kd::kd_debugger_not_present() { "Yes" } else { "No" });
+        outln!("");
+
+        let version = kd::kd_get_version();
+        outln!("Version:");
+        outln!("  Major:    {}", version.major_version);
+        outln!("  Minor:    {}", version.minor_version);
+        outln!("  Protocol: {}", version.protocol_version);
+        outln!("");
+
+        let (entered, bp_set, bp_hit, msgs) = kd::kd_get_stats();
+        outln!("Statistics:");
+        outln!("  Debugger Entries: {}", entered);
+        outln!("  Breakpoints Set:  {}", bp_set);
+        outln!("  Breakpoints Hit:  {}", bp_hit);
+        outln!("  Messages Logged:  {}", msgs);
+
+    } else if eq_ignore_case(args[0], "help") {
+        outln!("Kernel Debugger (KD)");
+        outln!("");
+        outln!("Usage: kdinfo [command]");
+        outln!("");
+        outln!("Commands:");
+        outln!("  status      Show debugger status (default)");
+        outln!("  help        Show this help");
+        outln!("");
+        outln!("The kernel debugger provides:");
+        outln!("  - Breakpoint support");
+        outln!("  - Exception handling");
+        outln!("  - Debug print messages");
+        outln!("  - Memory inspection");
+
+    } else {
+        outln!("Unknown kdinfo command: {}", args[0]);
+        outln!("Use 'kdinfo help' for usage information");
+    }
+}
