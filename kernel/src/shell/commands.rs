@@ -165,6 +165,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    prefetch       Prefetcher (stats, traces, enable/disable)");
         outln!("    verifier       Driver Verifier (stats, irp, pool, deadlock)");
         outln!("    kd             Kernel Debugger (status, bp, print, data)");
+        outln!("    audit          Security Auditing (status, policy, events)");
         outln!("    disk,partition Disk/Partition info (mbr, gpt, geometry)");
         outln!("");
         outln!("  Use UP/DOWN arrows to navigate command history.");
@@ -31220,4 +31221,239 @@ fn show_kd_version() {
     if ver.ps_loaded_module_list != 0 {
         outln!("Loaded Modules:    {:#x}", ver.ps_loaded_module_list);
     }
+}
+
+/// Security Audit command
+pub fn cmd_audit(args: &[&str]) {
+    if args.is_empty() {
+        show_audit_status();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "status") {
+        show_audit_status();
+    } else if eq_ignore_ascii_case(subcmd, "policy") {
+        if args.len() > 1 {
+            set_audit_policy(&args[1..]);
+        } else {
+            show_audit_policies();
+        }
+    } else if eq_ignore_ascii_case(subcmd, "events") {
+        show_audit_events(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "clear") {
+        clear_audit_queue();
+    } else if eq_ignore_ascii_case(subcmd, "test") {
+        generate_test_audit();
+    } else if eq_ignore_ascii_case(subcmd, "crashonfail") {
+        toggle_crash_on_fail(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("audit - Security Auditing");
+        outln!("");
+        outln!("Usage: audit [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  status         - Show audit status (default)");
+        outln!("  policy         - Show audit policies");
+        outln!("  policy <cat> <s/f>  - Set policy (success/failure)");
+        outln!("  events [n]     - Show recent audit events (last n)");
+        outln!("  clear          - Clear audit queue");
+        outln!("  test           - Generate test audit event");
+        outln!("  crashonfail [on/off] - Toggle crash on audit fail");
+        outln!("");
+        outln!("Categories: system, logon, object, privilege, tracking,");
+        outln!("            policy, account, directory, accountlogon");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'audit help' for usage information");
+    }
+}
+
+fn show_audit_status() {
+    use crate::se;
+
+    outln!("Security Audit Status");
+    outln!("=====================");
+    outln!("");
+
+    let stats = se::sep_adt_get_stats();
+    outln!("Statistics:");
+    outln!("  Generated:  {}", stats.0);
+    outln!("  Logged:     {}", stats.1);
+    outln!("  Discarded:  {}", stats.2);
+    outln!("  Failed:     {}", stats.3);
+    outln!("  Queue:      {} events", stats.4);
+    outln!("");
+
+    let bounds = se::sep_adt_get_bounds();
+    outln!("Queue Bounds:");
+    outln!("  Lower:      {}", bounds.lower_bound);
+    outln!("  Upper:      {}", bounds.upper_bound);
+    outln!("");
+
+    let options = se::sep_adt_get_options();
+    outln!("Options:");
+    outln!("  Skip Close Events:      {}", options.do_not_audit_close_object_events);
+    outln!("  Full Privilege Audit:   {}", options.full_privilege_auditing);
+    outln!("  Crash On Fail:          {}", se::sep_adt_get_crash_on_fail());
+}
+
+fn show_audit_policies() {
+    use crate::se;
+
+    outln!("Audit Policies");
+    outln!("==============");
+    outln!("");
+    outln!("Category              Success  Failure");
+    outln!("--------------------  -------  -------");
+
+    let policies = se::sep_adt_get_all_policies();
+    for (category, policy) in policies.iter() {
+        let name = se::audit_category_name(*category);
+        outln!("{:<20}  {:>7}  {:>7}",
+            name,
+            if policy.audit_success { "Yes" } else { "No" },
+            if policy.audit_failure { "Yes" } else { "No" });
+    }
+}
+
+fn set_audit_policy(args: &[&str]) {
+    use crate::se;
+
+    if args.len() < 2 {
+        outln!("Usage: audit policy <category> <success|failure|both|none>");
+        outln!("");
+        outln!("Categories: system, logon, object, privilege, tracking,");
+        outln!("            policy, account, directory, accountlogon");
+        return;
+    }
+
+    let cat_str = args[0];
+    let mode = args[1];
+
+    let category = match cat_str.to_lowercase().as_str() {
+        "system" => se::AuditEventCategory::System,
+        "logon" => se::AuditEventCategory::Logon,
+        "object" => se::AuditEventCategory::ObjectAccess,
+        "privilege" => se::AuditEventCategory::PrivilegeUse,
+        "tracking" => se::AuditEventCategory::DetailedTracking,
+        "policy" => se::AuditEventCategory::PolicyChange,
+        "account" => se::AuditEventCategory::AccountManagement,
+        "directory" => se::AuditEventCategory::DirectoryServiceAccess,
+        "accountlogon" => se::AuditEventCategory::AccountLogon,
+        _ => {
+            outln!("Unknown category: {}", cat_str);
+            return;
+        }
+    };
+
+    let (success, failure) = match mode.to_lowercase().as_str() {
+        "success" | "s" => (true, false),
+        "failure" | "f" => (false, true),
+        "both" | "sf" | "fs" => (true, true),
+        "none" | "off" => (false, false),
+        _ => {
+            outln!("Unknown mode: {} (use success/failure/both/none)", mode);
+            return;
+        }
+    };
+
+    let policy = se::AuditPolicy {
+        audit_success: success,
+        audit_failure: failure,
+    };
+
+    se::sep_adt_set_policy(category, policy);
+    outln!("Policy for {} updated: success={}, failure={}",
+        se::audit_category_name(category), success, failure);
+}
+
+fn show_audit_events(args: &[&str]) {
+    use crate::se;
+
+    let count = if args.is_empty() {
+        10
+    } else {
+        args[0].parse().unwrap_or(10)
+    };
+
+    outln!("Recent Audit Events (last {})", count);
+    outln!("================================");
+    outln!("");
+
+    let events = se::sep_adt_get_recent(count);
+    if events.is_empty() {
+        outln!("(no events in queue)");
+        return;
+    }
+
+    outln!("Timestamp        Category            ID     Type");
+    outln!("---------------  ------------------  -----  -------");
+
+    for event in events.iter() {
+        let cat_name = se::audit_category_name(event.parameters.category);
+        let type_str = match event.parameters.event_type {
+            se::AuditEventType::Success => "Success",
+            se::AuditEventType::Failure => "Failure",
+        };
+        outln!("{:<15}  {:<18}  {:>5}  {}",
+            event.timestamp % 1_000_000_000_000,
+            cat_name,
+            event.parameters.audit_id,
+            type_str);
+    }
+}
+
+fn clear_audit_queue() {
+    use crate::se;
+
+    se::sep_adt_clear_queue();
+    outln!("Audit queue cleared");
+}
+
+fn generate_test_audit() {
+    use crate::se;
+
+    outln!("Generating test audit events...");
+    outln!("");
+
+    // Generate a logon success event
+    se::se_audit_logon_success("S-1-5-21-test", 2, "TestSource");
+    outln!("  Generated: Logon success event");
+
+    // Generate an object access event
+    se::se_audit_object_access("\\TestObject", "File", 0x001F01FF, true);
+    outln!("  Generated: Object access event");
+
+    // Generate a privilege use event
+    se::se_audit_privilege_use("SeDebugPrivilege", true);
+    outln!("  Generated: Privilege use event");
+
+    let stats = se::sep_adt_get_stats();
+    outln!("");
+    outln!("Queue now has {} events", stats.4);
+}
+
+fn toggle_crash_on_fail(args: &[&str]) {
+    use crate::se;
+
+    if args.is_empty() {
+        let current = se::sep_adt_get_crash_on_fail();
+        outln!("Crash on audit fail: {}", if current { "Enabled" } else { "Disabled" });
+        outln!("Use 'audit crashonfail on' or 'audit crashonfail off' to change");
+        return;
+    }
+
+    let enable = match args[0].to_lowercase().as_str() {
+        "on" | "true" | "1" | "enable" => true,
+        "off" | "false" | "0" | "disable" => false,
+        _ => {
+            outln!("Unknown option: {} (use on/off)", args[0]);
+            return;
+        }
+    };
+
+    se::sep_adt_set_crash_on_fail(enable);
+    outln!("Crash on audit fail: {}", if enable { "Enabled" } else { "Disabled" });
 }

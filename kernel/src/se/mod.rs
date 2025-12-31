@@ -30,6 +30,7 @@ pub mod acl;
 pub mod descriptor;
 pub mod token;
 pub mod access;
+pub mod audit;
 
 // Re-export SID types
 pub use sid::{
@@ -142,6 +143,51 @@ pub use access::{
     se_open_object_audit,
 };
 
+// Re-export audit types
+pub use audit::{
+    AuditEventCategory,
+    AuditEventType,
+    AuditParameterType,
+    AuditParameter,
+    AuditParameterArray,
+    AuditWorkItem,
+    AuditBounds,
+    AuditOptions,
+    AuditPolicy,
+    audit_event_id,
+    // Core audit functions
+    sep_adt_init,
+    sep_adt_set_bounds,
+    sep_adt_get_bounds,
+    sep_adt_set_crash_on_fail,
+    sep_adt_get_crash_on_fail,
+    sep_adt_set_policy,
+    sep_adt_get_policy,
+    sep_adt_set_options,
+    sep_adt_get_options,
+    sep_adt_should_audit,
+    sep_adt_log_audit_record,
+    sep_adt_dequeue_work_item,
+    sep_adt_get_queue_length,
+    sep_adt_clear_queue,
+    sep_adt_get_recent,
+    sep_adt_get_stats,
+    sep_adt_get_all_policies,
+    // Convenience audit functions
+    se_audit_logon_success,
+    se_audit_logon_failure,
+    se_audit_logoff,
+    se_audit_object_access,
+    se_audit_privilege_use,
+    se_audit_process_created,
+    se_audit_process_exit,
+    se_audit_policy_change,
+    se_audit_user_created,
+    se_audit_system_startup,
+    se_audit_system_shutdown,
+    audit_category_name,
+};
+
 /// Initialize the Security Reference Monitor
 ///
 /// This initializes all security subsystems in the correct order:
@@ -151,6 +197,7 @@ pub use access::{
 /// 4. Security descriptor subsystem
 /// 5. Token subsystem
 /// 6. Access check subsystem
+/// 7. Audit subsystem
 pub fn init() {
     crate::serial_println!("[SE] Initializing Security Reference Monitor...");
 
@@ -161,6 +208,7 @@ pub fn init() {
     descriptor::init();
     token::init();
     access::init();
+    audit::sep_adt_init();
 
     crate::serial_println!("[SE] Security Reference Monitor initialized");
 }
