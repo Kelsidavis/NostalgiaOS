@@ -85,6 +85,7 @@ pub mod perf;
 pub mod pnp;
 pub mod po;
 pub mod ps;
+pub mod raw;
 pub mod rtl;
 pub mod se;
 pub mod shell;
@@ -364,6 +365,11 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing resource arbiter...");
     arb::init();
     kprintln!("  Resource arbiter initialized");
+
+    // Initialize RAW file system
+    kprintln!("  Initializing RAW file system...");
+    raw::init();
+    kprintln!("  RAW file system initialized");
 
     // Initialize object manager
     kprintln!("  Initializing object manager...");

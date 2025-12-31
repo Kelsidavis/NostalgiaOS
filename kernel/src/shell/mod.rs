@@ -1325,6 +1325,9 @@ impl Shell {
         // CACHE - cache manager
         } else if eq_ignore_case(cmd, "cache") {
             commands::cmd_cache(&args[1..argc]);
+        // RAWFS - RAW file system
+        } else if eq_ignore_case(cmd, "rawfs") {
+            commands::cmd_rawfs(&args[1..argc]);
         // ARP cache
         } else if eq_ignore_case(cmd, "arp") {
             commands::cmd_arp(&args[1..argc]);

@@ -28349,6 +28349,92 @@ pub fn cmd_cache(args: &[&str]) {
 }
 
 // ============================================================================
+// RAWFS Command - RAW File System Information
+// ============================================================================
+
+/// RAWFS command - show RAW file system information
+pub fn cmd_rawfs(args: &[&str]) {
+    use crate::raw;
+
+    if args.iter().any(|a| *a == "/?") {
+        outln!("RAWFS - RAW File System Viewer");
+        outln!("");
+        outln!("Usage: rawfs [stats | volumes | mount | dismount]");
+        outln!("");
+        outln!("  (no args)  Show RAW file system overview");
+        outln!("  stats      Show RAW I/O statistics");
+        outln!("  volumes    List mounted RAW volumes");
+        return;
+    }
+
+    let subcmd = if !args.is_empty() { args[0].to_ascii_lowercase() } else { "".into() };
+
+    if subcmd == "stats" {
+        let stats = raw::get_stats();
+        outln!("RAW File System Statistics:");
+        outln!("===========================");
+        outln!("");
+        outln!("  Volumes Mounted:  {}", stats.volumes_mounted);
+        outln!("");
+        outln!("I/O Operations:");
+        outln!("  Read Operations:  {}", stats.read_ops);
+        outln!("  Write Operations: {}", stats.write_ops);
+        outln!("  Bytes Read:       {}", stats.bytes_read);
+        outln!("  Bytes Written:    {}", stats.bytes_written);
+        outln!("");
+        outln!("Handle Operations:");
+        outln!("  Creates:          {}", stats.create_ops);
+        outln!("  Closes:           {}", stats.close_ops);
+        outln!("  IOCTLs:           {}", stats.ioctl_ops);
+    } else if subcmd == "volumes" {
+        let (indices, count) = raw::raw_list_volumes();
+
+        outln!("Mounted RAW Volumes:");
+        outln!("====================");
+        outln!("");
+
+        if count == 0 {
+            outln!("  (no RAW volumes mounted)");
+        } else {
+            outln!("  {:>4}  {:>10}  {:>12}  {:>6}  {:>8}", "VCB", "Device", "Size", "Sector", "Opens");
+            outln!("  {:->4}  {:->10}  {:->12}  {:->6}  {:->8}", "", "", "", "", "");
+            for i in 0..count {
+                if let Some(info) = raw::raw_query_volume_info(indices[i]) {
+                    let device_type = match info.device_type {
+                        raw::RawDeviceType::Disk => "Disk",
+                        raw::RawDeviceType::CdRom => "CD-ROM",
+                        raw::RawDeviceType::Tape => "Tape",
+                    };
+                    outln!("  {:>4}  {:>10}  {:>12}  {:>6}  {:>8}",
+                        indices[i], device_type, info.volume_size,
+                        info.sector_size, info.open_count);
+                }
+            }
+        }
+        outln!("");
+        outln!("Total: {} RAW volumes", count);
+    } else {
+        // Overview
+        let stats = raw::get_stats();
+
+        outln!("RAW File System Overview");
+        outln!("========================");
+        outln!("");
+        outln!("Status: {}", if raw::is_initialized() { "Initialized" } else { "Not Initialized" });
+        outln!("");
+        outln!("Statistics:");
+        outln!("  Volumes:     {}", stats.volumes_mounted);
+        outln!("  Read Ops:    {}  ({} bytes)", stats.read_ops, stats.bytes_read);
+        outln!("  Write Ops:   {}  ({} bytes)", stats.write_ops, stats.bytes_written);
+        outln!("  Handle Ops:  {} create, {} close", stats.create_ops, stats.close_ops);
+        outln!("");
+        outln!("RAW provides direct block access to unformatted volumes.");
+        outln!("");
+        outln!("Use 'rawfs <subcommand>' for detailed views.");
+    }
+}
+
+// ============================================================================
 // LOGMAN Command - Performance Logs and Alerts
 // ============================================================================
 
