@@ -3508,6 +3508,7 @@ pub fn cmd_rtl(args: &[&str]) {
         outln!("  image <addr>       Show PE image info using RTL functions");
         outln!("  8dot3 <name>       Generate 8.3 short name from long name");
         outln!("  compress <text>    Test LZNT1 compression");
+        outln!("  nls                Show NLS (code page) info");
         return;
     }
 
@@ -3800,8 +3801,81 @@ pub fn cmd_rtl(args: &[&str]) {
         } else {
             outln!("Compression failed: {:?}", status);
         }
+    } else if eq_ignore_case(cmd, "nls") {
+        use rtl::nls;
+
+        outln!("National Language Support (NLS)");
+        outln!("");
+
+        // Get current code pages
+        let (ansi_cp, oem_cp) = nls::rtl_get_default_code_page();
+
+        outln!("Code Pages:");
+        outln!("  ANSI:    {} ({})", ansi_cp, code_page_name(ansi_cp));
+        outln!("  OEM:     {} ({})", oem_cp, code_page_name(oem_cp));
+        outln!("  Multi-byte: {}", if nls::rtl_is_mb_code_page() { "Yes" } else { "No" });
+        outln!("  Initialized: {}", if nls::is_initialized() { "Yes" } else { "No" });
+        outln!("");
+
+        // Get stats
+        let stats = nls::get_stats();
+        outln!("Conversion Statistics:");
+        outln!("  ANSI -> Unicode: {}", stats.ansi_to_unicode);
+        outln!("  Unicode -> ANSI: {}", stats.unicode_to_ansi);
+        outln!("  OEM -> Unicode:  {}", stats.oem_to_unicode);
+        outln!("  Unicode -> OEM:  {}", stats.unicode_to_oem);
+        outln!("  Upcase ops:      {}", stats.upcase_ops);
+        outln!("  Downcase ops:    {}", stats.downcase_ops);
+        outln!("  Unmappable:      {}", stats.unmappable_chars);
+        outln!("");
+
+        // Test case conversion
+        outln!("Case Conversion Test:");
+        let test_str = "Hello World 123";
+        outln!("  Original:   \"{}\"", test_str);
+
+        // Convert to UTF-16
+        let mut utf16 = [0u16; 32];
+        let mut len = 0;
+        for ch in test_str.chars().take(31) {
+            utf16[len] = ch as u16;
+            len += 1;
+        }
+
+        // Upcase
+        let mut upcased = [0u16; 32];
+        upcased[..len].copy_from_slice(&utf16[..len]);
+        nls::rtl_upcase_unicode_string_in_place(&mut upcased[..len]);
+
+        let mut up_str = [0u8; 32];
+        for i in 0..len {
+            up_str[i] = upcased[i] as u8;
+        }
+        outln!("  Uppercase:  \"{}\"", core::str::from_utf8(&up_str[..len]).unwrap_or("?"));
+
+        // Downcase
+        let mut downcased = [0u16; 32];
+        downcased[..len].copy_from_slice(&utf16[..len]);
+        nls::rtl_downcase_unicode_string_in_place(&mut downcased[..len]);
+
+        let mut down_str = [0u8; 32];
+        for i in 0..len {
+            down_str[i] = downcased[i] as u8;
+        }
+        outln!("  Lowercase:  \"{}\"", core::str::from_utf8(&down_str[..len]).unwrap_or("?"));
     } else {
         outln!("Unknown rtl command: {}", cmd);
+    }
+}
+
+/// Helper to get code page name
+fn code_page_name(cp: u16) -> &'static str {
+    match cp {
+        437 => "US OEM",
+        850 => "Multilingual Latin 1",
+        1252 => "Windows Latin 1",
+        65001 => "UTF-8",
+        _ => "Unknown",
     }
 }
 
