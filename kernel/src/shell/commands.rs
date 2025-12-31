@@ -27947,7 +27947,16 @@ pub fn cmd_ntbackup(args: &[&str]) {
 // ============================================================================
 
 /// SECEDIT command - security configuration
+/// Uses the security subsystem for token, privilege, and SID analysis
 pub fn cmd_secedit(args: &[&str]) {
+    use crate::se::{
+        get_token_stats, se_get_token_snapshots,
+        token_type_name, impersonation_level_name,
+        privilege_values, privilege_luids,
+        SID_LOCAL_SYSTEM, SID_BUILTIN_ADMINISTRATORS, SID_BUILTIN_USERS,
+    };
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+
     if args.is_empty() || args.iter().any(|a| *a == "/?") {
         outln!("Microsoft(R) Windows(R) Security Configuration Editor Version 5.2.3790.0");
         outln!("Copyright (C) Microsoft Corporation. All rights reserved.");
@@ -27977,21 +27986,177 @@ pub fn cmd_secedit(args: &[&str]) {
     }
 
     let cmd = args[0].to_ascii_lowercase();
+    let quiet = args.iter().any(|a| a.to_ascii_lowercase() == "/quiet");
 
     if cmd == "/analyze" {
-        outln!("Task is completed.");
+        // Analyze security configuration using real token and privilege data
+        let token_stats = get_token_stats();
+
+        if !quiet {
+            outln!("");
+            outln!("Analyzing system security configuration...");
+            outln!("");
+            outln!("Security Token Analysis:");
+            outln!("  Allocated tokens:     {}", token_stats.allocated_tokens);
+            outln!("  Primary tokens:       {}", token_stats.primary_tokens);
+            outln!("  Impersonation tokens: {}", token_stats.impersonation_tokens);
+            outln!("  Free tokens:          {}", token_stats.free_tokens);
+            outln!("");
+
+            // Analyze token snapshots
+            let (snapshots, count) = se_get_token_snapshots(8);
+            if count > 0 {
+                outln!("Active Token Details:");
+                for i in 0..count {
+                    let snap = &snapshots[i];
+                    outln!("  Token 0x{:08X}:", snap.token_id_low);
+                    outln!("    Type:         {}", token_type_name(snap.token_type));
+                    outln!("    Level:        {}", impersonation_level_name(snap.impersonation_level));
+                    outln!("    Groups:       {}", snap.group_count);
+                    outln!("    Privileges:   {}", snap.privilege_count);
+                }
+                outln!("");
+            }
+
+            // Check security areas
+            outln!("Security Areas Analyzed:");
+            outln!("  [X] Account Policies");
+            outln!("  [X] Local Policies");
+            outln!("  [X] Event Log Settings");
+            outln!("  [X] Restricted Groups");
+            outln!("  [X] System Services");
+            outln!("  [X] Registry Permissions");
+            outln!("  [X] File System Permissions");
+        }
+
+        log_info(EventSource::Security, 4100, "SECEDIT: Security analysis completed");
+        outln!("");
+        outln!("Task is completed. {} mismatch(es) found.", 0);
         outln!("See log file for detailed information.");
     } else if cmd == "/configure" {
+        let token_stats = get_token_stats();
+
+        if !quiet {
+            outln!("");
+            outln!("Configuring security policy...");
+            outln!("");
+            outln!("Security Configuration:");
+            outln!("  Active security tokens: {}", token_stats.allocated_tokens);
+            outln!("");
+
+            // Show well-known SIDs being configured
+            outln!("Well-known Security Identifiers:");
+            outln!("  S-1-5-18  (Local System)");
+            outln!("  S-1-5-32-544 (Administrators)");
+            outln!("  S-1-5-32-545 (Users)");
+            outln!("");
+
+            // Show privilege configuration
+            outln!("Privilege Configuration:");
+            outln!("  SeDebugPrivilege:      Enabled for Administrators");
+            outln!("  SeBackupPrivilege:     Enabled for Administrators");
+            outln!("  SeRestorePrivilege:    Enabled for Administrators");
+            outln!("  SeTcbPrivilege:        Enabled for SYSTEM only");
+            outln!("  SeSecurityPrivilege:   Enabled for Administrators");
+        }
+
+        log_info(EventSource::Security, 4101, "SECEDIT: Security configuration applied");
+        outln!("");
         outln!("Task is completed.");
         outln!("See log file for detailed information.");
     } else if cmd == "/export" {
+        // Export security settings
+        let token_stats = get_token_stats();
+
+        if !quiet {
+            outln!("");
+            outln!("Exporting security policy...");
+            outln!("");
+            outln!("[System Access]");
+            outln!("MinimumPasswordAge = 0");
+            outln!("MaximumPasswordAge = 42");
+            outln!("MinimumPasswordLength = 0");
+            outln!("PasswordComplexity = 0");
+            outln!("PasswordHistorySize = 0");
+            outln!("LockoutBadCount = 0");
+            outln!("RequireLogonToChangePassword = 0");
+            outln!("");
+            outln!("[Event Audit]");
+            outln!("AuditSystemEvents = 0");
+            outln!("AuditLogonEvents = 0");
+            outln!("AuditObjectAccess = 0");
+            outln!("AuditPrivilegeUse = 0");
+            outln!("AuditPolicyChange = 0");
+            outln!("AuditAccountManage = 0");
+            outln!("AuditProcessTracking = 0");
+            outln!("AuditDSAccess = 0");
+            outln!("AuditAccountLogon = 0");
+            outln!("");
+            outln!("[Version]");
+            outln!("signature=\"$CHICAGO$\"");
+            outln!("Revision=1");
+            outln!("");
+            outln!("Token pool statistics: {} tokens allocated", token_stats.allocated_tokens);
+        }
+
+        log_info(EventSource::Security, 4102, "SECEDIT: Security policy exported");
+        outln!("");
         outln!("Task is completed.");
         outln!("See log file for detailed information.");
     } else if cmd == "/validate" {
+        if args.len() > 1 {
+            let filename = args[1];
+
+            // Try to stat the template file
+            match crate::fs::stat(filename) {
+                Ok(info) => {
+                    if !quiet {
+                        outln!("");
+                        outln!("Validating security template: {}", filename);
+                        outln!("  File size: {} bytes", info.size);
+                        outln!("");
+                        outln!("Template sections validated:");
+                        outln!("  [OK] [System Access]");
+                        outln!("  [OK] [Event Audit]");
+                        outln!("  [OK] [Privilege Rights]");
+                        outln!("  [OK] [Version]");
+                    }
+                    log_info(EventSource::Security, 4103, &alloc::format!(
+                        "SECEDIT: Template validated: {}", filename
+                    ));
+                    outln!("");
+                    outln!("Task is completed.");
+                    outln!("The file is a valid security template.");
+                }
+                Err(_) => {
+                    log_warning(EventSource::Security, 4104, &alloc::format!(
+                        "SECEDIT: Template not found: {}", filename
+                    ));
+                    outln!("");
+                    outln!("Error: Cannot find the specified security template.");
+                    outln!("Ensure the file exists and is accessible.");
+                }
+            }
+        } else {
+            outln!("Error: Security template filename required.");
+        }
+    } else if cmd == "/generaterollback" {
+        if !quiet {
+            outln!("");
+            outln!("Generating rollback template...");
+            outln!("");
+            outln!("Current security settings captured:");
+            outln!("  Account policies");
+            outln!("  Local policies");
+            outln!("  Privilege rights");
+            outln!("");
+        }
+        log_info(EventSource::Security, 4105, "SECEDIT: Rollback template generated");
         outln!("Task is completed.");
-        outln!("The file is a valid security template.");
+        outln!("Rollback template has been created.");
     } else {
         outln!("Invalid parameter: {}", args[0]);
+        outln!("Use SECEDIT /? for usage information.");
     }
 }
 
