@@ -3507,6 +3507,7 @@ pub fn cmd_rtl(args: &[&str]) {
         outln!("  crc32 <addr> <len> Calculate CRC32 of memory");
         outln!("  image <addr>       Show PE image info using RTL functions");
         outln!("  8dot3 <name>       Generate 8.3 short name from long name");
+        outln!("  compress <text>    Test LZNT1 compression");
         return;
     }
 
@@ -3698,6 +3699,107 @@ pub fn cmd_rtl(args: &[&str]) {
         }
         outln!("");
         outln!("Checksum: {:#06x}", rtl::rtl_compute_lfn_checksum(&name_utf16[..len]));
+    } else if eq_ignore_case(cmd, "compress") {
+        use rtl::compress::{
+            rtl_compress_buffer, rtl_decompress_buffer, rtl_get_compression_workspace_size,
+            COMPRESSION_FORMAT_LZNT1, COMPRESSION_ENGINE_STANDARD, RtlStatus,
+        };
+
+        // Get test data
+        let input = if args.len() > 1 {
+            args[1].as_bytes()
+        } else {
+            b"This is a test string for LZNT1 compression. AAAAAAAAAAAAA repeating data helps compression!"
+        };
+
+        outln!("LZNT1 Compression Test");
+        outln!("");
+        outln!("  Input:      \"{}\"", core::str::from_utf8(input).unwrap_or("<binary>"));
+        outln!("  Input size: {} bytes", input.len());
+        outln!("");
+
+        // Get workspace size
+        let format = COMPRESSION_FORMAT_LZNT1 | COMPRESSION_ENGINE_STANDARD;
+        let mut compress_ws = 0u32;
+        let mut fragment_ws = 0u32;
+
+        if rtl_get_compression_workspace_size(format, &mut compress_ws, &mut fragment_ws) != RtlStatus::Success {
+            outln!("Failed to get workspace size");
+            return;
+        }
+
+        outln!("Workspace sizes:");
+        outln!("  Compression:   {} bytes", compress_ws);
+        outln!("  Fragment:      {} bytes", fragment_ws);
+        outln!("");
+
+        // Compress the data
+        let mut compressed = [0u8; 512];
+        let mut workspace = [0u8; 4096];
+        let mut final_size = 0u32;
+
+        let status = rtl_compress_buffer(
+            format,
+            input,
+            &mut compressed,
+            4096,
+            &mut final_size,
+            &mut workspace,
+        );
+
+        if status == RtlStatus::Success {
+            let ratio = if final_size > 0 {
+                (input.len() * 100) / (final_size as usize)
+            } else {
+                0
+            };
+
+            outln!("Compression result:");
+            outln!("  Compressed size: {} bytes", final_size);
+            outln!("  Ratio:           {}%", ratio);
+
+            // Show first few bytes of compressed data
+            out!("  Compressed hex:  ");
+            for i in 0..(final_size as usize).min(16) {
+                out!("{:02x} ", compressed[i]);
+            }
+            if final_size > 16 {
+                out!("...");
+            }
+            outln!("");
+
+            // Try to decompress
+            let mut decompressed = [0u8; 512];
+            let mut decomp_size = 0u32;
+
+            let decomp_status = rtl_decompress_buffer(
+                COMPRESSION_FORMAT_LZNT1,
+                &mut decompressed,
+                &compressed[..(final_size as usize)],
+                &mut decomp_size,
+            );
+
+            if decomp_status == RtlStatus::Success {
+                outln!("");
+                outln!("Decompression:");
+                outln!("  Size:      {} bytes", decomp_size);
+                let decomp_str = core::str::from_utf8(&decompressed[..(decomp_size as usize).min(80)])
+                    .unwrap_or("<binary>");
+                outln!("  Content:   \"{}\"", decomp_str);
+                if decomp_size as usize == input.len() && &decompressed[..(decomp_size as usize)] == input {
+                    outln!("  Verified:  OK (matches original)");
+                } else {
+                    outln!("  Verified:  MISMATCH!");
+                }
+            } else {
+                outln!("");
+                outln!("Decompression failed: {:?}", decomp_status);
+            }
+        } else if status == RtlStatus::BufferAllZeros {
+            outln!("Buffer contains all zeros (special case)");
+        } else {
+            outln!("Compression failed: {:?}", status);
+        }
     } else {
         outln!("Unknown rtl command: {}", cmd);
     }
