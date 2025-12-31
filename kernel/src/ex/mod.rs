@@ -34,6 +34,7 @@ pub mod sysinfo;
 pub mod worker;
 pub mod eventlog;
 pub mod profile;
+pub mod atom;
 // pub mod pool;      // Uses mm::pool
 // pub mod timer;     // Uses ke::timer
 
@@ -49,3 +50,4 @@ pub use rundown::*;
 pub use sysinfo::*;
 pub use worker::*;
 pub use profile::*;
+pub use atom::*;

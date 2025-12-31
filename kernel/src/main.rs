@@ -443,6 +443,11 @@ fn phase1_init(boot_info: &BootInfo) {
     ex::profile::exp_profile_init();
     kprintln!("  Profile subsystem initialized");
 
+    // Initialize Atom Table subsystem
+    kprintln!("  Initializing atom table...");
+    ex::atom::exp_atom_init();
+    kprintln!("  Atom table initialized");
+
     // Initialize Service Control Manager
     kprintln!("  Initializing Service Control Manager...");
     svc::scm_initialize();

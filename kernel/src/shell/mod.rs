@@ -1280,6 +1280,9 @@ impl Shell {
         // CPU Profiling
         } else if eq_ignore_case(cmd, "profile") {
             commands::cmd_profile(&args[1..argc]);
+        // Atom Table
+        } else if eq_ignore_case(cmd, "atom") {
+            commands::cmd_atom(&args[1..argc]);
         // Disk/Partition viewer
         } else if eq_ignore_case(cmd, "disk") || eq_ignore_case(cmd, "partition") {
             commands::cmd_disk(&args[1..argc]);

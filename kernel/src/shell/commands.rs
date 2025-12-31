@@ -167,6 +167,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    kd             Kernel Debugger (status, bp, print, data)");
         outln!("    audit          Security Auditing (status, policy, events)");
         outln!("    profile        CPU Profiling (create, start, stop, hits)");
+        outln!("    atom           Atom Table (add, find, list, delete)");
         outln!("    disk,partition Disk/Partition info (mbr, gpt, geometry)");
         outln!("");
         outln!("  Use UP/DOWN arrows to navigate command history.");
@@ -31790,5 +31791,208 @@ fn parse_hex_or_dec(s: &str) -> Option<u64> {
         u64::from_str_radix(&s[2..], 16).ok()
     } else {
         s.parse().ok()
+    }
+}
+
+/// Atom Table command
+pub fn cmd_atom(args: &[&str]) {
+    if args.is_empty() {
+        show_atom_status();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "status") {
+        show_atom_status();
+    } else if eq_ignore_ascii_case(subcmd, "list") {
+        show_atom_list();
+    } else if eq_ignore_ascii_case(subcmd, "add") {
+        add_atom(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "find") {
+        find_atom(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "delete") {
+        delete_atom(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "info") {
+        show_atom_info(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("atom - Atom Table");
+        outln!("");
+        outln!("Usage: atom [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  status      - Show atom table status (default)");
+        outln!("  list        - List all atoms");
+        outln!("  add <name>  - Add atom to global table");
+        outln!("  find <name> - Find atom by name");
+        outln!("  delete <id> - Delete atom by ID");
+        outln!("  info <id>   - Show atom info");
+        outln!("");
+        outln!("Atoms are 16-bit handles for strings. Integer atoms");
+        outln!("(#0-#49151) represent numbers directly.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'atom help' for usage information");
+    }
+}
+
+fn show_atom_status() {
+    use crate::ex;
+
+    outln!("Atom Table Status");
+    outln!("=================");
+    outln!("");
+
+    let stats = ex::exp_atom_get_stats();
+    outln!("Statistics:");
+    outln!("  Atoms Added:   {}", stats.0);
+    outln!("  Atoms Found:   {}", stats.1);
+    outln!("  Atoms Deleted: {}", stats.2);
+    outln!("  Active Atoms:  {}", stats.3);
+    outln!("");
+
+    let sessions = ex::exp_list_session_tables();
+    outln!("Session Tables:  {}", sessions.len());
+    for (id, count) in sessions.iter() {
+        outln!("  Session {}: {} atoms", id, count);
+    }
+}
+
+fn show_atom_list() {
+    use crate::ex;
+
+    outln!("Global Atom Table");
+    outln!("=================");
+    outln!("");
+
+    let atoms = ex::exp_list_atoms();
+    if atoms.is_empty() {
+        outln!("(no atoms)");
+        return;
+    }
+
+    outln!("Atom    RefCount  Name");
+    outln!("------  --------  ----");
+
+    for (atom, name, refs) in atoms.iter() {
+        outln!("{:#06x}  {:>8}  {}", atom, refs, name);
+    }
+
+    outln!("");
+    outln!("Total: {} atoms", atoms.len());
+}
+
+fn add_atom(args: &[&str]) {
+    use crate::ex;
+
+    if args.is_empty() {
+        outln!("Usage: atom add <name>");
+        return;
+    }
+
+    let name = args[0];
+
+    match ex::nt_add_atom(name) {
+        Ok(atom) => {
+            outln!("Added atom {:#06x} for '{}'", atom, name);
+        }
+        Err(e) => {
+            outln!("Failed to add atom: {}", e);
+        }
+    }
+}
+
+fn find_atom(args: &[&str]) {
+    use crate::ex;
+
+    if args.is_empty() {
+        outln!("Usage: atom find <name>");
+        return;
+    }
+
+    let name = args[0];
+
+    match ex::nt_find_atom(name) {
+        Some(atom) => {
+            outln!("Found atom {:#06x} for '{}'", atom, name);
+        }
+        None => {
+            outln!("Atom not found: '{}'", name);
+        }
+    }
+}
+
+fn delete_atom(args: &[&str]) {
+    use crate::ex;
+
+    if args.is_empty() {
+        outln!("Usage: atom delete <id>");
+        outln!("  <id> can be decimal or hex (0x...)");
+        return;
+    }
+
+    let atom = if args[0].starts_with("0x") || args[0].starts_with("0X") {
+        u16::from_str_radix(&args[0][2..], 16).ok()
+    } else {
+        args[0].parse().ok()
+    };
+
+    let atom = match atom {
+        Some(a) => a,
+        None => {
+            outln!("Invalid atom ID");
+            return;
+        }
+    };
+
+    match ex::nt_delete_atom(atom) {
+        Ok(()) => {
+            outln!("Deleted atom {:#06x}", atom);
+        }
+        Err(e) => {
+            outln!("Failed to delete atom: {}", e);
+        }
+    }
+}
+
+fn show_atom_info(args: &[&str]) {
+    use crate::ex;
+
+    if args.is_empty() {
+        outln!("Usage: atom info <id>");
+        outln!("  <id> can be decimal or hex (0x...)");
+        return;
+    }
+
+    let atom = if args[0].starts_with("0x") || args[0].starts_with("0X") {
+        u16::from_str_radix(&args[0][2..], 16).ok()
+    } else {
+        args[0].parse().ok()
+    };
+
+    let atom = match atom {
+        Some(a) => a,
+        None => {
+            outln!("Invalid atom ID");
+            return;
+        }
+    };
+
+    match ex::nt_query_atom_info(atom) {
+        Some((name, refs, pinned)) => {
+            outln!("Atom {:#06x}", atom);
+            outln!("  Name:      {}", name);
+            outln!("  RefCount:  {}", refs);
+            outln!("  Pinned:    {}", pinned);
+
+            if atom <= ex::RTL_ATOM_INTEGER_MAX {
+                outln!("  Type:      Integer atom");
+            } else {
+                outln!("  Type:      String atom");
+            }
+        }
+        None => {
+            outln!("Atom not found: {:#06x}", atom);
+        }
     }
 }
