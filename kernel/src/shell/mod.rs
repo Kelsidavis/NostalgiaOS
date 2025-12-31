@@ -1271,6 +1271,9 @@ impl Shell {
         // Driver Verifier
         } else if eq_ignore_case(cmd, "verifier") {
             commands::cmd_verifier(&args[1..argc]);
+        // Kernel Debugger
+        } else if eq_ignore_case(cmd, "kd") {
+            commands::cmd_kd(&args[1..argc]);
         // Disk/Partition viewer
         } else if eq_ignore_case(cmd, "disk") || eq_ignore_case(cmd, "partition") {
             commands::cmd_disk(&args[1..argc]);

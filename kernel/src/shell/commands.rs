@@ -164,6 +164,7 @@ pub fn cmd_help(args: &[&str]) {
         outln!("    cc, cache      Cache Manager (stats, maps, prefetch)");
         outln!("    prefetch       Prefetcher (stats, traces, enable/disable)");
         outln!("    verifier       Driver Verifier (stats, irp, pool, deadlock)");
+        outln!("    kd             Kernel Debugger (status, bp, print, data)");
         outln!("    disk,partition Disk/Partition info (mbr, gpt, geometry)");
         outln!("");
         outln!("  Use UP/DOWN arrows to navigate command history.");
@@ -30999,5 +31000,224 @@ pub fn cmd_prnqctl(args: &[&str]) {
     } else {
         outln!("Unknown option: {}", cmd);
         outln!("Use -? for help.");
+    }
+}
+
+/// Kernel Debugger command
+pub fn cmd_kd(args: &[&str]) {
+    if args.is_empty() {
+        show_kd_status();
+        return;
+    }
+
+    let subcmd = args[0];
+
+    if eq_ignore_ascii_case(subcmd, "status") {
+        show_kd_status();
+    } else if eq_ignore_ascii_case(subcmd, "enable") {
+        kd_enable();
+    } else if eq_ignore_ascii_case(subcmd, "disable") {
+        kd_disable();
+    } else if eq_ignore_ascii_case(subcmd, "bp") || eq_ignore_ascii_case(subcmd, "breakpoint") {
+        show_kd_breakpoints();
+    } else if eq_ignore_ascii_case(subcmd, "print") {
+        show_kd_print(&args[1..]);
+    } else if eq_ignore_ascii_case(subcmd, "data") {
+        show_kd_data();
+    } else if eq_ignore_ascii_case(subcmd, "version") {
+        show_kd_version();
+    } else if eq_ignore_ascii_case(subcmd, "help") || subcmd == "-h" || subcmd == "--help" {
+        outln!("kd - Kernel Debugger");
+        outln!("");
+        outln!("Usage: kd [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  status      - Show debugger status (default)");
+        outln!("  enable      - Enable the debugger");
+        outln!("  disable     - Disable the debugger");
+        outln!("  bp          - Show breakpoints");
+        outln!("  print [n]   - Show debug print buffer (last n entries)");
+        outln!("  data        - Show debugger data blocks");
+        outln!("  version     - Show version info");
+        outln!("");
+        outln!("The kernel debugger provides breakpoint management,");
+        outln!("debug print buffering, and debugger data blocks.");
+    } else {
+        outln!("Unknown subcommand: {}", subcmd);
+        outln!("Use 'kd help' for usage information");
+    }
+}
+
+fn show_kd_status() {
+    use crate::kd;
+
+    outln!("Kernel Debugger Status");
+    outln!("======================");
+    outln!("");
+    outln!("State:              {}", if kd::kd_debugger_enabled() { "Enabled" } else { "Disabled" });
+    outln!("Debugger Present:   {}", if !kd::kd_debugger_not_present() { "Yes" } else { "No" });
+    outln!("");
+
+    let stats = kd::kd_get_stats();
+    outln!("Statistics:");
+    outln!("  Debugger Entries: {}", stats.0);
+    outln!("  Breakpoints Set:  {}", stats.1);
+    outln!("  Breakpoints Hit:  {}", stats.2);
+    outln!("  Messages Logged:  {}", stats.3);
+    outln!("");
+
+    let print_info = kd::kd_print_get_stats();
+    outln!("Print Buffer:");
+    outln!("  Messages Logged:  {}", print_info.0);
+    outln!("  Messages Dropped: {}", print_info.1);
+    outln!("  Messages Filtered:{}", print_info.2);
+}
+
+fn kd_enable() {
+    use crate::kd;
+
+    if kd::kd_enable_debugger() {
+        outln!("Kernel debugger enabled");
+    } else {
+        outln!("Failed to enable kernel debugger");
+    }
+}
+
+fn kd_disable() {
+    use crate::kd;
+
+    if kd::kd_disable_debugger() {
+        outln!("Kernel debugger disabled");
+    } else {
+        outln!("Failed to disable kernel debugger");
+    }
+}
+
+fn show_kd_breakpoints() {
+    use crate::kd;
+
+    outln!("Breakpoints");
+    outln!("===========");
+    outln!("");
+
+    let bp_stats = kd::kd_breakpoint_get_stats();
+    outln!("Set:     {}", bp_stats.0);
+    outln!("Hit:     {}", bp_stats.1);
+    outln!("Cleared: {}", bp_stats.2);
+    outln!("");
+
+    let bps = kd::kd_list_breakpoints();
+    if bps.is_empty() {
+        outln!("No active breakpoints");
+        return;
+    }
+
+    outln!("ID    Address            Suspended");
+    outln!("----  -----------------  ---------");
+
+    for (handle, addr, suspended) in bps.iter() {
+        outln!("{:<4}  {:#018x}  {}", handle, addr, if *suspended { "Yes" } else { "No" });
+    }
+}
+
+fn show_kd_print(args: &[&str]) {
+    use crate::kd;
+
+    let count = if args.is_empty() {
+        10
+    } else {
+        args[0].parse().unwrap_or(10)
+    };
+
+    outln!("Debug Print Buffer (last {} entries)", count);
+    outln!("=====================================");
+    outln!("");
+
+    let info = kd::kd_get_print_buffer_info();
+    outln!("Buffer Size:    {} / {} bytes", info.0, info.1);
+    outln!("Rollover Count: {}", info.2);
+    outln!("Buffer Changes: {}", info.3);
+    outln!("");
+
+    let entries = kd::kd_get_print_buffer(count);
+    if entries.is_empty() {
+        outln!("(buffer empty)");
+        return;
+    }
+
+    outln!("Timestamp        Component  Level   Message");
+    outln!("---------------  ---------  ------  -------");
+
+    for entry in entries.iter() {
+        let level_str = kd::level_name(entry.level);
+        // Truncate message to fit
+        let msg = if entry.message.len() > 40 {
+            &entry.message[..40]
+        } else {
+            &entry.message
+        };
+        outln!("{:<15}  {:>9}  {:>6}  {}",
+            entry.timestamp % 1_000_000_000_000,
+            entry.component_id,
+            level_str,
+            msg);
+    }
+}
+
+fn show_kd_data() {
+    use crate::kd;
+
+    outln!("Debugger Data Blocks");
+    outln!("====================");
+    outln!("");
+
+    let blocks = kd::kd_list_data_blocks();
+
+    outln!("Tag        Name                      Size");
+    outln!("---------  ------------------------  ------");
+
+    for (tag, name, size) in blocks.iter() {
+        // Format tag as 4 ASCII chars if possible
+        let tag_bytes = tag.to_le_bytes();
+        let tag_str = if tag_bytes.iter().all(|b| b.is_ascii_graphic() || *b == b' ') {
+            let mut s = [0u8; 4];
+            s.copy_from_slice(&tag_bytes);
+            alloc::string::String::from_utf8_lossy(&s).into_owned()
+        } else {
+            alloc::format!("{:#08x}", tag)
+        };
+
+        outln!("{:<9}  {:<24}  {:>6}", tag_str, name, size);
+    }
+
+    outln!("");
+
+    let stats = kd::kd_data_get_stats();
+    outln!("Registered:   {}", stats.0);
+    outln!("Deregistered: {}", stats.1);
+    outln!("Active:       {}", stats.2);
+}
+
+fn show_kd_version() {
+    use crate::kd;
+
+    let ver = kd::kd_get_version();
+
+    outln!("Kernel Debugger Version");
+    outln!("=======================");
+    outln!("");
+    outln!("Version:     {}.{}", ver.major_version, ver.minor_version);
+    outln!("Protocol:    {}", ver.protocol_version);
+    outln!("Machine:     {:#x} (AMD64)", ver.machine_type);
+    outln!("Flags:       {:#x}", ver.flags);
+    outln!("");
+    outln!("Max State Change:  {}", ver.max_state_change);
+    outln!("Max Manipulate:    {}", ver.max_manipulate);
+    outln!("");
+    if ver.kern_base != 0 {
+        outln!("Kernel Base:       {:#x}", ver.kern_base);
+    }
+    if ver.ps_loaded_module_list != 0 {
+        outln!("Loaded Modules:    {:#x}", ver.ps_loaded_module_list);
     }
 }

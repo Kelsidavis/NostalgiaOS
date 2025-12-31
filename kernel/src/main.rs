@@ -92,6 +92,7 @@ pub mod shell;
 pub mod svc;
 pub mod verifier;
 pub mod wmi;
+pub mod kd;
 
 mod framebuffer;
 mod serial;
@@ -431,6 +432,11 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing debugger support...");
     dbgk::dbgk_initialize();
     kprintln!("  Debugger support initialized");
+
+    // Initialize KD (Kernel Debugger)
+    kprintln!("  Initializing kernel debugger...");
+    kd::kd_init_system(0, true);
+    kprintln!("  Kernel debugger initialized");
 
     // Initialize Service Control Manager
     kprintln!("  Initializing Service Control Manager...");
