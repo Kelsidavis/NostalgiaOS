@@ -34,17 +34,112 @@ pub use provider::*;
 use crate::etw::Guid;
 use crate::ke::SpinLock;
 use alloc::collections::BTreeMap;
+use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 extern crate alloc;
+
+// ============================================================================
+// WMI Registration Action Constants (from wmi.c)
+// ============================================================================
+
+/// Register device for WMI
+pub const WMIREG_ACTION_REGISTER: u32 = 1;
+/// Deregister device from WMI
+pub const WMIREG_ACTION_DEREGISTER: u32 = 2;
+/// Re-register (deregister then register)
+pub const WMIREG_ACTION_REREGISTER: u32 = 3;
+/// Update GUIDs for device
+pub const WMIREG_ACTION_UPDATE_GUIDS: u32 = 4;
+/// Block IRPs for device
+pub const WMIREG_ACTION_BLOCK_IRPS: u32 = 5;
+
+/// Callback registration flag
+pub const WMIREG_FLAG_CALLBACK: u32 = 0x80000000;
+/// Trace provider flag
+pub const WMIREG_FLAG_TRACE_PROVIDER: u32 = 0x00010000;
+/// Expensive data collection
+pub const WMIREG_FLAG_EXPENSIVE: u32 = 0x00000001;
+/// Instance list provided
+pub const WMIREG_FLAG_INSTANCE_LIST: u32 = 0x00000004;
+/// Instance base name provided
+pub const WMIREG_FLAG_INSTANCE_BASENAME: u32 = 0x00000008;
+/// PDO instance names
+pub const WMIREG_FLAG_INSTANCE_PDO: u32 = 0x00000020;
+/// Event-only GUID
+pub const WMIREG_FLAG_EVENT_ONLY_GUID: u32 = 0x00000040;
+/// Remove GUID from registration
+pub const WMIREG_FLAG_REMOVE_GUID: u32 = 0x00010000;
+
+/// Maximum event size (64KB default)
+pub const DEFAULT_MAX_WNODE_EVENT_SIZE: u32 = 0x10000;
 
 /// WMI initialized flag
 static WMI_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 /// Next provider ID
 static NEXT_PROVIDER_ID: AtomicU32 = AtomicU32::new(1);
+
+// ============================================================================
+// WMI Event Notification (from notify.c)
+// ============================================================================
+
+/// WMI event entry for notification queue
+#[derive(Clone)]
+pub struct WmiEventEntry {
+    /// Event GUID
+    pub guid: Guid,
+    /// Provider ID
+    pub provider_id: u32,
+    /// Event data size
+    pub data_size: u32,
+    /// Event timestamp
+    pub timestamp: u64,
+    /// Instance index
+    pub instance_index: u32,
+    /// Event flags
+    pub flags: u32,
+}
+
+/// Maximum pending events
+const MAX_PENDING_EVENTS: usize = 256;
+
+/// WMI runtime statistics
+pub struct WmiRuntimeStats {
+    /// Total queries performed
+    pub total_queries: AtomicU64,
+    /// Total sets performed
+    pub total_sets: AtomicU64,
+    /// Total methods executed
+    pub total_methods: AtomicU64,
+    /// Total events fired
+    pub total_events: AtomicU64,
+    /// Total events dropped (queue full)
+    pub events_dropped: AtomicU64,
+    /// Total registrations
+    pub total_registrations: AtomicU64,
+    /// Total deregistrations
+    pub total_deregistrations: AtomicU64,
+}
+
+impl WmiRuntimeStats {
+    pub const fn new() -> Self {
+        Self {
+            total_queries: AtomicU64::new(0),
+            total_sets: AtomicU64::new(0),
+            total_methods: AtomicU64::new(0),
+            total_events: AtomicU64::new(0),
+            events_dropped: AtomicU64::new(0),
+            total_registrations: AtomicU64::new(0),
+            total_deregistrations: AtomicU64::new(0),
+        }
+    }
+}
+
+/// Global runtime statistics
+static WMI_STATS: WmiRuntimeStats = WmiRuntimeStats::new();
 
 /// WMI global state
 pub struct WmiState {
@@ -54,6 +149,14 @@ pub struct WmiState {
     providers: SpinLock<BTreeMap<u32, Arc<WmiProvider>>>,
     /// Provider ID to GUID mapping
     provider_guids: SpinLock<BTreeMap<u32, Vec<Guid>>>,
+    /// Pending event queue
+    event_queue: SpinLock<VecDeque<WmiEventEntry>>,
+    /// Event notifications enabled
+    events_enabled: SpinLock<BTreeMap<Guid, bool>>,
+    /// Registered devices by address
+    registered_devices: SpinLock<BTreeMap<usize, u32>>,
+    /// Trace providers
+    trace_providers: SpinLock<Vec<u32>>,
 }
 
 impl WmiState {
@@ -62,6 +165,10 @@ impl WmiState {
             data_blocks: SpinLock::new(BTreeMap::new()),
             providers: SpinLock::new(BTreeMap::new()),
             provider_guids: SpinLock::new(BTreeMap::new()),
+            event_queue: SpinLock::new(VecDeque::new()),
+            events_enabled: SpinLock::new(BTreeMap::new()),
+            registered_devices: SpinLock::new(BTreeMap::new()),
+            trace_providers: SpinLock::new(Vec::new()),
         }
     }
 }
@@ -142,6 +249,8 @@ pub fn wmi_query_data_block(
     instance_index: u32,
     buffer: &mut [u8],
 ) -> Result<usize, WmiError> {
+    WMI_STATS.total_queries.fetch_add(1, Ordering::Relaxed);
+
     let state = get_wmi_state();
     let blocks = state.data_blocks.lock();
 
@@ -165,6 +274,8 @@ pub fn wmi_set_data_block(
     instance_index: u32,
     buffer: &[u8],
 ) -> Result<(), WmiError> {
+    WMI_STATS.total_sets.fetch_add(1, Ordering::Relaxed);
+
     let state = get_wmi_state();
     let blocks = state.data_blocks.lock();
 
@@ -194,6 +305,8 @@ pub fn wmi_execute_method(
     input: &[u8],
     output: &mut [u8],
 ) -> Result<usize, WmiError> {
+    WMI_STATS.total_methods.fetch_add(1, Ordering::Relaxed);
+
     let state = get_wmi_state();
     let blocks = state.data_blocks.lock();
 
@@ -220,6 +333,8 @@ pub fn wmi_register_provider(
         return None;
     }
 
+    WMI_STATS.total_registrations.fetch_add(1, Ordering::Relaxed);
+
     let provider_id = NEXT_PROVIDER_ID.fetch_add(1, Ordering::SeqCst);
 
     let provider = WmiProvider::new(provider_id, name, device_object);
@@ -233,6 +348,12 @@ pub fn wmi_register_provider(
     {
         let mut provider_guids = state.provider_guids.lock();
         provider_guids.insert(provider_id, Vec::new());
+    }
+
+    // Track device to provider mapping
+    {
+        let mut devices = state.registered_devices.lock();
+        devices.insert(device_object, provider_id);
     }
 
     crate::serial_println!(
@@ -249,6 +370,8 @@ pub fn wmi_unregister_provider(provider_id: u32) -> bool {
     if !WMI_INITIALIZED.load(Ordering::SeqCst) {
         return false;
     }
+
+    WMI_STATS.total_deregistrations.fetch_add(1, Ordering::Relaxed);
 
     let state = get_wmi_state();
 
@@ -273,6 +396,18 @@ pub fn wmi_unregister_provider(provider_id: u32) -> bool {
     {
         let mut provider_guids = state.provider_guids.lock();
         provider_guids.remove(&provider_id);
+    }
+
+    // Remove device mapping
+    {
+        let mut devices = state.registered_devices.lock();
+        devices.retain(|_, &mut v| v != provider_id);
+    }
+
+    // Remove from trace providers
+    {
+        let mut traces = state.trace_providers.lock();
+        traces.retain(|&id| id != provider_id);
     }
 
     true
@@ -312,6 +447,20 @@ pub struct WmiStatistics {
     pub total_sets: u64,
     /// Total method executions
     pub total_methods: u64,
+    /// Total events fired
+    pub total_events: u64,
+    /// Events dropped (queue full)
+    pub events_dropped: u64,
+    /// Total registrations
+    pub total_registrations: u64,
+    /// Total deregistrations
+    pub total_deregistrations: u64,
+    /// Pending events in queue
+    pub pending_events: u32,
+    /// Registered devices
+    pub registered_devices: u32,
+    /// Trace providers
+    pub trace_providers: u32,
 }
 
 /// Get WMI statistics
@@ -323,12 +472,227 @@ pub fn wmi_get_statistics() -> WmiStatistics {
     let state = get_wmi_state();
     let blocks = state.data_blocks.lock();
     let providers = state.providers.lock();
+    let events = state.event_queue.lock();
+    let devices = state.registered_devices.lock();
+    let traces = state.trace_providers.lock();
 
     WmiStatistics {
         data_blocks: blocks.len() as u32,
         providers: providers.len() as u32,
-        total_queries: 0,
-        total_sets: 0,
-        total_methods: 0,
+        total_queries: WMI_STATS.total_queries.load(Ordering::Relaxed),
+        total_sets: WMI_STATS.total_sets.load(Ordering::Relaxed),
+        total_methods: WMI_STATS.total_methods.load(Ordering::Relaxed),
+        total_events: WMI_STATS.total_events.load(Ordering::Relaxed),
+        events_dropped: WMI_STATS.events_dropped.load(Ordering::Relaxed),
+        total_registrations: WMI_STATS.total_registrations.load(Ordering::Relaxed),
+        total_deregistrations: WMI_STATS.total_deregistrations.load(Ordering::Relaxed),
+        pending_events: events.len() as u32,
+        registered_devices: devices.len() as u32,
+        trace_providers: traces.len() as u32,
     }
+}
+
+// ============================================================================
+// IoWMIWriteEvent - Fire WMI Events (from notify.c)
+// ============================================================================
+
+/// Fire a WMI event
+/// This is the kernel equivalent of IoWMIWriteEvent
+pub fn wmi_write_event(
+    guid: &Guid,
+    provider_id: u32,
+    instance_index: u32,
+    data_size: u32,
+    flags: u32,
+) -> Result<(), WmiError> {
+    if !WMI_INITIALIZED.load(Ordering::SeqCst) {
+        return Err(WmiError::NotSupported);
+    }
+
+    // Check if events are enabled for this GUID
+    let state = get_wmi_state();
+    {
+        let enabled = state.events_enabled.lock();
+        if let Some(&is_enabled) = enabled.get(guid) {
+            if !is_enabled {
+                return Ok(()); // Events disabled, silently succeed
+            }
+        }
+    }
+
+    // Create event entry
+    let event = WmiEventEntry {
+        guid: *guid,
+        provider_id,
+        data_size,
+        timestamp: crate::hal::rtc::get_system_time(),
+        instance_index,
+        flags,
+    };
+
+    // Queue the event
+    {
+        let mut queue = state.event_queue.lock();
+        if queue.len() >= MAX_PENDING_EVENTS {
+            WMI_STATS.events_dropped.fetch_add(1, Ordering::Relaxed);
+            return Err(WmiError::InsufficientResources);
+        }
+        queue.push_back(event);
+    }
+
+    WMI_STATS.total_events.fetch_add(1, Ordering::Relaxed);
+
+    Ok(())
+}
+
+/// Enable events for a GUID
+pub fn wmi_enable_events(guid: &Guid) -> Result<(), WmiError> {
+    if !WMI_INITIALIZED.load(Ordering::SeqCst) {
+        return Err(WmiError::NotSupported);
+    }
+
+    let state = get_wmi_state();
+    let mut enabled = state.events_enabled.lock();
+    enabled.insert(*guid, true);
+
+    Ok(())
+}
+
+/// Disable events for a GUID
+pub fn wmi_disable_events(guid: &Guid) -> Result<(), WmiError> {
+    if !WMI_INITIALIZED.load(Ordering::SeqCst) {
+        return Err(WmiError::NotSupported);
+    }
+
+    let state = get_wmi_state();
+    let mut enabled = state.events_enabled.lock();
+    enabled.insert(*guid, false);
+
+    Ok(())
+}
+
+/// Get next pending event (for notification processing)
+pub fn wmi_get_next_event() -> Option<WmiEventEntry> {
+    if !WMI_INITIALIZED.load(Ordering::SeqCst) {
+        return None;
+    }
+
+    let state = get_wmi_state();
+    let mut queue = state.event_queue.lock();
+    queue.pop_front()
+}
+
+/// Get pending event count
+pub fn wmi_pending_event_count() -> usize {
+    if !WMI_INITIALIZED.load(Ordering::SeqCst) {
+        return 0;
+    }
+
+    let state = get_wmi_state();
+    let queue = state.event_queue.lock();
+    queue.len()
+}
+
+// ============================================================================
+// IoWMIRegistrationControl - Device Registration (from register.c)
+// ============================================================================
+
+/// IoWMIRegistrationControl equivalent
+/// Registers or deregisters a device for WMI
+pub fn wmi_registration_control(
+    device_object: usize,
+    action: u32,
+) -> Result<u32, WmiError> {
+    if !WMI_INITIALIZED.load(Ordering::SeqCst) {
+        return Err(WmiError::NotSupported);
+    }
+
+    let is_trace_provider = (action & WMIREG_FLAG_TRACE_PROVIDER) != 0;
+    let base_action = action & !(WMIREG_FLAG_CALLBACK | WMIREG_FLAG_TRACE_PROVIDER);
+
+    match base_action {
+        WMIREG_ACTION_REGISTER => {
+            // Create a default provider name
+            let name = alloc::format!("Device_{:016X}", device_object);
+            if let Some(provider_id) = wmi_register_provider(&name, device_object) {
+                // Track as trace provider if needed
+                if is_trace_provider {
+                    let state = get_wmi_state();
+                    let mut traces = state.trace_providers.lock();
+                    if !traces.contains(&provider_id) {
+                        traces.push(provider_id);
+                    }
+                }
+                Ok(provider_id)
+            } else {
+                Err(WmiError::InsufficientResources)
+            }
+        }
+        WMIREG_ACTION_DEREGISTER => {
+            let state = get_wmi_state();
+            let provider_id = {
+                let devices = state.registered_devices.lock();
+                devices.get(&device_object).copied()
+            };
+
+            if let Some(id) = provider_id {
+                wmi_unregister_provider(id);
+                Ok(0)
+            } else {
+                Err(WmiError::ProviderNotFound)
+            }
+        }
+        WMIREG_ACTION_REREGISTER => {
+            // Deregister then register
+            let _ = wmi_registration_control(device_object, WMIREG_ACTION_DEREGISTER);
+            wmi_registration_control(device_object, WMIREG_ACTION_REGISTER | (action & WMIREG_FLAG_TRACE_PROVIDER))
+        }
+        WMIREG_ACTION_UPDATE_GUIDS => {
+            // Just succeed for now
+            Ok(0)
+        }
+        WMIREG_ACTION_BLOCK_IRPS => {
+            // Mark device as blocked (not implemented yet)
+            Ok(0)
+        }
+        _ => Err(WmiError::InvalidParameter),
+    }
+}
+
+/// Find provider ID by device object
+pub fn wmi_find_provider_by_device(device_object: usize) -> Option<u32> {
+    if !WMI_INITIALIZED.load(Ordering::SeqCst) {
+        return None;
+    }
+
+    let state = get_wmi_state();
+    let devices = state.registered_devices.lock();
+    devices.get(&device_object).copied()
+}
+
+/// Check if a device is registered as a trace provider
+pub fn wmi_is_trace_provider(provider_id: u32) -> bool {
+    if !WMI_INITIALIZED.load(Ordering::SeqCst) {
+        return false;
+    }
+
+    let state = get_wmi_state();
+    let traces = state.trace_providers.lock();
+    traces.contains(&provider_id)
+}
+
+/// Get all trace providers
+pub fn wmi_get_trace_providers() -> Vec<u32> {
+    if !WMI_INITIALIZED.load(Ordering::SeqCst) {
+        return Vec::new();
+    }
+
+    let state = get_wmi_state();
+    let traces = state.trace_providers.lock();
+    traces.clone()
+}
+
+/// Check if WMI is initialized
+pub fn wmi_is_initialized() -> bool {
+    WMI_INITIALIZED.load(Ordering::SeqCst)
 }

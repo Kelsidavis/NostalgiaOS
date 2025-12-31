@@ -25095,6 +25095,7 @@ pub fn cmd_wmic(args: &[&str]) {
         outln!("  BIOS            BIOS information");
         outln!("  MEMORYCHIP      Memory modules");
         outln!("  USERACCOUNT     User accounts");
+        outln!("  WMISTATS        WMI subsystem statistics");
         outln!("");
         outln!("Verbs: GET, LIST, CALL, SET");
         outln!("");
@@ -25360,6 +25361,43 @@ pub fn cmd_wmic(args: &[&str]) {
         outln!("  Allocated tokens:       {}", token_stats.allocated_tokens);
         outln!("  Primary tokens:         {}", token_stats.primary_tokens);
         outln!("  Impersonation tokens:   {}", token_stats.impersonation_tokens);
+
+    } else if alias == "WMISTATS" || alias == "WMI" {
+        // Show WMI subsystem statistics
+        let stats = crate::wmi::wmi_get_statistics();
+        let trace_providers = crate::wmi::wmi_get_trace_providers();
+
+        outln!("");
+        outln!("WMI Subsystem Statistics");
+        outln!("========================");
+        outln!("");
+        outln!("Registration:");
+        outln!("  Data Blocks:        {}", stats.data_blocks);
+        outln!("  Providers:          {}", stats.providers);
+        outln!("  Registered Devices: {}", stats.registered_devices);
+        outln!("  Trace Providers:    {}", stats.trace_providers);
+        outln!("");
+        outln!("Operations:");
+        outln!("  Total Queries:      {}", stats.total_queries);
+        outln!("  Total Sets:         {}", stats.total_sets);
+        outln!("  Total Methods:      {}", stats.total_methods);
+        outln!("");
+        outln!("Events:");
+        outln!("  Total Events:       {}", stats.total_events);
+        outln!("  Events Dropped:     {}", stats.events_dropped);
+        outln!("  Pending Events:     {}", stats.pending_events);
+        outln!("");
+        outln!("Registrations:");
+        outln!("  Total Registrations:    {}", stats.total_registrations);
+        outln!("  Total Deregistrations:  {}", stats.total_deregistrations);
+
+        if !trace_providers.is_empty() {
+            outln!("");
+            outln!("Active Trace Providers:");
+            for id in &trace_providers {
+                outln!("  Provider ID: {}", id);
+            }
+        }
 
     } else {
         outln!("Alias not found: {}", alias);
