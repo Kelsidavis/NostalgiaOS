@@ -3656,6 +3656,10 @@ pub fn cmd_ob(args: &[&str]) {
         outln!("  types              List registered object types");
         outln!("  dir [path]         List directory contents");
         outln!("  handles            Show system handle table");
+        outln!("  symlink            Symbolic link operations:");
+        outln!("    symlink list     List all symbolic links");
+        outln!("    symlink query <n> Query symlink target");
+        outln!("    symlink stats    Show symlink statistics");
         return;
     }
 
@@ -3800,6 +3804,69 @@ pub fn cmd_ob(args: &[&str]) {
                 outln!("");
                 outln!("Total shown: {} handles", count);
             }
+        }
+    } else if eq_ignore_case(cmd, "symlink") {
+        // Symbolic link subcommands
+        let subcmd = if args.len() > 1 { args[1] } else { "list" };
+
+        if eq_ignore_case(subcmd, "list") {
+            outln!("Symbolic Links:");
+            outln!("");
+            outln!("{:<35} -> {}", "Link Name", "Target");
+            outln!("------------------------------------------------------------");
+
+            let links = ob::ob_list_symbolic_links();
+            for (name, target) in links.iter() {
+                outln!("{:<35} -> {}", name, target);
+            }
+
+            if links.is_empty() {
+                outln!("  (No symbolic links registered)");
+            } else {
+                outln!("");
+                outln!("Total: {} symbolic links", links.len());
+            }
+        } else if eq_ignore_case(subcmd, "query") {
+            if args.len() < 3 {
+                outln!("Usage: ob symlink query <link-name>");
+                outln!("Example: ob symlink query \\DosDevices\\C:");
+                return;
+            }
+            let name = args[2];
+
+            if let Some(target) = ob::ob_query_symbolic_link(name) {
+                outln!("Symbolic Link: {}", name);
+                outln!("Target:        {}", target);
+            } else {
+                outln!("Symbolic link not found: {}", name);
+            }
+        } else if eq_ignore_case(subcmd, "stats") {
+            let (count, lookups, hits) = ob::ob_get_symlink_stats();
+            let hit_rate = if lookups > 0 {
+                (hits * 100) / lookups
+            } else {
+                0
+            };
+
+            outln!("Symbolic Link Statistics:");
+            outln!("");
+            outln!("  Total Links:     {}", count);
+            outln!("  Total Lookups:   {}", lookups);
+            outln!("  Cache Hits:      {}", hits);
+            outln!("  Hit Rate:        {}%", hit_rate);
+        } else if eq_ignore_case(subcmd, "resolve") {
+            if args.len() < 3 {
+                outln!("Usage: ob symlink resolve <path>");
+                outln!("Example: ob symlink resolve \\DosDevices\\C:\\Windows");
+                return;
+            }
+            let path = args[2];
+            let resolved = ob::ob_resolve_symbolic_links(path, 10);
+            outln!("Original: {}", path);
+            outln!("Resolved: {}", resolved);
+        } else {
+            outln!("Unknown symlink subcommand: {}", subcmd);
+            outln!("Available: list, query, stats, resolve");
         }
     } else {
         outln!("Unknown ob command: {}", cmd);
@@ -4032,6 +4099,7 @@ pub fn cmd_ke(args: &[&str]) {
         outln!("  apc                Show APC information");
         outln!("  timer              Show timer information");
         outln!("  prcb               Show processor control block");
+        outln!("  balance            Balance set manager status");
         return;
     }
 
@@ -4143,6 +4211,39 @@ pub fn cmd_ke(args: &[&str]) {
             outln!("");
             outln!("Queued Spinlock Queues: {}", ke::LOCK_QUEUE_MAXIMUM);
         }
+    } else if eq_ignore_case(cmd, "balance") {
+        outln!("Balance Set Manager Status");
+        outln!("");
+
+        let running = ke::ke_is_balance_manager_running();
+        let pressure = ke::ke_get_memory_pressure();
+        let protect_time = ke::ke_get_stack_protect_time();
+
+        outln!("Manager Status:");
+        outln!("  Running:            {}", if running { "Yes" } else { "No" });
+        outln!("  Memory Pressure:    {} {}", pressure,
+               if pressure == 0 { "(none)" }
+               else if pressure <= 2 { "(low)" }
+               else { "(high)" });
+        outln!("  Stack Protect Time: {} ticks", protect_time);
+        outln!("");
+
+        let stats = ke::ke_get_balance_stats();
+        outln!("Statistics:");
+        outln!("  Run Count:          {}", stats.run_count);
+        outln!("  Stacks Swapped Out: {}", stats.stacks_swapped_out);
+        outln!("  Stacks Swapped In:  {}", stats.stacks_swapped_in);
+        outln!("  Procs Swapped Out:  {}", stats.processes_swapped_out);
+        outln!("  Procs Swapped In:   {}", stats.processes_swapped_in);
+        outln!("  Priority Boosts:    {}", stats.priority_boosts);
+        outln!("  Ready Queue Scans:  {}", stats.ready_scans);
+        outln!("");
+
+        outln!("Constants:");
+        outln!("  Max Thread Stacks:     {}", ke::MAXIMUM_THREAD_STACKS);
+        outln!("  Periodic Interval:     {} (100ns units)", ke::PERIODIC_INTERVAL);
+        outln!("  Ready Without Running: {} ticks", ke::READY_WITHOUT_RUNNING);
+        outln!("  Stack Scan Period:     {}", ke::STACK_SCAN_PERIOD);
     } else {
         outln!("Unknown ke command: {}", cmd);
     }
