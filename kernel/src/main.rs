@@ -80,6 +80,7 @@ pub mod mm;
 pub mod net;
 pub mod drivers;
 pub mod ob;
+pub mod perf;
 pub mod pnp;
 pub mod po;
 pub mod ps;
@@ -352,6 +353,11 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing power manager...");
     po::init();
     kprintln!("  Power manager initialized");
+
+    // Initialize performance monitoring subsystem
+    kprintln!("  Initializing performance monitoring...");
+    perf::init();
+    kprintln!("  Performance monitoring initialized");
 
     // Initialize object manager
     kprintln!("  Initializing object manager...");

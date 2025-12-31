@@ -616,3 +616,30 @@ pub fn ke_get_current_processor_number() -> u32 {
 pub fn ke_get_current_processor_set_member() -> KAffinity {
     get_current_prcb().set_member
 }
+
+/// Get the current thread ID
+#[inline]
+pub fn ke_get_current_thread_id() -> u32 {
+    let prcb = get_current_prcb();
+    if prcb.current_thread.is_null() {
+        0
+    } else {
+        unsafe { (*prcb.current_thread).thread_id }
+    }
+}
+
+/// Get the current process ID
+#[inline]
+pub fn ke_get_current_process_id() -> u32 {
+    let prcb = get_current_prcb();
+    if prcb.current_thread.is_null() {
+        0
+    } else {
+        let process = unsafe { (*prcb.current_thread).process };
+        if process.is_null() {
+            0
+        } else {
+            unsafe { (*process).process_id }
+        }
+    }
+}

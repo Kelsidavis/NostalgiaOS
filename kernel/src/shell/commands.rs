@@ -27918,19 +27918,22 @@ pub fn cmd_typeperf(args: &[&str]) {
         use crate::ps::get_cid_stats;
         use crate::net;
         use crate::etw;
+        use crate::perf;
 
         let dt = get_datetime();
 
-        // Get real stats
+        // Get real stats from various subsystems
         let pool_stats = mm_get_pool_stats();
         let cid_stats = get_cid_stats();
         let net_stats = net::get_stats();
         let etw_stats = etw::etw_get_statistics();
+        let perf_stats = perf::get_stats();
+        let hook_stats = perf::hooks::get_stats();
 
         // Output header
-        outln!("\"(PDH-CSV 4.0)\",\"\\\\NOSTALGOS\\Memory\\Pool Bytes\",\"\\\\NOSTALGOS\\System\\Processes\",\"\\\\NOSTALGOS\\System\\Threads\",\"\\\\NOSTALGOS\\Network\\Bytes Received\",\"\\\\NOSTALGOS\\Network\\Bytes Sent\",\"\\\\NOSTALGOS\\ETW\\Events\"");
+        outln!("\"(PDH-CSV 4.0)\",\"\\\\NOSTALGOS\\Memory\\Pool Bytes\",\"\\\\NOSTALGOS\\System\\Processes\",\"\\\\NOSTALGOS\\System\\Threads\",\"\\\\NOSTALGOS\\Network\\Bytes Received\",\"\\\\NOSTALGOS\\Network\\Bytes Sent\",\"\\\\NOSTALGOS\\Perf\\Events\"");
 
-        // Output current sample with real data
+        // Output current sample with real data including perf subsystem
         outln!("\"{:02}/{:02}/{} {:02}:{:02}:{:02}.000\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"",
                dt.month, dt.day, dt.year,
                dt.hour, dt.minute, dt.second,
@@ -27939,11 +27942,155 @@ pub fn cmd_typeperf(args: &[&str]) {
                cid_stats.active_threads,
                net_stats.bytes_received,
                net_stats.bytes_transmitted,
-               etw_stats.total_events);
+               perf_stats.total_events + hook_stats.events_logged);
 
+        outln!("");
+        outln!("Performance Monitoring Active: {}", perf::is_enabled());
+        outln!("Hook Events Logged: {}", hook_stats.events_logged);
+        outln!("Hook Events Dropped: {}", hook_stats.events_dropped);
         outln!("");
         outln!("The command completed successfully.");
         outln!("(Press Ctrl+C to stop continuous monitoring)");
+    }
+}
+
+/// PERFMON command - show performance monitoring statistics
+pub fn cmd_perfmon(args: &[&str]) {
+    use crate::perf;
+
+    if args.iter().any(|a| *a == "/?") {
+        outln!("PERFMON - Performance Monitor");
+        outln!("");
+        outln!("Usage: perfmon [counters | profile | hooks | start | stop | reset]");
+        outln!("");
+        outln!("  (no args)  Show overall performance statistics");
+        outln!("  counters   Show registered performance counters");
+        outln!("  profile    Show CPU profiling information");
+        outln!("  hooks      Show performance hook statistics");
+        outln!("  start      Start performance logging");
+        outln!("  stop       Stop performance logging");
+        outln!("  reset      Reset all performance counters");
+        return;
+    }
+
+    let subcmd = if !args.is_empty() { args[0].to_ascii_lowercase() } else { "".into() };
+
+    if subcmd == "counters" {
+        // Show registered counters
+        let counter_stats = perf::counters::get_stats();
+        outln!("Performance Counter Objects:");
+        outln!("");
+        outln!("  Registered Objects:  {}", counter_stats.objects_registered);
+        outln!("  Total Counters:      {}", counter_stats.total_counters);
+        outln!("  Queries Performed:   {}", counter_stats.queries_performed);
+        outln!("");
+        outln!("Available Object Types:");
+        outln!("  \\Processor           - CPU usage, interrupts, DPCs");
+        outln!("  \\Memory              - Pool bytes, available bytes");
+        outln!("  \\System              - Processes, threads, uptime");
+        outln!("  \\Process             - Per-process statistics");
+        outln!("  \\Network Interface   - Bytes sent/received");
+        outln!("  \\Disk                - Read/write operations");
+        outln!("  \\Cache               - Cache hits/misses");
+    } else if subcmd == "profile" {
+        // Show CPU profiling stats
+        let profile_stats = perf::profile::get_stats();
+        outln!("CPU Profiler Status:");
+        outln!("");
+        outln!("  Active:            {}", if profile_stats.active { "Yes" } else { "No" });
+        outln!("  Interval:          {} us", profile_stats.interval_us);
+        outln!("  Source:            {:?}", profile_stats.source);
+        outln!("  Samples Collected: {}", profile_stats.samples_collected);
+        outln!("  Samples Dropped:   {}", profile_stats.samples_dropped);
+        outln!("  Cache Size:        {}", profile_stats.cache_size);
+
+        // Show hot spots if profiling is active
+        if profile_stats.samples_collected > 0 {
+            outln!("");
+            outln!("Top 5 Hot Spots (most sampled addresses):");
+            let hot_spots = perf::profile::find_hot_spots(5);
+            for (i, (ip, count)) in hot_spots.iter().enumerate() {
+                outln!("  {}. {:#018x}  ({} samples)", i + 1, ip, count);
+            }
+        }
+    } else if subcmd == "hooks" {
+        // Show hook statistics
+        let hook_stats = perf::hooks::get_stats();
+        outln!("Performance Hook Status:");
+        outln!("");
+        outln!("  Hooks Registered:  {}", hook_stats.hooks_registered);
+        outln!("  Buffer Enabled:    {}", if hook_stats.buffer_enabled { "Yes" } else { "No" });
+        outln!("  Buffer Used:       {} bytes", hook_stats.buffer_used);
+        outln!("  Events Logged:     {}", hook_stats.events_logged);
+        outln!("  Events Dropped:    {}", hook_stats.events_dropped);
+    } else if subcmd == "start" {
+        // Start performance logging
+        let mut mask = perf::PerfGroupMask::new();
+        mask.set_group(perf::PerfGroup::ContextSwitch, true);
+        mask.set_group(perf::PerfGroup::Memory, true);
+        mask.set_group(perf::PerfGroup::DiskIo, true);
+        mask.set_group(perf::PerfGroup::Profile, true);
+        mask.set_group(perf::PerfGroup::Dpc, true);
+        mask.set_group(perf::PerfGroup::Interrupt, true);
+
+        let result = perf::start_log(&mask, perf::PerfStartLogLocation::PostBoot);
+        if result == 0 {
+            perf::hooks::enable_buffer();
+            perf::profile::start();
+            outln!("Performance logging started.");
+        } else {
+            outln!("Failed to start performance logging (status: {})", result);
+        }
+    } else if subcmd == "stop" {
+        // Stop performance logging
+        perf::profile::stop();
+        perf::hooks::disable_buffer();
+        let result = perf::stop_log();
+        if result == 0 {
+            outln!("Performance logging stopped.");
+        } else {
+            outln!("Failed to stop performance logging (status: {})", result);
+        }
+    } else if subcmd == "reset" {
+        // Reset counters
+        perf::reset_stats();
+        perf::hooks::clear_buffer();
+        outln!("Performance counters reset.");
+    } else {
+        // Show overall stats
+        let stats = perf::get_stats();
+        let hook_stats = perf::hooks::get_stats();
+        let profile_stats = perf::profile::get_stats();
+
+        outln!("Performance Monitoring Subsystem");
+        outln!("================================");
+        outln!("");
+        outln!("Status:");
+        outln!("  Enabled:           {}", if perf::is_enabled() { "Yes" } else { "No" });
+        outln!("  Logging Active:    {}", if perf::is_logging() { "Yes" } else { "No" });
+        outln!("  Profiling Active:  {}", if profile_stats.active { "Yes" } else { "No" });
+        outln!("");
+        outln!("Event Statistics:");
+        outln!("  Total Events:      {}", stats.total_events);
+        outln!("  Context Switches:  {}", stats.context_switches);
+        outln!("  Hard Faults:       {}", stats.hard_faults);
+        outln!("  Disk Reads:        {}", stats.disk_reads);
+        outln!("  Disk Writes:       {}", stats.disk_writes);
+        outln!("  Network Sends:     {}", stats.network_sends);
+        outln!("  Network Receives:  {}", stats.network_receives);
+        outln!("  Registry Reads:    {}", stats.registry_reads);
+        outln!("  Registry Writes:   {}", stats.registry_writes);
+        outln!("  Pool Allocations:  {}", stats.pool_allocations);
+        outln!("  Pool Frees:        {}", stats.pool_frees);
+        outln!("  DPC Count:         {}", stats.dpc_count);
+        outln!("  Interrupt Count:   {}", stats.interrupt_count);
+        outln!("  System Calls:      {}", stats.syscall_count);
+        outln!("  Profile Samples:   {}", stats.profile_samples);
+        outln!("");
+        outln!("Hook Buffer:");
+        outln!("  Events Logged:     {}", hook_stats.events_logged);
+        outln!("  Events Dropped:    {}", hook_stats.events_dropped);
+        outln!("  Hooks Registered:  {}", hook_stats.hooks_registered);
     }
 }
 

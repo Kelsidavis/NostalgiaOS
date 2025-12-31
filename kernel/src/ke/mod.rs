@@ -86,6 +86,7 @@ pub use prcb::{
     ki_get_processor_block, get_active_cpu_count, ke_get_active_processors,
     ki_get_idle_summary, ki_set_processor_idle, ki_clear_processor_idle,
     ke_get_current_processor_number, ke_get_current_processor_set_member,
+    ke_get_current_thread_id, ke_get_current_process_id,
 };
 
 // Re-export KPCR types

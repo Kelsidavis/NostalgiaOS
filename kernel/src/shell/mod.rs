@@ -159,7 +159,7 @@ const COMMANDS: &[&str] = &[
     "makecab", "md", "mem", "memmap", "memory", "mkdir", "mm", "mode", "more", "msg", "msr", "mv",
     "nbtstat", "net", "netinfo", "netserv", "netsh", "netstat", "nslookup", "ntbackup", "ntfs",
     "ob", "obdir", "openfiles",
-    "pagetable", "partition", "path", "pathping", "pause", "pci", "pe", "peb", "pfn", "ping", "pipes", "po", "pool", "pooltag", "popd", "port", "power", "powercfg", "prcb", "prncnfg", "prndrvr", "prnjobs", "prnmngr", "prnport", "prnqctl", "prefetch", "print", "prompt", "ps", "pushd", "pwd",
+    "pagetable", "partition", "path", "pathping", "pause", "pci", "pe", "peb", "perfmon", "pfn", "ping", "pipes", "po", "pool", "pooltag", "popd", "port", "power", "powercfg", "prcb", "prncnfg", "prndrvr", "prnjobs", "prnmngr", "prnport", "prnqctl", "prefetch", "print", "prompt", "ps", "pushd", "pwd",
     "qotd", "query", "quit",
     "ramdisk", "rd", "reboot", "recover", "reg", "regsvr32", "relog", "ren", "rename", "replace", "reset", "resume", "rm", "rmdir", "robocopy", "route", "rtl", "runas", "rundll32",
     "sc", "sched", "schtasks", "se", "secedit", "section", "services", "set", "setlocal", "setx", "shutdown", "smbios", "sort", "stack", "start", "subst", "suspend", "sysinfo", "systeminfo",
@@ -1253,6 +1253,9 @@ impl Shell {
         // PEB viewer
         } else if eq_ignore_case(cmd, "peb") {
             commands::cmd_peb(&args[1..argc]);
+        // PERFMON - performance monitoring
+        } else if eq_ignore_case(cmd, "perfmon") {
+            commands::cmd_perfmon(&args[1..argc]);
         // TEB viewer
         } else if eq_ignore_case(cmd, "teb") {
             commands::cmd_teb(&args[1..argc]);
