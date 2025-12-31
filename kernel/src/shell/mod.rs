@@ -1292,6 +1292,9 @@ impl Shell {
         // Environment Variables
         } else if eq_ignore_case(cmd, "env") || eq_ignore_case(cmd, "set") {
             commands::cmd_env(&args[1..argc]);
+        // Version Info
+        } else if eq_ignore_case(cmd, "ver") {
+            commands::cmd_ver(&args[1..argc]);
         // Disk/Partition viewer
         } else if eq_ignore_case(cmd, "disk") || eq_ignore_case(cmd, "partition") {
             commands::cmd_disk(&args[1..argc]);

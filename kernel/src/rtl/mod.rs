@@ -50,6 +50,7 @@ pub mod time;
 pub mod uuid;
 pub mod environ;
 pub mod splay;
+pub mod version;
 
 // Re-exports for convenience
 pub use atom::*;
@@ -71,3 +72,4 @@ pub use time::*;
 pub use uuid::{Uuid, create_uuid, create_sequential_uuid};
 pub use environ::*;
 pub use splay::*;
+pub use version::*;

@@ -468,6 +468,11 @@ fn phase1_init(boot_info: &BootInfo) {
     rtl::splay::rtl_splay_init();
     kprintln!("  Splay trees initialized");
 
+    // Initialize Version Info subsystem
+    kprintln!("  Initializing version info...");
+    rtl::version::rtl_version_init();
+    kprintln!("  Version info initialized");
+
     // Initialize Service Control Manager
     kprintln!("  Initializing Service Control Manager...");
     svc::scm_initialize();

@@ -32464,3 +32464,62 @@ fn show_env_status() {
     outln!("  Remove Operations: {}", stats.total_removed);
     outln!("  Expand Operations: {}", stats.total_expanded);
 }
+
+// =============================================================================
+// Version Info Command
+// =============================================================================
+
+pub fn cmd_ver(args: &[&str]) {
+    if args.is_empty() || eq_ignore_ascii_case(args[0], "info") {
+        show_version_info();
+    } else if eq_ignore_ascii_case(args[0], "help") || args[0] == "-h" || args[0] == "--help" {
+        outln!("ver - Version Information");
+        outln!("");
+        outln!("Usage: ver [subcommand]");
+        outln!("");
+        outln!("Subcommands:");
+        outln!("  info    - Show version info (default)");
+        outln!("");
+        outln!("Shows OS version, build number, and platform information.");
+    } else {
+        show_version_info();
+    }
+}
+
+fn show_version_info() {
+    use crate::rtl;
+
+    outln!("");
+    outln!("{}", rtl::rtl_get_version_string());
+    outln!("");
+
+    let mut info = rtl::OsVersionInfoEx::new();
+    rtl::rtl_get_version(&mut info);
+
+    outln!("Version:      {}.{}", info.major_version, info.minor_version);
+    outln!("Build:        {}", info.build_number);
+    outln!("Platform:     {}", match info.platform_id {
+        0 => "Win32s",
+        1 => "Windows 9x",
+        2 => "Windows NT",
+        _ => "Unknown",
+    });
+
+    if info.service_pack_major > 0 {
+        outln!("Service Pack: {}.{}", info.service_pack_major, info.service_pack_minor);
+    }
+
+    outln!("Product:      {}", match info.product_type {
+        1 => "Workstation",
+        2 => "Domain Controller",
+        3 => "Server",
+        _ => "Unknown",
+    });
+
+    if info.suite_mask != 0 {
+        outln!("Suite Mask:   0x{:04X}", info.suite_mask);
+    }
+
+    outln!("");
+    outln!("Platform:     {}", if rtl::rtl_is_server() { "Server" } else { "Workstation" });
+}
