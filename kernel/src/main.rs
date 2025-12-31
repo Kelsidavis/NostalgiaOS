@@ -458,6 +458,11 @@ fn phase1_init(boot_info: &BootInfo) {
     ex::nbqueue::exp_nbqueue_init();
     kprintln!("  Non-blocking queue subsystem initialized");
 
+    // Initialize Probe subsystem
+    kprintln!("  Initializing probe subsystem...");
+    ex::probe::ex_probe_init();
+    kprintln!("  Probe subsystem initialized");
+
     // Initialize Environment Variables subsystem
     kprintln!("  Initializing environment variables...");
     rtl::environ::rtl_environ_init();
