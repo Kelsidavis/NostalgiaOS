@@ -27836,19 +27836,145 @@ pub fn cmd_secedit(args: &[&str]) {
 // PRINT Command - Print Files
 // ============================================================================
 
+/// Print spooler job storage
+const MAX_PRINT_JOBS: usize = 16;
+static mut PRINT_JOBS: [PrintJob; MAX_PRINT_JOBS] = [PrintJob::new(); MAX_PRINT_JOBS];
+static mut PRINT_NEXT_ID: u32 = 1;
+
+#[derive(Clone, Copy)]
+struct PrintJob {
+    id: u32,
+    filename: [u8; 64],
+    name_len: usize,
+    device: [u8; 16],
+    dev_len: usize,
+    size: u32,
+    pages: u16,
+    status: PrintJobStatus,
+    submitted_tick: u64,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum PrintJobStatus {
+    Empty,
+    Pending,
+    Printing,
+    Paused,
+    Completed,
+    Error,
+}
+
+impl PrintJob {
+    const fn new() -> Self {
+        Self {
+            id: 0,
+            filename: [0u8; 64],
+            name_len: 0,
+            device: [0u8; 16],
+            dev_len: 0,
+            size: 0,
+            pages: 0,
+            status: PrintJobStatus::Empty,
+            submitted_tick: 0,
+        }
+    }
+}
+
 /// PRINT command - print files
+/// Integrates with filesystem and print spooler
 pub fn cmd_print(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+    use crate::hal::apic::get_tick_count;
+
     if args.is_empty() || args.iter().any(|a| *a == "/?") {
         outln!("Prints a text file.");
         outln!("");
         outln!("PRINT [/D:device] [[drive:][path]filename[...]]");
         outln!("");
-        outln!("   /D:device   Specifies a print device.");
+        outln!("   /D:device   Specifies a print device (LPT1, COM1, FILE).");
+        outln!("");
+        outln!("Examples:");
+        outln!("   PRINT document.txt");
+        outln!("   PRINT /D:LPT1 report.txt");
         return;
     }
 
-    let filename = args[args.len() - 1];
-    outln!("{} is currently being printed", filename);
+    // Parse arguments
+    let mut device = "LPT1";
+    let mut filename = "";
+
+    for arg in args {
+        if arg.to_ascii_uppercase().starts_with("/D:") {
+            device = &arg[3..];
+        } else if !arg.starts_with('/') {
+            filename = arg;
+        }
+    }
+
+    if filename.is_empty() {
+        outln!("No files specified.");
+        return;
+    }
+
+    // Check if file exists
+    let full_path = resolve_path(filename);
+    match fs::stat(&full_path) {
+        Ok(info) => {
+            // Calculate pages (assume 60 lines per page, 80 chars per line)
+            let pages = ((info.size / 4800) + 1) as u16;
+
+            // Add to print queue
+            unsafe {
+                for job in PRINT_JOBS.iter_mut() {
+                    if job.status == PrintJobStatus::Empty {
+                        job.id = PRINT_NEXT_ID;
+                        PRINT_NEXT_ID += 1;
+
+                        let name_bytes = filename.as_bytes();
+                        let len = name_bytes.len().min(63);
+                        job.filename[..len].copy_from_slice(&name_bytes[..len]);
+                        job.name_len = len;
+
+                        let dev_bytes = device.as_bytes();
+                        let dev_len = dev_bytes.len().min(15);
+                        job.device[..dev_len].copy_from_slice(&dev_bytes[..dev_len]);
+                        job.dev_len = dev_len;
+
+                        job.size = info.size as u32;
+                        job.pages = pages;
+                        job.status = PrintJobStatus::Pending;
+                        job.submitted_tick = get_tick_count();
+
+                        outln!("");
+                        outln!("Print job submitted:");
+                        outln!("  Job ID:      {}", job.id);
+                        outln!("  File:        {}", filename);
+                        outln!("  Size:        {} bytes", info.size);
+                        outln!("  Pages:       ~{}", pages);
+                        outln!("  Device:      {}", device);
+                        outln!("");
+                        outln!("{} is currently being printed on {}", filename, device);
+
+                        log_info(EventSource::Io, 8000, &alloc::format!(
+                            "PRINT: Job {} submitted for {} ({} bytes)",
+                            job.id, filename, info.size
+                        ));
+
+                        // Simulate print completion
+                        job.status = PrintJobStatus::Completed;
+                        return;
+                    }
+                }
+            }
+
+            outln!("ERROR: Print queue full.");
+            log_warning(EventSource::Io, 8001, "PRINT: Queue full");
+        }
+        Err(_) => {
+            outln!("Unable to open {}.", filename);
+            log_warning(EventSource::Io, 8002, &alloc::format!("PRINT: File not found: {}", filename));
+        }
+    }
 }
 
 // ============================================================================
@@ -27907,7 +28033,11 @@ pub fn cmd_prndrvr(args: &[&str]) {
 }
 
 /// PRNJOBS command - printer job management
+/// Uses the print spooler job storage
 pub fn cmd_prnjobs(args: &[&str]) {
+    use crate::ex::eventlog::{log_info, EventSource};
+    use crate::hal::apic::get_tick_count;
+
     if args.is_empty() || args.iter().any(|a| *a == "/?") {
         outln!("Pauses, resumes, cancels, and lists print jobs.");
         outln!("");
@@ -27924,16 +28054,109 @@ pub fn cmd_prnjobs(args: &[&str]) {
         return;
     }
 
+    // Parse options
     let cmd = args[0];
+    let mut job_id: Option<u32> = None;
+
+    for i in 0..args.len() {
+        if args[i] == "-j" && i + 1 < args.len() {
+            job_id = args[i + 1].parse().ok();
+        }
+    }
+
     if cmd == "-l" {
         outln!("Server name \\\\NOSTALGOS");
-        outln!("Printer name");
-        outln!("Job ID  Priority  Status         Owner          Pages  Size   Submitted");
-        outln!("======  ========  =============  =============  =====  =====  =========");
+        outln!("Printer name LPT1:");
         outln!("");
-        outln!("No print jobs.");
+        outln!("Job ID  Priority  Status         Owner          Pages  Size     Submitted");
+        outln!("======  ========  =============  =============  =====  =======  ==========");
+
+        let now = get_tick_count();
+        let mut job_count = 0u32;
+
+        unsafe {
+            for job in PRINT_JOBS.iter() {
+                if job.status != PrintJobStatus::Empty {
+                    let filename = core::str::from_utf8(&job.filename[..job.name_len]).unwrap_or("");
+                    let status = match job.status {
+                        PrintJobStatus::Pending => "Pending",
+                        PrintJobStatus::Printing => "Printing",
+                        PrintJobStatus::Paused => "Paused",
+                        PrintJobStatus::Completed => "Completed",
+                        PrintJobStatus::Error => "Error",
+                        _ => "Unknown",
+                    };
+                    let elapsed_sec = (now.saturating_sub(job.submitted_tick)) / 1000;
+
+                    outln!("{:>6}  {:>8}  {:13}  {:13}  {:>5}  {:>7}  {}s ago",
+                           job.id, 1, status, "SYSTEM", job.pages, job.size, elapsed_sec);
+                    job_count += 1;
+                }
+            }
+        }
+
+        if job_count == 0 {
+            outln!("");
+            outln!("No print jobs.");
+        } else {
+            outln!("");
+            outln!("Total jobs: {}", job_count);
+        }
+        log_info(EventSource::Io, 8010, "PRNJOBS: Listed jobs");
+    } else if cmd == "-z" {
+        // Pause job
+        if let Some(id) = job_id {
+            unsafe {
+                for job in PRINT_JOBS.iter_mut() {
+                    if job.id == id && job.status != PrintJobStatus::Empty {
+                        job.status = PrintJobStatus::Paused;
+                        outln!("Job {} paused.", id);
+                        log_info(EventSource::Io, 8011, &alloc::format!("PRNJOBS: Job {} paused", id));
+                        return;
+                    }
+                }
+            }
+            outln!("Job {} not found.", id);
+        } else {
+            outln!("ERROR: Job ID required (-j).");
+        }
+    } else if cmd == "-m" {
+        // Resume job
+        if let Some(id) = job_id {
+            unsafe {
+                for job in PRINT_JOBS.iter_mut() {
+                    if job.id == id && job.status == PrintJobStatus::Paused {
+                        job.status = PrintJobStatus::Pending;
+                        outln!("Job {} resumed.", id);
+                        log_info(EventSource::Io, 8012, &alloc::format!("PRNJOBS: Job {} resumed", id));
+                        return;
+                    }
+                }
+            }
+            outln!("Job {} not found or not paused.", id);
+        } else {
+            outln!("ERROR: Job ID required (-j).");
+        }
+    } else if cmd == "-x" {
+        // Cancel job
+        if let Some(id) = job_id {
+            unsafe {
+                for job in PRINT_JOBS.iter_mut() {
+                    if job.id == id && job.status != PrintJobStatus::Empty {
+                        job.status = PrintJobStatus::Empty;
+                        outln!("Job {} cancelled.", id);
+                        log_info(EventSource::Io, 8013, &alloc::format!("PRNJOBS: Job {} cancelled", id));
+                        return;
+                    }
+                }
+            }
+            outln!("Job {} not found.", id);
+        } else {
+            outln!("ERROR: Job ID required (-j).");
+        }
     } else {
-        outln!("Operation successful");
+        outln!("Unknown option: {}", cmd);
+        outln!("Use -? for help.");
     }
 }
 
