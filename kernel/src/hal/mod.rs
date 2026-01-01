@@ -41,6 +41,7 @@ pub mod keyboard;
 pub mod mce;
 pub mod mouse;
 pub mod mp;
+pub mod msreg;
 pub mod pci;
 pub mod pic;
 pub mod port;
@@ -234,6 +235,21 @@ pub use cpuid::{
     cpuid_get_vendor, cpuid_get_vendor_string, cpuid_get_brand_string,
     cpuid_get_model, cpuid_get_capabilities, cpuid_is_virtual, cpuid_is_initialized,
     cpuid_get_stats, ex_is_processor_feature_present,
+};
+
+// Re-export MSR types
+pub use msreg::{
+    ia32, efer, apic_base, MsrStats,
+    msr_read_raw, msr_write_raw, msr_read, msr_write,
+    msr_read_bits, msr_set_bits, msr_clear_bits,
+    msr_get_apic_base, msr_is_bsp, msr_is_x2apic_enabled,
+    msr_get_efer, msr_is_long_mode, msr_is_nx_enabled,
+    msr_get_syscall_handler, msr_set_syscall_handler,
+    msr_get_fs_base, msr_set_fs_base, msr_get_gs_base, msr_set_gs_base,
+    msr_get_kernel_gs_base, msr_set_kernel_gs_base, msr_swap_gs,
+    msr_read_tsc, rdtsc, rdtscp,
+    msr_is_initialized, msr_get_stats, msr_record_gp_fault,
+    hal_read_msr, hal_write_msr,
 };
 
 // TODO: Future submodules
