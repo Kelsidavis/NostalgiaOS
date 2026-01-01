@@ -31,6 +31,7 @@ pub mod acpi;
 pub mod apic;
 pub mod ata;
 pub mod bus;
+pub mod cache;
 pub mod cmos;
 pub mod display;
 pub mod dma;
@@ -209,6 +210,19 @@ pub use power::{
     power_shutdown, power_enable_rtc_wake, power_disable_rtc_wake, power_get_last_wake_source,
     power_get_state_info, power_is_initialized, power_is_acpi_available, power_get_stats,
     hal_system_shutdown, hal_return_to_firmware, nt_set_system_power_state,
+};
+
+// Re-export cache types
+pub use cache::{
+    CacheType, CacheInfo, FlushMode, PrefetchHint, CacheStats,
+    DEFAULT_CACHE_LINE_SIZE, MAX_CACHE_LEVELS,
+    cache_flush_line, cache_writeback_line, cache_flush_range, cache_writeback_range, cache_flush_all,
+    cache_memory_fence, cache_store_fence, cache_load_fence, cache_compiler_barrier,
+    cache_prefetch, cache_prefetch_write,
+    cache_get_line_size, cache_get_info, cache_get_all_info,
+    cache_is_clflush_supported, cache_is_clflushopt_supported, cache_is_clwb_supported, cache_is_initialized,
+    cache_get_stats,
+    ke_flush_write_buffer, ke_sweep_dcache, ke_sweep_icache, ke_flush_io_buffers,
 };
 
 // TODO: Future submodules
