@@ -19,6 +19,7 @@ pub mod fcb;
 pub mod notify;
 pub mod tunnel;
 pub mod oplock;
+pub mod fastio;
 
 // Re-export key types
 pub use mcb::{
@@ -84,4 +85,30 @@ pub use oplock::{
     // Extended functions
     fsrtl_oplock_fsctrl, fsrtl_check_oplock_ex, fsrtl_break_level2_oplocks,
     fsrtl_get_oplock_stats,
+};
+
+pub use fastio::{
+    // Types
+    FastIoDispatch, IoStatusBlock, FastIoStats,
+    FileBasicInformation, FileStandardInformation, FileNetworkOpenInformation,
+    FsRtlCommonFcbHeader,
+    // Flags
+    FSRTL_FLAG_FILE_MODIFIED, FSRTL_FLAG_FILE_LENGTH_CHANGED,
+    FSRTL_FLAG_LIMIT_MODIFIED_PAGES, FSRTL_FLAG_ACQUIRE_MAIN_RSRC_EX,
+    FSRTL_FLAG_ACQUIRE_MAIN_RSRC_SH, FSRTL_FLAG_USER_MAPPED_FILE,
+    // Fast I/O functions
+    fsrtl_copy_read as fastio_copy_read, fsrtl_copy_write as fastio_copy_write,
+    fsrtl_mdl_read, fsrtl_mdl_read_complete,
+    fsrtl_prepare_mdl_write, fsrtl_mdl_write_complete,
+    fsrtl_acquire_file_exclusive, fsrtl_release_file,
+    fsrtl_acquire_file_for_cc_flush, fsrtl_release_file_for_cc_flush,
+    fsrtl_acquire_file_for_mod_write, fsrtl_release_file_for_mod_write,
+    fsrtl_get_file_size as fastio_get_file_size,
+    fsrtl_set_file_size as fastio_set_file_size,
+    fsrtl_fast_io_check_if_possible,
+    // Statistics
+    get_fast_io_stats,
+    fsrtl_increment_cc_fast_read_not_possible,
+    fsrtl_increment_cc_fast_read_wait,
+    fsrtl_increment_cc_fast_read_resource_miss,
 };
