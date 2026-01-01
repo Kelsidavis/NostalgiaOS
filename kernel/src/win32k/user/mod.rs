@@ -53,6 +53,13 @@ pub mod tab;
 pub mod header;
 pub mod listview;
 pub mod treeview;
+pub mod tooltip;
+pub mod hotkey;
+pub mod animate;
+pub mod monthcal;
+pub mod datetimepick;
+pub mod pager;
+pub mod ipaddress;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -317,6 +324,27 @@ pub fn init() {
 
     // Initialize treeview control
     treeview::init();
+
+    // Initialize tooltip control
+    tooltip::init();
+
+    // Initialize hotkey control
+    hotkey::init();
+
+    // Initialize animate control
+    animate::init();
+
+    // Initialize month calendar control
+    monthcal::init();
+
+    // Initialize date time picker control
+    datetimepick::init();
+
+    // Initialize pager control
+    pager::init();
+
+    // Initialize IP address control
+    ipaddress::init();
 
     // Register built-in window classes
     register_builtin_classes();
