@@ -42,6 +42,7 @@ pub mod pci;
 pub mod pic;
 pub mod port;
 pub mod ppm;
+pub mod profile;
 pub mod rtc;
 pub mod timer;
 
@@ -168,6 +169,20 @@ pub use mp::{
     mp_flush_tlb_all, mp_request_reschedule,
     mp_get_stats, mp_is_initialized,
     ke_number_processors, ke_get_current_processor_number, hal_start_next_processor, hal_request_ipi,
+};
+
+// Re-export profile types
+pub use profile::{
+    ProfileSource, ProfileSample, StackSample, ProfileStats,
+    MAX_PROFILE_SOURCES, MAX_PROFILE_SAMPLES, MAX_STACK_DEPTH, PROFILE_VECTOR,
+    profile_is_pmc_supported, profile_start, profile_stop, profile_is_active,
+    profile_record_sample, profile_record_sample_with_stack,
+    profile_get_samples, profile_clear_samples,
+    profile_set_stack_capture, profile_is_stack_capture_enabled, profile_capture_stack,
+    profile_read_pmc, profile_read_fixed_counter,
+    profile_get_instructions, profile_get_cycles, profile_get_ref_cycles,
+    profile_get_stats, profile_is_initialized,
+    hal_start_profile_interrupt, hal_stop_profile_interrupt, hal_set_profile_interval,
 };
 
 // TODO: Future submodules
