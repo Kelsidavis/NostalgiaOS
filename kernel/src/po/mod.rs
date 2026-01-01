@@ -37,6 +37,7 @@ use core::sync::atomic::{AtomicU8, AtomicU32, AtomicBool, Ordering};
 use spin::Mutex;
 
 pub mod idle;
+pub mod shutdown;
 
 // Re-export idle detection types
 pub use idle::{
@@ -56,6 +57,28 @@ pub use idle::{
     po_force_idle_scan,
     po_get_idle_stats,
     po_get_idle_device_snapshots,
+};
+
+// Re-export shutdown types
+pub use shutdown::{
+    ShutdownWorkCallback,
+    ShutdownStats,
+    ShutdownReason,
+    ShutdownMajorReason,
+    ShutdownMinorReason,
+    po_request_shutdown_wait,
+    po_cancel_shutdown_wait,
+    po_queue_shutdown_work_item,
+    po_cancel_shutdown_work_item,
+    po_request_shutdown_event,
+    is_shutdown_in_progress,
+    is_shutdown_complete,
+    execute_graceful_shutdown,
+    get_shutdown_stats,
+    get_shutdown_thread_count,
+    get_shutdown_work_count,
+    set_shutdown_reason,
+    get_shutdown_reason,
 };
 
 // ============================================================================
@@ -411,6 +434,9 @@ pub fn init() {
 
     // Initialize idle detection subsystem
     idle::init();
+
+    // Initialize shutdown support
+    shutdown::init();
 
     PO_INITIALIZED.store(true, Ordering::SeqCst);
 
