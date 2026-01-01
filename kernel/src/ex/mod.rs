@@ -42,6 +42,7 @@ pub mod event_pair;
 pub mod delay;
 pub mod uuid;
 pub mod zone;
+pub mod raise;
 // pub mod pool;      // Uses mm::pool
 // pub mod timer;     // Uses ke::timer
 
@@ -65,3 +66,4 @@ pub use event_pair::*;
 pub use delay::*;
 pub use uuid::*;
 pub use zone::*;
+pub use raise::*;
