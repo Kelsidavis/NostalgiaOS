@@ -81,6 +81,9 @@ pub mod profile;
 // Balance set manager
 pub mod balance;
 
+// Performance counters
+pub mod perfctr;
+
 // Re-export key types
 pub use list::ListEntry;
 pub use thread::{KThread, ThreadState};
@@ -259,4 +262,21 @@ pub use profile::{
     // Interrupt handlers
     ki_profile_interrupt, ki_profile_alignment_fixup,
     ki_start_profile_interrupt_ipi, ki_stop_profile_interrupt_ipi,
+};
+
+// Re-export performance counter types
+pub use perfctr::{
+    PerformanceCounters, CpuUtilization, PerformanceRates,
+    get_performance_counters, get_cpu_utilization, calculate_performance_rates,
+    ke_query_performance_counter, ke_query_performance_frequency,
+    get_context_switches, get_system_calls, get_interrupts,
+    get_dpcs, get_apcs, get_page_faults,
+    get_uptime, get_uptime_seconds, get_boot_time,
+    // Counter increment functions (for kernel use)
+    inc_context_switches, inc_system_calls, inc_system_call_failed,
+    inc_interrupts, add_interrupt_time, inc_dpcs, add_dpc_time,
+    inc_apcs, add_apc_time, inc_exceptions, inc_page_faults,
+    record_pool_alloc, record_pool_free,
+    record_io_read, record_io_write, record_io_other,
+    reset_counters as reset_perf_counters,
 };
