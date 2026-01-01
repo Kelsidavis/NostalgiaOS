@@ -39,6 +39,7 @@ pub mod harderr;
 pub mod nbqueue;
 pub mod probe;
 pub mod event_pair;
+pub mod delay;
 // pub mod pool;      // Uses mm::pool
 // pub mod timer;     // Uses ke::timer
 
@@ -59,3 +60,4 @@ pub use harderr::*;
 pub use nbqueue::*;
 pub use probe::*;
 pub use event_pair::*;
+pub use delay::*;
