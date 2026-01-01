@@ -51,6 +51,8 @@ pub mod progressbar;
 pub mod updown;
 pub mod tab;
 pub mod header;
+pub mod listview;
+pub mod treeview;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -309,6 +311,12 @@ pub fn init() {
 
     // Initialize header control
     header::init();
+
+    // Initialize listview control
+    listview::init();
+
+    // Initialize treeview control
+    treeview::init();
 
     // Register built-in window classes
     register_builtin_classes();
