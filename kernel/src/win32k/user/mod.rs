@@ -35,6 +35,7 @@ pub mod timer;
 pub mod menu;
 pub mod dialog;
 pub mod icon;
+pub mod clipboard;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -245,6 +246,9 @@ pub fn init() {
 
     // Initialize icon/cursor system
     icon::init();
+
+    // Initialize clipboard system
+    clipboard::init();
 
     // Register built-in window classes
     register_builtin_classes();
@@ -642,4 +646,56 @@ pub fn destroy_icon(hicon: icon::HICON) -> bool {
 /// Draw an icon
 pub fn draw_icon(hdc: super::HDC, x: i32, y: i32, hicon: icon::HICON) -> bool {
     icon::draw_icon(hdc, x, y, hicon)
+}
+
+// ============================================================================
+// Clipboard API
+// ============================================================================
+
+// Re-export clipboard types
+pub use clipboard::ClipboardFormat;
+
+/// Open the clipboard for access
+pub fn open_clipboard(hwnd: HWND) -> bool {
+    clipboard::open_clipboard(hwnd)
+}
+
+/// Close the clipboard
+pub fn close_clipboard() -> bool {
+    clipboard::close_clipboard()
+}
+
+/// Empty the clipboard
+pub fn empty_clipboard() -> bool {
+    clipboard::empty_clipboard()
+}
+
+/// Set clipboard data
+pub fn set_clipboard_data(format: ClipboardFormat, data: &[u8]) -> bool {
+    clipboard::set_clipboard_data(format, data)
+}
+
+/// Get clipboard data
+pub fn get_clipboard_data(format: ClipboardFormat, buffer: &mut [u8]) -> usize {
+    clipboard::get_clipboard_data(format, buffer)
+}
+
+/// Set clipboard text
+pub fn set_clipboard_text(text: &str) -> bool {
+    clipboard::set_clipboard_text(text)
+}
+
+/// Get clipboard text
+pub fn get_clipboard_text(buffer: &mut [u8]) -> usize {
+    clipboard::get_clipboard_text(buffer)
+}
+
+/// Check if format is available
+pub fn is_clipboard_format_available(format: ClipboardFormat) -> bool {
+    clipboard::is_clipboard_format_available(format)
+}
+
+/// Register a custom clipboard format
+pub fn register_clipboard_format(name: &str) -> u32 {
+    clipboard::register_clipboard_format(name)
 }
