@@ -83,6 +83,9 @@ pub mod comdlg;
 pub mod reghelp;
 pub mod shellpath;
 pub mod notify;
+pub mod enumwin;
+pub mod dragdrop;
+pub mod verinfo;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -437,6 +440,15 @@ pub fn init() {
 
     // Initialize notification area
     notify::init();
+
+    // Initialize window enumeration
+    enumwin::init();
+
+    // Initialize drag-drop support
+    dragdrop::init();
+
+    // Initialize version info
+    verinfo::init();
 
     // Register built-in window classes
     register_builtin_classes();
