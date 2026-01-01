@@ -86,6 +86,8 @@ pub mod notify;
 pub mod enumwin;
 pub mod dragdrop;
 pub mod verinfo;
+pub mod access;
+pub mod shellexec;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -449,6 +451,12 @@ pub fn init() {
 
     // Initialize version info
     verinfo::init();
+
+    // Initialize accessibility
+    access::init();
+
+    // Initialize shell execute
+    shellexec::init();
 
     // Register built-in window classes
     register_builtin_classes();
