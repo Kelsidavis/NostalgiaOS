@@ -20,6 +20,7 @@ pub mod notify;
 pub mod tunnel;
 pub mod oplock;
 pub mod fastio;
+pub mod stackovf;
 
 // Re-export key types
 pub use mcb::{
@@ -111,4 +112,24 @@ pub use fastio::{
     fsrtl_increment_cc_fast_read_not_possible,
     fsrtl_increment_cc_fast_read_wait,
     fsrtl_increment_cc_fast_read_resource_miss,
+};
+
+pub use stackovf::{
+    // Types
+    StackOverflowRoutine, StackOverflowItem, StackOverflowStats,
+    // Constants
+    STACK_OVERFLOW_READ_THRESHHOLD,
+    // Stack check functions
+    io_get_remaining_stack_size, io_check_stack_overflow,
+    fsrtl_is_stack_overflow_read_possible, get_stack_usage_percent,
+    // Post functions
+    fsrtl_post_stack_overflow, fsrtl_post_paging_file_stack_overflow,
+    // Worker functions
+    fsrtl_stack_overflow_worker, fsrtl_worker_thread_normal, fsrtl_worker_thread_paging,
+    // Status checking
+    fsrtl_is_ntstatus_expected,
+    // Statistics
+    get_stats as get_stack_overflow_stats, reset_stats as reset_stack_overflow_stats,
+    // Init
+    init as init_stack_overflow,
 };
