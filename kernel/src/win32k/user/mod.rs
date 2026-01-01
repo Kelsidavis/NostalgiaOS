@@ -62,6 +62,7 @@ pub mod pager;
 pub mod ipaddress;
 pub mod rebar;
 pub mod comboboxex;
+pub mod syslink;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -353,6 +354,9 @@ pub fn init() {
 
     // Initialize comboboxex control
     comboboxex::init();
+
+    // Initialize syslink control
+    syslink::init();
 
     // Register built-in window classes
     register_builtin_classes();
