@@ -80,6 +80,7 @@ pub mod dpa;
 pub mod strhelp;
 pub mod format;
 pub mod comdlg;
+pub mod reghelp;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -425,6 +426,9 @@ pub fn init() {
 
     // Initialize common dialogs
     comdlg::init();
+
+    // Initialize registry helpers
+    reghelp::init();
 
     // Register built-in window classes
     register_builtin_classes();
