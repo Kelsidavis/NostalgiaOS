@@ -103,6 +103,9 @@ pub mod error;
 pub mod console;
 pub mod security;
 pub mod fontmgr;
+pub mod appcompat;
+pub mod profile;
+pub mod environ;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -517,6 +520,15 @@ pub fn init() {
 
     // Initialize font management
     fontmgr::init();
+
+    // Initialize application compatibility
+    appcompat::init();
+
+    // Initialize user profile
+    profile::init();
+
+    // Initialize environment variables
+    environ::init();
 
     // Register built-in window classes
     register_builtin_classes();
