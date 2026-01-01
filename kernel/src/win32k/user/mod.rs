@@ -1,0 +1,488 @@
+//! USER - Window Manager Subsystem
+//!
+//! Kernel-mode window management following the Windows NT USER architecture.
+//! Provides windows, message queues, input handling, and desktop management.
+//!
+//! # Components
+//!
+//! - **window**: Window objects and management
+//! - **message**: Message queue and dispatch
+//! - **class**: Window class registration
+//! - **input**: Keyboard and mouse input
+//! - **desktop**: Desktop and window station
+//! - **paint**: Window painting (WM_PAINT)
+//! - **timer**: Timer support for UI updates
+//! - **cursor**: Cursor/mouse pointer rendering
+//! - **controls**: Standard window controls
+//!
+//! # References
+//!
+//! Based on Windows Server 2003:
+//! - `windows/core/ntuser/kernel/createw.c` - Window creation
+//! - `windows/core/ntuser/kernel/sendmsg.c` - Message sending
+//! - `windows/core/ntuser/kernel/input.c` - Input handling
+//! - `windows/core/ntuser/kernel/timer.c` - Timer management
+
+pub mod window;
+pub mod message;
+pub mod class;
+pub mod input;
+pub mod desktop;
+pub mod paint;
+pub mod cursor;
+pub mod controls;
+pub mod timer;
+
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use crate::ke::spinlock::SpinLock;
+use super::{UserHandle, HWND, Rect, Point};
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/// Maximum windows per desktop
+pub const MAX_WINDOWS: usize = 1024;
+
+/// Maximum window classes
+pub const MAX_CLASSES: usize = 256;
+
+/// Maximum message queue size
+pub const MAX_QUEUE_SIZE: usize = 256;
+
+// ============================================================================
+// Window Styles
+// ============================================================================
+
+bitflags::bitflags! {
+    /// Window styles (WS_*)
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct WindowStyle: u32 {
+        /// Overlapped window (default)
+        const OVERLAPPED = 0x00000000;
+        /// Popup window
+        const POPUP = 0x80000000;
+        /// Child window
+        const CHILD = 0x40000000;
+        /// Initially minimized
+        const MINIMIZE = 0x20000000;
+        /// Initially visible
+        const VISIBLE = 0x10000000;
+        /// Initially disabled
+        const DISABLED = 0x08000000;
+        /// Clip siblings
+        const CLIPSIBLINGS = 0x04000000;
+        /// Clip children
+        const CLIPCHILDREN = 0x02000000;
+        /// Initially maximized
+        const MAXIMIZE = 0x01000000;
+        /// Has caption
+        const CAPTION = 0x00C00000;
+        /// Has border
+        const BORDER = 0x00800000;
+        /// Has dialog frame
+        const DLGFRAME = 0x00400000;
+        /// Has vertical scroll bar
+        const VSCROLL = 0x00200000;
+        /// Has horizontal scroll bar
+        const HSCROLL = 0x00100000;
+        /// Has system menu
+        const SYSMENU = 0x00080000;
+        /// Has thick frame (resizable)
+        const THICKFRAME = 0x00040000;
+        /// Group box start
+        const GROUP = 0x00020000;
+        /// Tab stop
+        const TABSTOP = 0x00010000;
+        /// Has minimize box
+        const MINIMIZEBOX = 0x00020000;
+        /// Has maximize box
+        const MAXIMIZEBOX = 0x00010000;
+
+        // Common combinations
+        /// Overlapped window with all decorations
+        const OVERLAPPEDWINDOW = Self::OVERLAPPED.bits() | Self::CAPTION.bits() |
+            Self::SYSMENU.bits() | Self::THICKFRAME.bits() |
+            Self::MINIMIZEBOX.bits() | Self::MAXIMIZEBOX.bits();
+        /// Popup window with border and system menu
+        const POPUPWINDOW = Self::POPUP.bits() | Self::BORDER.bits() | Self::SYSMENU.bits();
+    }
+}
+
+bitflags::bitflags! {
+    /// Extended window styles (WS_EX_*)
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    pub struct WindowStyleEx: u32 {
+        /// Dialog modal frame
+        const DLGMODALFRAME = 0x00000001;
+        /// No parent notify
+        const NOPARENTNOTIFY = 0x00000004;
+        /// Topmost
+        const TOPMOST = 0x00000008;
+        /// Accept drag files
+        const ACCEPTFILES = 0x00000010;
+        /// Transparent
+        const TRANSPARENT = 0x00000020;
+        /// MDI child
+        const MDICHILD = 0x00000040;
+        /// Tool window
+        const TOOLWINDOW = 0x00000080;
+        /// Has edge
+        const WINDOWEDGE = 0x00000100;
+        /// Has client edge
+        const CLIENTEDGE = 0x00000200;
+        /// Context help button
+        const CONTEXTHELP = 0x00000400;
+        /// Right-aligned text
+        const RIGHT = 0x00001000;
+        /// RTL reading order
+        const RTLREADING = 0x00002000;
+        /// Left scroll bar
+        const LEFTSCROLLBAR = 0x00004000;
+        /// Control parent
+        const CONTROLPARENT = 0x00010000;
+        /// Static edge
+        const STATICEDGE = 0x00020000;
+        /// Activate on show
+        const APPWINDOW = 0x00040000;
+        /// Layered window
+        const LAYERED = 0x00080000;
+        /// No inherit layout
+        const NOINHERITLAYOUT = 0x00100000;
+        /// Right-to-left layout
+        const LAYOUTRTL = 0x00400000;
+        /// Composited
+        const COMPOSITED = 0x02000000;
+        /// No activate
+        const NOACTIVATE = 0x08000000;
+    }
+}
+
+// ============================================================================
+// Show Window Commands
+// ============================================================================
+
+/// Show window commands (SW_*)
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShowCommand {
+    #[default]
+    Hide = 0,
+    ShowNormal = 1,
+    ShowMinimized = 2,
+    ShowMaximized = 3,
+    ShowNoActivate = 4,
+    Show = 5,
+    Minimize = 6,
+    ShowMinNoActive = 7,
+    ShowNA = 8,
+    Restore = 9,
+    ShowDefault = 10,
+    ForceMinimize = 11,
+}
+
+// ============================================================================
+// State
+// ============================================================================
+
+static USER_INITIALIZED: AtomicBool = AtomicBool::new(false);
+static USER_LOCK: SpinLock<()> = SpinLock::new(());
+
+// Statistics
+static WINDOW_COUNT: AtomicU32 = AtomicU32::new(0);
+static CLASS_COUNT: AtomicU32 = AtomicU32::new(0);
+static MESSAGE_COUNT: AtomicU32 = AtomicU32::new(0);
+
+// ============================================================================
+// Initialization
+// ============================================================================
+
+/// Initialize USER subsystem
+pub fn init() {
+    let _guard = USER_LOCK.lock();
+
+    if USER_INITIALIZED.load(Ordering::Acquire) {
+        return;
+    }
+
+    crate::serial_println!("[USER] Initializing Window Manager...");
+
+    // Initialize desktop
+    desktop::init();
+
+    // Initialize window class manager
+    class::init();
+
+    // Initialize window manager
+    window::init();
+
+    // Initialize message system
+    message::init();
+
+    // Initialize input system
+    input::init();
+
+    // Initialize paint system
+    paint::init();
+
+    // Initialize cursor system
+    cursor::init();
+
+    // Initialize controls
+    controls::init();
+
+    // Initialize timer system
+    timer::init();
+
+    // Register built-in window classes
+    register_builtin_classes();
+
+    USER_INITIALIZED.store(true, Ordering::Release);
+
+    crate::serial_println!("[USER] Window Manager initialized");
+}
+
+/// Register built-in window classes
+fn register_builtin_classes() {
+    // Register desktop window class
+    class::register_system_class("Desktop", 0);
+
+    // Register button class
+    class::register_system_class("Button", 0);
+
+    // Register static text class
+    class::register_system_class("Static", 0);
+
+    // Register edit control class
+    class::register_system_class("Edit", 0);
+
+    // Register listbox class
+    class::register_system_class("ListBox", 0);
+
+    // Register combobox class
+    class::register_system_class("ComboBox", 0);
+
+    // Register scrollbar class
+    class::register_system_class("ScrollBar", 0);
+
+    crate::serial_println!("[USER] Registered built-in window classes");
+}
+
+// ============================================================================
+// Statistics
+// ============================================================================
+
+/// USER statistics
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UserStats {
+    pub initialized: bool,
+    pub window_count: u32,
+    pub class_count: u32,
+    pub message_count: u32,
+}
+
+/// Get USER statistics
+pub fn get_stats() -> UserStats {
+    UserStats {
+        initialized: USER_INITIALIZED.load(Ordering::Relaxed),
+        window_count: WINDOW_COUNT.load(Ordering::Relaxed),
+        class_count: CLASS_COUNT.load(Ordering::Relaxed),
+        message_count: MESSAGE_COUNT.load(Ordering::Relaxed),
+    }
+}
+
+pub fn inc_window_count() { WINDOW_COUNT.fetch_add(1, Ordering::Relaxed); }
+pub fn dec_window_count() { WINDOW_COUNT.fetch_sub(1, Ordering::Relaxed); }
+pub fn inc_class_count() { CLASS_COUNT.fetch_add(1, Ordering::Relaxed); }
+pub fn dec_class_count() { CLASS_COUNT.fetch_sub(1, Ordering::Relaxed); }
+pub fn inc_message_count() { MESSAGE_COUNT.fetch_add(1, Ordering::Relaxed); }
+
+// ============================================================================
+// High-Level Window API
+// ============================================================================
+
+/// Create a window
+pub fn create_window(
+    class_name: &str,
+    window_name: &str,
+    style: WindowStyle,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    parent: HWND,
+    menu: u32,
+) -> HWND {
+    window::create_window(
+        class_name,
+        window_name,
+        style,
+        WindowStyleEx::empty(),
+        x, y, width, height,
+        parent,
+        menu,
+    )
+}
+
+/// Create an extended window
+pub fn create_window_ex(
+    ex_style: WindowStyleEx,
+    class_name: &str,
+    window_name: &str,
+    style: WindowStyle,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    parent: HWND,
+    menu: u32,
+) -> HWND {
+    window::create_window(
+        class_name,
+        window_name,
+        style,
+        ex_style,
+        x, y, width, height,
+        parent,
+        menu,
+    )
+}
+
+/// Destroy a window
+pub fn destroy_window(hwnd: HWND) -> bool {
+    window::destroy_window(hwnd)
+}
+
+/// Show/hide a window
+pub fn show_window(hwnd: HWND, cmd: ShowCommand) -> bool {
+    window::show_window(hwnd, cmd)
+}
+
+/// Update a window (process pending WM_PAINT)
+pub fn update_window(hwnd: HWND) -> bool {
+    paint::update_window(hwnd)
+}
+
+/// Invalidate a region of a window
+pub fn invalidate_rect(hwnd: HWND, rect: Option<&Rect>, erase: bool) -> bool {
+    paint::invalidate_rect(hwnd, rect, erase)
+}
+
+/// Get window rectangle
+pub fn get_window_rect(hwnd: HWND) -> Option<Rect> {
+    window::get_window_rect(hwnd)
+}
+
+/// Get client rectangle
+pub fn get_client_rect(hwnd: HWND) -> Option<Rect> {
+    window::get_client_rect(hwnd)
+}
+
+/// Move a window
+pub fn move_window(hwnd: HWND, x: i32, y: i32, width: i32, height: i32, repaint: bool) -> bool {
+    window::move_window(hwnd, x, y, width, height, repaint)
+}
+
+/// Set window position
+pub fn set_window_pos(hwnd: HWND, x: i32, y: i32, width: i32, height: i32, flags: u32) -> bool {
+    window::set_window_pos(hwnd, x, y, width, height, flags)
+}
+
+/// Get a message from the queue
+pub fn get_message(hwnd: HWND) -> Option<message::Message> {
+    message::get_message(hwnd)
+}
+
+/// Peek at a message (non-blocking)
+pub fn peek_message(hwnd: HWND, remove: bool) -> Option<message::Message> {
+    message::peek_message(hwnd, remove)
+}
+
+/// Post a message to a window
+pub fn post_message(hwnd: HWND, msg: u32, wparam: usize, lparam: isize) -> bool {
+    message::post_message(hwnd, msg, wparam, lparam)
+}
+
+/// Send a message to a window (blocking)
+pub fn send_message(hwnd: HWND, msg: u32, wparam: usize, lparam: isize) -> isize {
+    message::send_message(hwnd, msg, wparam, lparam)
+}
+
+/// Dispatch a message to window procedure
+pub fn dispatch_message(msg: &message::Message) -> isize {
+    message::dispatch_message(msg)
+}
+
+/// Translate virtual key messages
+pub fn translate_message(msg: &message::Message) -> bool {
+    message::translate_message(msg)
+}
+
+/// Begin painting (returns DC)
+pub fn begin_paint(hwnd: HWND) -> Option<(super::gdi::dc::DeviceContext, paint::PaintStruct)> {
+    paint::begin_paint(hwnd)
+}
+
+/// End painting
+pub fn end_paint(hwnd: HWND, ps: &paint::PaintStruct) {
+    paint::end_paint(hwnd, ps)
+}
+
+/// Get window DC
+pub fn get_dc(hwnd: HWND) -> super::HDC {
+    paint::get_window_dc(hwnd)
+}
+
+/// Release window DC
+pub fn release_dc(hwnd: HWND, hdc: super::HDC) -> bool {
+    paint::release_dc(hwnd, hdc)
+}
+
+/// Set focus to a window
+pub fn set_focus(hwnd: HWND) -> HWND {
+    input::set_focus(hwnd)
+}
+
+/// Get the focused window
+pub fn get_focus() -> HWND {
+    input::get_focus()
+}
+
+/// Set window text
+pub fn set_window_text(hwnd: HWND, text: &str) -> bool {
+    window::set_window_text(hwnd, text)
+}
+
+/// Get window text
+pub fn get_window_text(hwnd: HWND, buffer: &mut [u8]) -> usize {
+    window::get_window_text(hwnd, buffer)
+}
+
+// ============================================================================
+// Timer API
+// ============================================================================
+
+/// Create a timer for a window
+pub fn set_timer(hwnd: HWND, timer_id: usize, interval_ms: u32) -> usize {
+    timer::set_timer(hwnd, timer_id, interval_ms, 0)
+}
+
+/// Create a timer with callback
+pub fn set_timer_with_callback(hwnd: HWND, timer_id: usize, interval_ms: u32, callback: usize) -> usize {
+    timer::set_timer(hwnd, timer_id, interval_ms, callback)
+}
+
+/// Destroy a timer
+pub fn kill_timer(hwnd: HWND, timer_id: usize) -> bool {
+    timer::kill_timer(hwnd, timer_id)
+}
+
+/// Get current tick count in milliseconds
+pub fn get_tick_count() -> u64 {
+    timer::get_tick_count()
+}
+
+/// Process expired timers (should be called from message loop)
+pub fn process_timers() {
+    timer::process_timers()
+}

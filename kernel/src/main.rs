@@ -93,6 +93,7 @@ pub mod svc;
 pub mod verifier;
 pub mod wmi;
 pub mod kd;
+pub mod win32k;
 
 mod framebuffer;
 mod serial;
@@ -516,6 +517,14 @@ fn phase1_init(boot_info: &BootInfo) {
     net::init();
     kprintln!("  Network subsystem initialized");
 
+    // Initialize Win32k (Graphical) subsystem
+    kprintln!("  Initializing Win32k graphical subsystem...");
+    win32k::init();
+    kprintln!("  Win32k graphical subsystem initialized");
+
+    // Test graphical subsystem
+    test_graphics();
+
     // Test file system by reading C:\TEST.TXT
     test_file_read();
 
@@ -569,6 +578,397 @@ fn shell_thread_entry() {
     // Shell exited - halt this thread
     loop {
         unsafe { crate::ke::scheduler::ki_yield(); }
+    }
+}
+
+/// Test graphical subsystem
+fn test_graphics() {
+    serial_println!("[GFX-TEST] Testing Win32k graphical subsystem...");
+
+    // Get Win32k statistics
+    let stats = win32k::get_stats();
+    serial_println!("[GFX-TEST] Win32k initialized: {}", stats.initialized);
+    serial_println!("[GFX-TEST] GDI DCs: {}, Brushes: {}, Pens: {}",
+        stats.gdi_stats.dc_count,
+        stats.gdi_stats.brush_count,
+        stats.gdi_stats.pen_count);
+    serial_println!("[GFX-TEST] USER Windows: {}, Classes: {}",
+        stats.user_stats.window_count,
+        stats.user_stats.class_count);
+
+    // Paint the desktop background first
+    serial_println!("[GFX-TEST] Painting desktop background...");
+    win32k::user::paint::paint_desktop();
+
+    // Create display DC for drawing the demo
+    serial_println!("[GFX-TEST] Creating display DC for demo...");
+    if let Ok(hdc) = win32k::gdi::dc::create_display_dc() {
+        serial_println!("[GFX-TEST] Display DC created: {:#x}", hdc.raw());
+
+        // ============================================
+        // Demo 1: Primitives showcase (top-left area)
+        // ============================================
+        draw_primitives_demo(hdc, 20, 40);
+
+        // ============================================
+        // Demo 2: Controls showcase (top-right area)
+        // ============================================
+        draw_controls_demo(hdc, 350, 40);
+
+        // ============================================
+        // Demo 3: Shapes gallery (bottom area)
+        // ============================================
+        draw_shapes_demo(hdc, 20, 320);
+
+        // Draw title bar at top
+        draw_demo_title(hdc);
+
+        // Clean up
+        win32k::gdi::dc::delete_dc(hdc);
+        serial_println!("[GFX-TEST] DC deleted");
+    } else {
+        serial_println!("[GFX-TEST] Failed to create display DC");
+    }
+
+    // Create a test window
+    serial_println!("[GFX-TEST] Creating test window...");
+    let hwnd = win32k::user::create_window(
+        "Desktop",
+        "Nostalgia OS Shell",
+        win32k::user::WindowStyle::OVERLAPPEDWINDOW | win32k::user::WindowStyle::VISIBLE,
+        500, 150, 280, 200,
+        win32k::HWND::NULL,
+        0,
+    );
+
+    if hwnd.is_valid() {
+        serial_println!("[GFX-TEST] Window created: {:#x}", hwnd.raw());
+        if let Some(rect) = win32k::user::get_window_rect(hwnd) {
+            serial_println!("[GFX-TEST] Window rect: ({},{}) - ({},{})",
+                rect.left, rect.top, rect.right, rect.bottom);
+        }
+    } else {
+        serial_println!("[GFX-TEST] Failed to create window");
+    }
+
+    serial_println!("[GFX-TEST] Graphical subsystem demo complete");
+}
+
+/// Draw the main title at the top of the demo
+fn draw_demo_title(hdc: win32k::HDC) {
+    // Title bar background
+    let title_rect = win32k::Rect::new(0, 0, 800, 30);
+    let title_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::ACTIVE_CAPTION);
+    win32k::gdi::fill_rect(hdc, &title_rect, title_brush);
+
+    // Title text
+    win32k::gdi::dc::set_text_color(hdc, win32k::ColorRef::WHITE);
+    win32k::gdi::dc::set_bk_mode(hdc, win32k::gdi::dc::BkMode::Transparent);
+    win32k::gdi::text_out(hdc, 10, 7, "Nostalgia OS - Windows Server 2003 Recreation - Win32k Graphics Demo");
+}
+
+/// Draw a section showcasing drawing primitives
+fn draw_primitives_demo(hdc: win32k::HDC, x: i32, y: i32) {
+    // Panel background
+    let panel = win32k::Rect::new(x, y, x + 310, y + 260);
+    let bg_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::WINDOW_BG);
+    win32k::gdi::fill_rect(hdc, &panel, bg_brush);
+    win32k::gdi::draw_edge_raised(hdc, &panel);
+
+    // Section title
+    win32k::gdi::dc::set_text_color(hdc, win32k::ColorRef::BLACK);
+    win32k::gdi::dc::set_bk_mode(hdc, win32k::gdi::dc::BkMode::Transparent);
+    win32k::gdi::text_out(hdc, x + 10, y + 5, "GDI Drawing Primitives");
+
+    // Separator line
+    let pen = win32k::gdi::pen::create_pen(win32k::gdi::pen::PenStyle::Solid, 1, win32k::ColorRef::GRAY);
+    win32k::gdi::dc::select_object(hdc, pen);
+    win32k::gdi::move_to(hdc, x + 10, y + 22);
+    win32k::gdi::line_to(hdc, x + 300, y + 22);
+
+    // 1. Regular rectangle
+    let rect_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(200, 220, 240));
+    win32k::gdi::dc::select_object(hdc, rect_brush);
+    win32k::gdi::rectangle(hdc, x + 15, y + 30, x + 85, y + 70);
+    win32k::gdi::text_out(hdc, x + 20, y + 75, "Rectangle");
+
+    // 2. Rounded rectangle
+    let round_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(220, 200, 240));
+    win32k::gdi::dc::select_object(hdc, round_brush);
+    win32k::gdi::round_rect(hdc, x + 100, y + 30, x + 180, y + 70, 16, 16);
+    win32k::gdi::text_out(hdc, x + 105, y + 75, "RoundRect");
+
+    // 3. Ellipse
+    let ellipse_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(240, 220, 200));
+    win32k::gdi::dc::select_object(hdc, ellipse_brush);
+    win32k::gdi::ellipse(hdc, x + 195, y + 30, x + 280, y + 70);
+    win32k::gdi::text_out(hdc, x + 215, y + 75, "Ellipse");
+
+    // 4. Polygon (triangle)
+    let poly_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(200, 240, 220));
+    win32k::gdi::dc::select_object(hdc, poly_brush);
+    let triangle = [
+        win32k::Point::new(x + 50, y + 100),
+        win32k::Point::new(x + 15, y + 150),
+        win32k::Point::new(x + 85, y + 150),
+    ];
+    win32k::gdi::polygon(hdc, &triangle);
+    win32k::gdi::text_out(hdc, x + 20, y + 155, "Polygon");
+
+    // 5. Polyline
+    let line_pen = win32k::gdi::pen::create_pen(win32k::gdi::pen::PenStyle::Solid, 2, win32k::ColorRef::BLUE);
+    win32k::gdi::dc::select_object(hdc, line_pen);
+    let polyline_pts = [
+        win32k::Point::new(x + 100, y + 100),
+        win32k::Point::new(x + 120, y + 130),
+        win32k::Point::new(x + 140, y + 110),
+        win32k::Point::new(x + 160, y + 140),
+        win32k::Point::new(x + 180, y + 120),
+    ];
+    win32k::gdi::polyline(hdc, &polyline_pts);
+    win32k::gdi::dc::set_text_color(hdc, win32k::ColorRef::BLACK);
+    win32k::gdi::text_out(hdc, x + 110, y + 155, "Polyline");
+
+    // 6. Arc
+    let arc_pen = win32k::gdi::pen::create_pen(win32k::gdi::pen::PenStyle::Solid, 2, win32k::ColorRef::RED);
+    win32k::gdi::dc::select_object(hdc, arc_pen);
+    win32k::gdi::arc(hdc, x + 195, y + 100, x + 280, y + 150,
+        x + 280, y + 125, x + 237, y + 100);
+    win32k::gdi::text_out(hdc, x + 225, y + 155, "Arc");
+
+    // 7. Pie
+    let pie_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(255, 200, 200));
+    win32k::gdi::dc::select_object(hdc, pie_brush);
+    win32k::gdi::pie(hdc, x + 15, y + 175, x + 85, y + 235,
+        x + 85, y + 205, x + 50, y + 175);
+    win32k::gdi::text_out(hdc, x + 35, y + 240, "Pie");
+
+    // 8. Lines with different styles
+    win32k::gdi::dc::set_text_color(hdc, win32k::ColorRef::BLACK);
+    let thick_pen = win32k::gdi::pen::create_pen(win32k::gdi::pen::PenStyle::Solid, 3, win32k::ColorRef::rgb(0, 100, 0));
+    win32k::gdi::dc::select_object(hdc, thick_pen);
+    win32k::gdi::move_to(hdc, x + 100, y + 180);
+    win32k::gdi::line_to(hdc, x + 180, y + 210);
+    win32k::gdi::move_to(hdc, x + 100, y + 210);
+    win32k::gdi::line_to(hdc, x + 180, y + 180);
+    win32k::gdi::text_out(hdc, x + 110, y + 240, "Lines");
+
+    // 9. Chord
+    let chord_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(200, 200, 255));
+    win32k::gdi::dc::select_object(hdc, chord_brush);
+    let chord_pen = win32k::gdi::pen::create_pen(win32k::gdi::pen::PenStyle::Solid, 1, win32k::ColorRef::BLACK);
+    win32k::gdi::dc::select_object(hdc, chord_pen);
+    win32k::gdi::chord(hdc, x + 195, y + 175, x + 280, y + 235,
+        x + 195, y + 205, x + 280, y + 205);
+    win32k::gdi::text_out(hdc, x + 215, y + 240, "Chord");
+}
+
+/// Draw a section showcasing Windows controls
+fn draw_controls_demo(hdc: win32k::HDC, x: i32, y: i32) {
+    // Panel background
+    let panel = win32k::Rect::new(x, y, x + 280, y + 260);
+    let bg_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::WINDOW_BG);
+    win32k::gdi::fill_rect(hdc, &panel, bg_brush);
+    win32k::gdi::draw_edge_raised(hdc, &panel);
+
+    // Section title
+    win32k::gdi::dc::set_text_color(hdc, win32k::ColorRef::BLACK);
+    win32k::gdi::dc::set_bk_mode(hdc, win32k::gdi::dc::BkMode::Transparent);
+    win32k::gdi::text_out(hdc, x + 10, y + 5, "Windows Controls");
+
+    // Separator line
+    let pen = win32k::gdi::pen::create_pen(win32k::gdi::pen::PenStyle::Solid, 1, win32k::ColorRef::GRAY);
+    win32k::gdi::dc::select_object(hdc, pen);
+    win32k::gdi::move_to(hdc, x + 10, y + 22);
+    win32k::gdi::line_to(hdc, x + 270, y + 22);
+
+    // Buttons in different states
+    let btn_rect = win32k::Rect::new(x + 15, y + 30, x + 100, y + 55);
+    win32k::user::controls::draw_button(hdc, &btn_rect, "Normal",
+        win32k::user::controls::ButtonState::Normal,
+        win32k::user::controls::ButtonStyle::PushButton);
+
+    let btn_hover = win32k::Rect::new(x + 110, y + 30, x + 195, y + 55);
+    win32k::user::controls::draw_button(hdc, &btn_hover, "Hover",
+        win32k::user::controls::ButtonState::Hover,
+        win32k::user::controls::ButtonStyle::PushButton);
+
+    let btn_pressed = win32k::Rect::new(x + 15, y + 60, x + 100, y + 85);
+    win32k::user::controls::draw_button(hdc, &btn_pressed, "Pressed",
+        win32k::user::controls::ButtonState::Pressed,
+        win32k::user::controls::ButtonStyle::PushButton);
+
+    let btn_disabled = win32k::Rect::new(x + 110, y + 60, x + 195, y + 85);
+    win32k::user::controls::draw_button(hdc, &btn_disabled, "Disabled",
+        win32k::user::controls::ButtonState::Disabled,
+        win32k::user::controls::ButtonStyle::PushButton);
+
+    // Checkboxes
+    let cb1_rect = win32k::Rect::new(x + 15, y + 95, x + 140, y + 115);
+    win32k::user::controls::draw_checkbox(hdc, &cb1_rect, "Checked",
+        win32k::user::controls::ButtonState::Normal,
+        win32k::user::controls::CheckState::Checked);
+
+    let cb2_rect = win32k::Rect::new(x + 145, y + 95, x + 270, y + 115);
+    win32k::user::controls::draw_checkbox(hdc, &cb2_rect, "Unchecked",
+        win32k::user::controls::ButtonState::Normal,
+        win32k::user::controls::CheckState::Unchecked);
+
+    // Radio buttons
+    let rb1_rect = win32k::Rect::new(x + 15, y + 120, x + 100, y + 140);
+    win32k::user::controls::draw_radio_button(hdc, &rb1_rect, "Option A",
+        win32k::user::controls::ButtonState::Normal, true);
+
+    let rb2_rect = win32k::Rect::new(x + 105, y + 120, x + 190, y + 140);
+    win32k::user::controls::draw_radio_button(hdc, &rb2_rect, "Option B",
+        win32k::user::controls::ButtonState::Normal, false);
+
+    // Group box
+    let group_rect = win32k::Rect::new(x + 15, y + 145, x + 265, y + 200);
+    win32k::user::controls::draw_group_box(hdc, &group_rect, "Settings");
+
+    // Static text inside group
+    let static_rect = win32k::Rect::new(x + 25, y + 165, x + 255, y + 180);
+    win32k::user::controls::draw_static_text(hdc, &static_rect, "Static label text",
+        win32k::user::controls::StaticStyle::Left);
+
+    // Edit control inside group
+    let edit_rect = win32k::Rect::new(x + 25, y + 180, x + 255, y + 195);
+    win32k::user::controls::draw_edit_control(hdc, &edit_rect, "Edit box text", 0, false);
+
+    // Progress bars
+    win32k::gdi::text_out(hdc, x + 15, y + 205, "Progress:");
+
+    let prog1_rect = win32k::Rect::new(x + 80, y + 205, x + 265, y + 220);
+    win32k::user::controls::draw_progress_bar(hdc, &prog1_rect, 75);
+
+    let prog2_rect = win32k::Rect::new(x + 80, y + 225, x + 265, y + 240);
+    win32k::user::controls::draw_progress_bar(hdc, &prog2_rect, 35);
+
+    let prog3_rect = win32k::Rect::new(x + 80, y + 245, x + 265, y + 260);
+    win32k::user::controls::draw_progress_bar(hdc, &prog3_rect, 100);
+}
+
+/// Draw a section showcasing various shapes
+fn draw_shapes_demo(hdc: win32k::HDC, x: i32, y: i32) {
+    // Panel background
+    let panel = win32k::Rect::new(x, y, x + 610, y + 140);
+    let bg_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::WINDOW_BG);
+    win32k::gdi::fill_rect(hdc, &panel, bg_brush);
+    win32k::gdi::draw_edge_raised(hdc, &panel);
+
+    // Section title
+    win32k::gdi::dc::set_text_color(hdc, win32k::ColorRef::BLACK);
+    win32k::gdi::dc::set_bk_mode(hdc, win32k::gdi::dc::BkMode::Transparent);
+    win32k::gdi::text_out(hdc, x + 10, y + 5, "Shapes Gallery - Polygons and Complex Figures");
+
+    // Separator line
+    let pen = win32k::gdi::pen::create_pen(win32k::gdi::pen::PenStyle::Solid, 1, win32k::ColorRef::GRAY);
+    win32k::gdi::dc::select_object(hdc, pen);
+    win32k::gdi::move_to(hdc, x + 10, y + 22);
+    win32k::gdi::line_to(hdc, x + 600, y + 22);
+
+    // Pentagon
+    let pent_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(255, 220, 180));
+    win32k::gdi::dc::select_object(hdc, pent_brush);
+    let pentagon = [
+        win32k::Point::new(x + 50, y + 35),
+        win32k::Point::new(x + 80, y + 55),
+        win32k::Point::new(x + 70, y + 90),
+        win32k::Point::new(x + 30, y + 90),
+        win32k::Point::new(x + 20, y + 55),
+    ];
+    win32k::gdi::polygon(hdc, &pentagon);
+    win32k::gdi::text_out(hdc, x + 25, y + 100, "Pentagon");
+
+    // Hexagon
+    let hex_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(180, 255, 220));
+    win32k::gdi::dc::select_object(hdc, hex_brush);
+    let hexagon = [
+        win32k::Point::new(x + 150, y + 35),
+        win32k::Point::new(x + 175, y + 45),
+        win32k::Point::new(x + 175, y + 75),
+        win32k::Point::new(x + 150, y + 85),
+        win32k::Point::new(x + 125, y + 75),
+        win32k::Point::new(x + 125, y + 45),
+    ];
+    win32k::gdi::polygon(hdc, &hexagon);
+    win32k::gdi::text_out(hdc, x + 125, y + 100, "Hexagon");
+
+    // Star (5-pointed)
+    let star_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(255, 255, 180));
+    win32k::gdi::dc::select_object(hdc, star_brush);
+    let star = [
+        win32k::Point::new(x + 250, y + 35),   // Top
+        win32k::Point::new(x + 260, y + 60),   // Inner right
+        win32k::Point::new(x + 285, y + 60),   // Outer right
+        win32k::Point::new(x + 265, y + 75),   // Inner right bottom
+        win32k::Point::new(x + 275, y + 100),  // Bottom right
+        win32k::Point::new(x + 250, y + 85),   // Inner bottom
+        win32k::Point::new(x + 225, y + 100),  // Bottom left
+        win32k::Point::new(x + 235, y + 75),   // Inner left bottom
+        win32k::Point::new(x + 215, y + 60),   // Outer left
+        win32k::Point::new(x + 240, y + 60),   // Inner left
+    ];
+    win32k::gdi::polygon(hdc, &star);
+    win32k::gdi::text_out(hdc, x + 235, y + 105, "Star");
+
+    // Arrow pointing right
+    let arrow_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(180, 220, 255));
+    win32k::gdi::dc::select_object(hdc, arrow_brush);
+    let arrow = [
+        win32k::Point::new(x + 320, y + 50),
+        win32k::Point::new(x + 360, y + 50),
+        win32k::Point::new(x + 360, y + 40),
+        win32k::Point::new(x + 390, y + 65),
+        win32k::Point::new(x + 360, y + 90),
+        win32k::Point::new(x + 360, y + 80),
+        win32k::Point::new(x + 320, y + 80),
+    ];
+    win32k::gdi::polygon(hdc, &arrow);
+    win32k::gdi::text_out(hdc, x + 335, y + 100, "Arrow");
+
+    // Diamond
+    let diamond_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(220, 180, 255));
+    win32k::gdi::dc::select_object(hdc, diamond_brush);
+    let diamond = [
+        win32k::Point::new(x + 450, y + 35),
+        win32k::Point::new(x + 480, y + 65),
+        win32k::Point::new(x + 450, y + 95),
+        win32k::Point::new(x + 420, y + 65),
+    ];
+    win32k::gdi::polygon(hdc, &diamond);
+    win32k::gdi::text_out(hdc, x + 430, y + 100, "Diamond");
+
+    // House shape
+    let house_brush = win32k::gdi::brush::create_solid_brush(win32k::ColorRef::rgb(255, 200, 200));
+    win32k::gdi::dc::select_object(hdc, house_brush);
+    let house = [
+        win32k::Point::new(x + 550, y + 35),   // Roof peak
+        win32k::Point::new(x + 590, y + 55),   // Roof right
+        win32k::Point::new(x + 590, y + 95),   // Wall right bottom
+        win32k::Point::new(x + 510, y + 95),   // Wall left bottom
+        win32k::Point::new(x + 510, y + 55),   // Wall left top
+    ];
+    win32k::gdi::polygon(hdc, &house);
+    win32k::gdi::text_out(hdc, x + 535, y + 100, "House");
+
+    // Add some additional decorative elements
+
+    // Concentric rounded rectangles
+    let colors = [
+        win32k::ColorRef::rgb(100, 150, 200),
+        win32k::ColorRef::rgb(120, 170, 220),
+        win32k::ColorRef::rgb(140, 190, 240),
+    ];
+    for (i, color) in colors.iter().enumerate() {
+        let brush = win32k::gdi::brush::create_solid_brush(*color);
+        win32k::gdi::dc::select_object(hdc, brush);
+        let offset = (i as i32) * 8;
+        win32k::gdi::round_rect(hdc,
+            x + 50 + offset, y + 115 + (i as i32) * 3,
+            x + 90 - offset, y + 135 - (i as i32) * 3,
+            10 - (i as i32) * 2, 10 - (i as i32) * 2);
     }
 }
 
