@@ -38,6 +38,7 @@ pub mod mce;
 pub mod mouse;
 pub mod pci;
 pub mod pic;
+pub mod port;
 pub mod ppm;
 pub mod rtc;
 pub mod timer;
@@ -122,6 +123,21 @@ pub use mce::{
     mce_is_supported, mce_get_bank_count, mce_init_cpu, mce_poll_errors,
     mce_exception_handler, mce_get_error_log, mce_clear_error_log,
     mce_get_stats, mce_get_global_stats, mce_is_initialized,
+};
+
+// Re-export port types
+pub use port::{
+    Port, PortStats, ports,
+    read_port_u8, read_port_u16, read_port_u32,
+    write_port_u8, write_port_u16, write_port_u32,
+    read_port_buffer_u8, read_port_buffer_u16, read_port_buffer_u32,
+    write_port_buffer_u8, write_port_buffer_u16, write_port_buffer_u32,
+    read_port_u8_delayed, write_port_u8_delayed, io_delay, io_delay_multiple,
+    hal_read_port_uchar, hal_read_port_ushort, hal_read_port_ulong,
+    hal_write_port_uchar, hal_write_port_ushort, hal_write_port_ulong,
+    hal_read_port_buffer_uchar, hal_read_port_buffer_ushort, hal_read_port_buffer_ulong,
+    hal_write_port_buffer_uchar, hal_write_port_buffer_ushort, hal_write_port_buffer_ulong,
+    hal_get_port_stats, hal_reset_port_stats,
 };
 
 // TODO: Future submodules
