@@ -91,6 +91,7 @@ pub mod shellexec;
 pub mod ime;
 pub mod multilang;
 pub mod dde;
+pub mod help;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -469,6 +470,9 @@ pub fn init() {
 
     // Initialize DDE support
     dde::init();
+
+    // Initialize help system
+    help::init();
 
     // Register built-in window classes
     register_builtin_classes();
