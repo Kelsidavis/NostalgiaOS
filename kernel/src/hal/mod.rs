@@ -33,6 +33,7 @@ pub mod ata;
 pub mod bus;
 pub mod cache;
 pub mod cmos;
+pub mod cpuid;
 pub mod display;
 pub mod dma;
 pub mod interrupt;
@@ -223,6 +224,16 @@ pub use cache::{
     cache_is_clflush_supported, cache_is_clflushopt_supported, cache_is_clwb_supported, cache_is_initialized,
     cache_get_stats,
     ke_flush_write_buffer, ke_sweep_dcache, ke_sweep_icache, ke_flush_io_buffers,
+};
+
+// Re-export CPUID types
+pub use cpuid::{
+    CpuVendor, CpuFeature, CpuModel, CpuCapabilities, CpuidStats,
+    cpuid, cpuid_leaf,
+    cpuid_has_feature, cpuid_has_features,
+    cpuid_get_vendor, cpuid_get_vendor_string, cpuid_get_brand_string,
+    cpuid_get_model, cpuid_get_capabilities, cpuid_is_virtual, cpuid_is_initialized,
+    cpuid_get_stats, ex_is_processor_feature_present,
 };
 
 // TODO: Future submodules
