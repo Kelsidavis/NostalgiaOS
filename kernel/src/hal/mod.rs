@@ -32,6 +32,7 @@ pub mod apic;
 pub mod ata;
 pub mod bus;
 pub mod cmos;
+pub mod display;
 pub mod dma;
 pub mod interrupt;
 pub mod keyboard;
@@ -183,6 +184,18 @@ pub use profile::{
     profile_get_instructions, profile_get_cycles, profile_get_ref_cycles,
     profile_get_stats, profile_is_initialized,
     hal_start_profile_interrupt, hal_stop_profile_interrupt, hal_set_profile_interval,
+};
+
+// Re-export display types
+pub use display::{
+    VgaColor, DisplayMode, DisplayInfo, CursorPos, DisplayStats,
+    VGA_BUFFER_ADDR, VGA_WIDTH, VGA_HEIGHT, BSOD_ATTRIBUTE,
+    display_write_char, display_write_string, display_write_hex,
+    display_set_attribute, display_get_cursor, display_set_cursor, display_clear,
+    display_bugcheck_screen, display_is_bugcheck_active,
+    display_set_gop, display_get_info, display_get_mode, display_is_initialized,
+    display_get_stats,
+    hal_display_string, hal_query_display_parameters, inbv_display_string, inbv_set_text_color,
 };
 
 // TODO: Future submodules
