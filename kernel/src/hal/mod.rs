@@ -50,6 +50,7 @@ pub mod ppm;
 pub mod profile;
 pub mod rtc;
 pub mod timer;
+pub mod tlb;
 
 // Re-export interrupt types
 pub use interrupt::{
@@ -250,6 +251,17 @@ pub use msreg::{
     msr_read_tsc, rdtsc, rdtscp,
     msr_is_initialized, msr_get_stats, msr_record_gp_fault,
     hal_read_msr, hal_write_msr,
+};
+
+// Re-export TLB types
+pub use tlb::{
+    TlbFlushScope, InvpcidDescriptor, TlbStats, MAX_PCID,
+    tlb_flush_page, tlb_flush_range, tlb_flush_all, tlb_flush_all_global,
+    tlb_flush_pcid_address, tlb_flush_pcid, tlb_flush_all_contexts, tlb_flush_all_contexts_global,
+    tlb_shootdown_all, tlb_shootdown_page, tlb_shootdown_range,
+    tlb_get_current_pcid, tlb_set_current_pcid,
+    tlb_is_pcid_supported, tlb_is_invpcid_supported, tlb_is_global_supported, tlb_is_initialized,
+    tlb_get_stats, ke_flush_single_tb, ke_flush_entire_tb,
 };
 
 // TODO: Future submodules
