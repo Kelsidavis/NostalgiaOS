@@ -200,6 +200,11 @@ impl UserHandle {
     pub const fn raw(self) -> u32 {
         self.0
     }
+
+    /// Create a handle from raw value
+    pub const fn from_raw(value: u32) -> Self {
+        UserHandle(value)
+    }
 }
 
 // Type aliases for clarity

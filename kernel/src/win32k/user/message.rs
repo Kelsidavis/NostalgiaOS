@@ -108,7 +108,7 @@ pub const WM_APP: u32 = 0x8000;
 // Message Structure
 // ============================================================================
 
-/// Window message
+/// Window message (MSG structure)
 #[derive(Debug, Clone, Copy)]
 pub struct Message {
     /// Target window
@@ -158,6 +158,9 @@ impl Message {
         }
     }
 }
+
+/// Type alias for Windows API compatibility
+pub type MSG = Message;
 
 // ============================================================================
 // Message Queue

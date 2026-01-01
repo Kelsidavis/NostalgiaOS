@@ -36,6 +36,12 @@ pub mod menu;
 pub mod dialog;
 pub mod icon;
 pub mod clipboard;
+pub mod metrics;
+pub mod accelerator;
+pub mod caret;
+pub mod listbox;
+pub mod combobox;
+pub mod hooks;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -249,6 +255,24 @@ pub fn init() {
 
     // Initialize clipboard system
     clipboard::init();
+
+    // Initialize metrics system
+    metrics::init();
+
+    // Initialize accelerator table system
+    accelerator::init();
+
+    // Initialize caret system
+    caret::init();
+
+    // Initialize listbox system
+    listbox::init();
+
+    // Initialize combobox system
+    combobox::init();
+
+    // Initialize hooks system
+    hooks::init();
 
     // Register built-in window classes
     register_builtin_classes();
@@ -698,4 +722,131 @@ pub fn is_clipboard_format_available(format: ClipboardFormat) -> bool {
 /// Register a custom clipboard format
 pub fn register_clipboard_format(name: &str) -> u32 {
     clipboard::register_clipboard_format(name)
+}
+
+// ============================================================================
+// System Metrics API
+// ============================================================================
+
+// Re-export metrics types
+pub use metrics::{SystemMetric, SystemColor};
+
+/// Get a system metric value
+pub fn get_system_metrics(index: i32) -> i32 {
+    metrics::get_system_metrics(index)
+}
+
+/// Get or set system parameters
+pub fn system_parameters_info(action: u32, param: u32, data: usize, win_ini: u32) -> bool {
+    metrics::system_parameters_info(action, param, data, win_ini)
+}
+
+/// Get a system color
+pub fn get_sys_color(index: i32) -> u32 {
+    metrics::get_sys_color(index)
+}
+
+/// Set system colors
+pub fn set_sys_colors(indices: &[i32], colors: &[u32]) -> bool {
+    metrics::set_sys_colors(indices, colors)
+}
+
+/// Get system color brush
+pub fn get_sys_color_brush(index: i32) -> super::GdiHandle {
+    metrics::get_sys_color_brush(index)
+}
+
+/// Set screen size
+pub fn set_screen_size(width: i32, height: i32) {
+    metrics::set_screen_size(width, height)
+}
+
+// ============================================================================
+// Accelerator Table API
+// ============================================================================
+
+// Re-export accelerator types and constants
+pub use accelerator::{
+    Accel, HACCEL,
+    FVIRTKEY, FNOINVERT, FSHIFT, FCONTROL, FALT,
+    vk, cmd,
+};
+
+/// Create an accelerator table
+pub fn create_accelerator_table(accels: &[Accel]) -> HACCEL {
+    accelerator::create_accelerator_table(accels)
+}
+
+/// Destroy an accelerator table
+pub fn destroy_accelerator_table(haccel: HACCEL) -> bool {
+    accelerator::destroy_accelerator_table(haccel)
+}
+
+/// Copy accelerator table entries
+pub fn copy_accelerator_table(haccel: HACCEL, buffer: &mut [Accel]) -> usize {
+    accelerator::copy_accelerator_table(haccel, buffer)
+}
+
+/// Translate keyboard message using accelerator table
+pub fn translate_accelerator(hwnd: HWND, haccel: HACCEL, msg: &message::MSG) -> bool {
+    accelerator::translate_accelerator(hwnd, haccel, msg)
+}
+
+/// Update keyboard modifier state
+pub fn update_keyboard_modifiers(shift: bool, control: bool, alt: bool) {
+    accelerator::update_modifiers(shift, control, alt)
+}
+
+/// Create standard Edit menu accelerator table
+pub fn create_standard_edit_accelerators() -> HACCEL {
+    accelerator::create_standard_edit_accels()
+}
+
+/// Create standard File menu accelerator table
+pub fn create_standard_file_accelerators() -> HACCEL {
+    accelerator::create_standard_file_accels()
+}
+
+// ============================================================================
+// Caret API
+// ============================================================================
+
+/// Create a caret for a window
+pub fn create_caret(hwnd: HWND, bitmap: u32, width: i32, height: i32) -> bool {
+    caret::create_caret(hwnd, bitmap, width, height)
+}
+
+/// Destroy the caret
+pub fn destroy_caret() -> bool {
+    caret::destroy_caret()
+}
+
+/// Show the caret
+pub fn show_caret(hwnd: HWND) -> bool {
+    caret::show_caret(hwnd)
+}
+
+/// Hide the caret
+pub fn hide_caret(hwnd: HWND) -> bool {
+    caret::hide_caret(hwnd)
+}
+
+/// Set caret position
+pub fn set_caret_pos(x: i32, y: i32) -> bool {
+    caret::set_caret_pos(x, y)
+}
+
+/// Get caret position
+pub fn get_caret_pos(point: &mut Point) -> bool {
+    caret::get_caret_pos_point(point)
+}
+
+/// Set caret blink time
+pub fn set_caret_blink_time(blink_time: u32) -> bool {
+    caret::set_caret_blink_time(blink_time)
+}
+
+/// Get caret blink time
+pub fn get_caret_blink_time() -> u32 {
+    caret::get_caret_blink_time()
 }
