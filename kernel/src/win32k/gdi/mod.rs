@@ -33,6 +33,7 @@ pub mod pen;
 pub mod region;
 pub mod draw;
 pub mod font;
+pub mod palette;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -167,6 +168,9 @@ pub fn init() {
 
     // Initialize font manager
     font::init();
+
+    // Initialize palette manager
+    palette::init();
 
     // Create stock objects
     create_stock_objects();

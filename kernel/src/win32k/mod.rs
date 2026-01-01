@@ -221,6 +221,33 @@ pub type HMENU = UserHandle;
 pub type HCURSOR = UserHandle;
 pub type HICON = UserHandle;
 
+/// Module instance handle
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HINSTANCE(pub u32);
+
+impl HINSTANCE {
+    pub const NULL: HINSTANCE = HINSTANCE(0);
+
+    /// Create from raw value
+    pub const fn from_raw(value: u32) -> Self {
+        HINSTANCE(value)
+    }
+
+    /// Get raw value
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+
+    /// Check if valid
+    pub const fn is_valid(self) -> bool {
+        self.0 != 0
+    }
+}
+
+/// Module handle (same as HINSTANCE)
+pub type HMODULE = HINSTANCE;
+
 // ============================================================================
 // Common Structures
 // ============================================================================

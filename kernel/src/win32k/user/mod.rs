@@ -42,6 +42,15 @@ pub mod caret;
 pub mod listbox;
 pub mod combobox;
 pub mod hooks;
+pub mod edit;
+pub mod resource;
+pub mod toolbar;
+pub mod statusbar;
+pub mod trackbar;
+pub mod progressbar;
+pub mod updown;
+pub mod tab;
+pub mod header;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -273,6 +282,33 @@ pub fn init() {
 
     // Initialize hooks system
     hooks::init();
+
+    // Initialize edit control system
+    edit::init();
+
+    // Initialize resource manager
+    resource::init();
+
+    // Initialize toolbar control
+    toolbar::init();
+
+    // Initialize statusbar control
+    statusbar::init();
+
+    // Initialize trackbar control
+    trackbar::init();
+
+    // Initialize progressbar control
+    progressbar::init();
+
+    // Initialize updown control
+    updown::init();
+
+    // Initialize tab control
+    tab::init();
+
+    // Initialize header control
+    header::init();
 
     // Register built-in window classes
     register_builtin_classes();
