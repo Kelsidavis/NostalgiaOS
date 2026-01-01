@@ -100,6 +100,8 @@ pub mod credui;
 pub mod power;
 pub mod network;
 pub mod error;
+pub mod console;
+pub mod security;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -505,6 +507,12 @@ pub fn init() {
 
     // Initialize error reporting
     error::init();
+
+    // Initialize console subsystem
+    console::init();
+
+    // Initialize security UI
+    security::init();
 
     // Register built-in window classes
     register_builtin_classes();
