@@ -36,6 +36,7 @@ pub mod keyboard;
 pub mod mouse;
 pub mod pci;
 pub mod pic;
+pub mod ppm;
 pub mod rtc;
 pub mod timer;
 
@@ -84,6 +85,20 @@ pub use dma::{
     hal_allocate_adapter_channel, hal_free_adapter_channel,
     hal_map_transfer, hal_flush_adapter_buffers, hal_read_dma_counter,
     hal_get_dma_stats, hal_get_adapter_stats, hal_is_dma_initialized,
+};
+
+// Re-export PPM types
+pub use ppm::{
+    CState, PState, TState, PowerPolicy,
+    CStateInfo, PStateInfo, ProcessorPowerState, ProcessorPowerInfo, PpmStats,
+    MAX_PROCESSORS, MAX_C_STATES, MAX_P_STATES,
+    ppm_enter_idle_state, ppm_exit_idle_state, ppm_get_deepest_c_state,
+    ppm_is_mwait_supported, ppm_set_performance_state, ppm_get_current_p_state,
+    ppm_is_speedstep_supported, ppm_get_p_state_count,
+    ppm_get_temperature, ppm_is_thermal_throttling, ppm_set_thermal_throttle_point,
+    ppm_set_power_policy, ppm_get_power_policy,
+    ppm_register_processor, ppm_unregister_processor,
+    ppm_get_stats, ppm_get_processor_info, ppm_is_initialized,
 };
 
 // TODO: Future submodules
