@@ -88,6 +88,7 @@ pub mod dragdrop;
 pub mod verinfo;
 pub mod access;
 pub mod shellexec;
+pub mod ime;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -457,6 +458,9 @@ pub fn init() {
 
     // Initialize shell execute
     shellexec::init();
+
+    // Initialize IME support
+    ime::init();
 
     // Register built-in window classes
     register_builtin_classes();
