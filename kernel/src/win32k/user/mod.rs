@@ -75,6 +75,7 @@ pub mod customdraw;
 pub mod subclass;
 pub mod taskdialog;
 pub mod splitbutton;
+pub mod bufferedpaint;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -405,6 +406,9 @@ pub fn init() {
 
     // Initialize split button
     splitbutton::init();
+
+    // Initialize buffered paint
+    bufferedpaint::init();
 
     // Register built-in window classes
     register_builtin_classes();
