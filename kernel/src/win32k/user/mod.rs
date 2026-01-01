@@ -69,6 +69,9 @@ pub mod wizard;
 pub mod draglist;
 pub mod nativefont;
 pub mod richedit;
+pub mod flatscroll;
+pub mod mrulist;
+pub mod customdraw;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -381,6 +384,15 @@ pub fn init() {
 
     // Initialize rich edit control
     richedit::init();
+
+    // Initialize flat scrollbar
+    flatscroll::init();
+
+    // Initialize MRU list
+    mrulist::init();
+
+    // Initialize custom draw support
+    customdraw::init();
 
     // Register built-in window classes
     register_builtin_classes();
