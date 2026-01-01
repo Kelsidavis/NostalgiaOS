@@ -60,6 +60,8 @@ pub mod monthcal;
 pub mod datetimepick;
 pub mod pager;
 pub mod ipaddress;
+pub mod rebar;
+pub mod comboboxex;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -345,6 +347,12 @@ pub fn init() {
 
     // Initialize IP address control
     ipaddress::init();
+
+    // Initialize rebar control
+    rebar::init();
+
+    // Initialize comboboxex control
+    comboboxex::init();
 
     // Register built-in window classes
     register_builtin_classes();
