@@ -31,6 +31,7 @@ pub mod acpi;
 pub mod apic;
 pub mod ata;
 pub mod bus;
+pub mod cmos;
 pub mod dma;
 pub mod interrupt;
 pub mod keyboard;
@@ -138,6 +139,19 @@ pub use port::{
     hal_read_port_buffer_uchar, hal_read_port_buffer_ushort, hal_read_port_buffer_ulong,
     hal_write_port_buffer_uchar, hal_write_port_buffer_ushort, hal_write_port_buffer_ulong,
     hal_get_port_stats, hal_reset_port_stats,
+};
+
+// Re-export CMOS types
+pub use cmos::{
+    RtcTime, CmosStatus, CmosStats, registers as cmos_registers,
+    CMOS_SIZE, EXTENDED_CMOS_SIZE, NVRAM_START, NVRAM_END,
+    cmos_read, cmos_write, cmos_read_buffer, cmos_write_buffer,
+    cmos_read_rtc, cmos_write_rtc, cmos_get_status, cmos_battery_good,
+    cmos_disable_nmi, cmos_enable_nmi, cmos_is_nmi_disabled,
+    cmos_calculate_checksum, cmos_get_stored_checksum, cmos_verify_checksum, cmos_update_checksum,
+    cmos_get_base_memory, cmos_get_extended_memory,
+    hal_read_cmos_data, hal_write_cmos_data,
+    cmos_get_stats, cmos_is_initialized,
 };
 
 // TODO: Future submodules
