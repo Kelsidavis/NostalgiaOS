@@ -38,6 +38,7 @@ use spin::Mutex;
 
 pub mod idle;
 pub mod shutdown;
+pub mod request;
 
 // Re-export idle detection types
 pub use idle::{
@@ -79,6 +80,28 @@ pub use shutdown::{
     get_shutdown_work_count,
     set_shutdown_reason,
     get_shutdown_reason,
+};
+
+// Re-export power request types
+pub use request::{
+    PowerRequest,
+    PowerRequestType,
+    PowerRequestContext,
+    PowerRequestStats,
+    PowerRequestSnapshot,
+    MAX_POWER_REQUESTS,
+    po_create_power_request,
+    po_delete_power_request,
+    po_set_power_request,
+    po_clear_power_request,
+    is_system_sleep_blocked,
+    is_display_off_blocked,
+    is_away_mode_requested,
+    is_execution_required,
+    get_request_count,
+    get_power_request_stats,
+    get_power_request_snapshots,
+    get_power_request_count,
 };
 
 // ============================================================================
@@ -437,6 +460,9 @@ pub fn init() {
 
     // Initialize shutdown support
     shutdown::init();
+
+    // Initialize power request support
+    request::init();
 
     PO_INITIALIZED.store(true, Ordering::SeqCst);
 
