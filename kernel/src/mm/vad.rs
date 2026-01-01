@@ -46,7 +46,10 @@ pub mod allocation_type {
     pub const MEM_MAPPED: u32 = 0x40000;
     pub const MEM_RESET: u32 = 0x80000;
     pub const MEM_TOP_DOWN: u32 = 0x100000;
+    pub const MEM_WRITE_WATCH: u32 = 0x200000;
     pub const MEM_PHYSICAL: u32 = 0x400000;
+    pub const MEM_ROTATE: u32 = 0x800000;
+    pub const MEM_4MB_PAGES: u32 = 0x80000000;
     pub const MEM_LARGE_PAGES: u32 = 0x20000000;
 }
 
@@ -93,6 +96,10 @@ pub mod vad_flags {
     pub const VAD_LONG: u16 = 0x0100;
     /// Memory-mapped file
     pub const VAD_MAPPED_FILE: u16 = 0x0200;
+    /// Write watch enabled (track written pages)
+    pub const VAD_WRITE_WATCH: u16 = 0x0400;
+    /// Physical view (AWE)
+    pub const VAD_PHYSICAL_VIEW: u16 = 0x0800;
 }
 
 /// Virtual Address Descriptor
@@ -217,6 +224,16 @@ impl MmVad {
     /// Check if locked in memory
     pub fn is_locked(&self) -> bool {
         (self.flags & vad_flags::VAD_LOCKED) != 0
+    }
+
+    /// Check if write watch is enabled
+    pub fn is_write_watch(&self) -> bool {
+        (self.flags & vad_flags::VAD_WRITE_WATCH) != 0
+    }
+
+    /// Check if this is a physical view (AWE)
+    pub fn is_physical_view(&self) -> bool {
+        (self.flags & vad_flags::VAD_PHYSICAL_VIEW) != 0
     }
 
     /// Clear the VAD

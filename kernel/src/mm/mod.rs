@@ -32,6 +32,9 @@ pub mod section;
 pub mod tlb;
 pub mod mdl;
 pub mod ws;
+pub mod wrtwatch;
+pub mod awe;
+pub mod lockvm;
 
 // Re-export PFN types
 pub use pfn::{
@@ -291,6 +294,67 @@ pub use ws::{
     mi_record_page_fault,
 };
 
+// Re-export write watch types
+pub use wrtwatch::{
+    WriteWatchRegion,
+    WriteWatchBitmap,
+    WriteWatchStats,
+    WriteWatchSnapshot,
+    WRITE_WATCH_FLAG_RESET,
+    MAX_WRITE_WATCH_REGIONS,
+    mi_create_write_watch_region,
+    mi_destroy_write_watch_region,
+    mi_find_write_watch_region,
+    mi_capture_write_watch_dirty_bit,
+    mi_is_write_watch_address,
+    mi_get_write_watch_stats,
+    mi_get_write_watch_snapshots,
+    nt_get_write_watch,
+    nt_reset_write_watch,
+};
+
+// Re-export AWE types
+pub use awe::{
+    AwePageState,
+    AwePageInfo,
+    AweRegion,
+    AweInfo,
+    AweStats,
+    AweSnapshot,
+    MAX_AWE_REGIONS,
+    MAX_AWE_PAGES_PER_PROCESS,
+    mi_create_awe_region,
+    mi_destroy_awe_region,
+    mi_find_awe_region,
+    mi_get_awe_pfn,
+    mi_get_awe_stats,
+    mi_get_awe_snapshots,
+    nt_allocate_user_physical_pages,
+    nt_free_user_physical_pages,
+    nt_map_user_physical_pages,
+    nt_map_user_physical_pages_scatter,
+};
+
+// Re-export lock VM types
+pub use lockvm::{
+    LockedRegion,
+    ProcessLockInfo,
+    LockVmStats,
+    LockedRegionSnapshot,
+    MAP_PROCESS,
+    MAP_SYSTEM,
+    MAX_LOCKED_REGIONS,
+    MAX_LOCKED_PAGES_PER_PROCESS,
+    nt_lock_virtual_memory,
+    nt_unlock_virtual_memory,
+    mi_is_page_locked,
+    mi_is_range_locked,
+    mi_get_page_lock_type,
+    mi_cleanup_process_locks,
+    mi_get_lock_stats,
+    mi_get_locked_region_snapshots,
+};
+
 /// Initialize the Memory Manager
 ///
 /// This initializes all memory management subsystems:
@@ -326,6 +390,15 @@ pub unsafe fn init(boot_info: &crate::BootInfo) {
 
     // Initialize TLB shootdown subsystem
     tlb::init();
+
+    // Initialize write watch subsystem
+    wrtwatch::init();
+
+    // Initialize AWE subsystem
+    awe::init();
+
+    // Initialize lock VM subsystem
+    lockvm::init();
 
     crate::serial_println!("[MM] Memory Manager initialized");
 }
