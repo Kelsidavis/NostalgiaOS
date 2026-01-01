@@ -94,6 +94,8 @@ pub mod dde;
 pub mod help;
 pub mod theme;
 pub mod oleauto;
+pub mod print;
+pub mod gdihelp;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -481,6 +483,12 @@ pub fn init() {
 
     // Initialize OLE automation
     oleauto::init();
+
+    // Initialize printing support
+    print::init();
+
+    // Initialize GDI helpers
+    gdihelp::init();
 
     // Register built-in window classes
     register_builtin_classes();
