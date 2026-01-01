@@ -93,6 +93,7 @@ pub mod multilang;
 pub mod dde;
 pub mod help;
 pub mod theme;
+pub mod oleauto;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -477,6 +478,9 @@ pub fn init() {
 
     // Initialize theme support
     theme::init();
+
+    // Initialize OLE automation
+    oleauto::init();
 
     // Register built-in window classes
     register_builtin_classes();
