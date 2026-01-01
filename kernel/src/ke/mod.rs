@@ -253,4 +253,10 @@ pub use profile::{
     ke_initialize_profile, ke_start_profile, ke_stop_profile,
     ke_query_interval_profile, ke_set_interval_profile,
     DEFAULT_PROFILE_INTERVAL, MINIMUM_PROFILE_INTERVAL,
+    // Active profile source tracking
+    ActiveProfileSource, ProfileStats, MAX_ACTIVE_SOURCES,
+    get_profile_stats,
+    // Interrupt handlers
+    ki_profile_interrupt, ki_profile_alignment_fixup,
+    ki_start_profile_interrupt_ipi, ki_stop_profile_interrupt_ipi,
 };

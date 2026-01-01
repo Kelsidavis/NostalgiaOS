@@ -302,11 +302,115 @@ impl Default for KProfile {
 // Global Profile Management
 // ============================================================================
 
+use crate::ke::spinlock::SpinLock;
+use crate::ke::prcb::MAX_CPUS;
+
 /// Current profile interval (100ns units)
 static PROFILE_INTERVAL: AtomicU32 = AtomicU32::new(DEFAULT_PROFILE_INTERVAL);
 
 /// Current alignment fixup profile interval
 static ALIGNMENT_FIXUP_INTERVAL: AtomicU32 = AtomicU32::new(DEFAULT_PROFILE_INTERVAL);
+
+/// Whether alignment fixup profiling is enabled
+static PROFILE_ALIGNMENT_FIXUP: AtomicBool = AtomicBool::new(false);
+
+/// Profile lock for synchronizing profile list access
+static PROFILE_LOCK: SpinLock<()> = SpinLock::new(());
+
+/// Maximum number of active profile sources
+pub const MAX_ACTIVE_SOURCES: usize = 32;
+
+/// Active profile source entry
+/// Tracks which profile sources are active and on which processors
+#[repr(C)]
+pub struct ActiveProfileSource {
+    /// Whether this entry is in use
+    pub in_use: bool,
+    /// The profile source type
+    pub source: ProfileSource,
+    /// Affinity mask of processors where this source is active
+    pub affinity: u64,
+    /// Reference count per processor
+    pub processor_count: [u32; MAX_CPUS],
+}
+
+impl ActiveProfileSource {
+    pub const fn new() -> Self {
+        Self {
+            in_use: false,
+            source: ProfileSource::Time,
+            affinity: 0,
+            processor_count: [0; MAX_CPUS],
+        }
+    }
+}
+
+/// Global list of active profile sources
+static mut ACTIVE_PROFILE_SOURCES: [ActiveProfileSource; MAX_ACTIVE_SOURCES] = {
+    const EMPTY: ActiveProfileSource = ActiveProfileSource::new();
+    [EMPTY; MAX_ACTIVE_SOURCES]
+};
+
+/// Global profile list head (for system-wide profiles)
+static mut GLOBAL_PROFILE_LIST: [Option<*const KProfile>; MAX_ACTIVE_PROFILES] = [None; MAX_ACTIVE_PROFILES];
+
+/// Number of active global profiles
+static GLOBAL_PROFILE_COUNT: AtomicU32 = AtomicU32::new(0);
+
+/// Profile statistics
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProfileStats {
+    /// Total profile interrupts received
+    pub total_interrupts: u64,
+    /// Total hits recorded
+    pub total_hits: u64,
+    /// Currently active profiles
+    pub active_profiles: u32,
+    /// Currently active sources
+    pub active_sources: u32,
+}
+
+/// Global profile statistics
+static mut PROFILE_STATS: ProfileStats = ProfileStats {
+    total_interrupts: 0,
+    total_hits: 0,
+    active_profiles: 0,
+    active_sources: 0,
+};
+
+/// Find or allocate an active profile source entry
+unsafe fn find_or_allocate_source(source: ProfileSource) -> Option<&'static mut ActiveProfileSource> {
+    // First, try to find existing
+    for entry in ACTIVE_PROFILE_SOURCES.iter_mut() {
+        if entry.in_use && entry.source == source {
+            return Some(entry);
+        }
+    }
+
+    // Allocate new entry
+    for entry in ACTIVE_PROFILE_SOURCES.iter_mut() {
+        if !entry.in_use {
+            entry.in_use = true;
+            entry.source = source;
+            entry.affinity = 0;
+            entry.processor_count = [0; MAX_CPUS];
+            PROFILE_STATS.active_sources += 1;
+            return Some(entry);
+        }
+    }
+
+    None
+}
+
+/// Find an active profile source entry
+unsafe fn find_source(source: ProfileSource) -> Option<&'static mut ActiveProfileSource> {
+    for entry in ACTIVE_PROFILE_SOURCES.iter_mut() {
+        if entry.in_use && entry.source == source {
+            return Some(entry);
+        }
+    }
+    None
+}
 
 /// Query the current profile interval (KeQueryIntervalProfile)
 pub fn ke_query_interval_profile(source: ProfileSource) -> u32 {
@@ -314,8 +418,8 @@ pub fn ke_query_interval_profile(source: ProfileSource) -> u32 {
         ProfileSource::Time => PROFILE_INTERVAL.load(Ordering::Relaxed),
         ProfileSource::AlignmentFixup => ALIGNMENT_FIXUP_INTERVAL.load(Ordering::Relaxed),
         _ => {
-            // TODO: Query HAL for other profile sources
-            0
+            // Query HAL for other profile sources
+            hal_query_profile_interval(source)
         }
     }
 }
@@ -327,15 +431,140 @@ pub fn ke_set_interval_profile(interval: u32, source: ProfileSource) {
     match source {
         ProfileSource::Time => {
             PROFILE_INTERVAL.store(interval, Ordering::Relaxed);
-            // TODO: Call HAL to set hardware profile timer
+            // Call HAL to set hardware profile timer
+            hal_set_profile_interval(interval, source);
         }
         ProfileSource::AlignmentFixup => {
             ALIGNMENT_FIXUP_INTERVAL.store(interval, Ordering::Relaxed);
         }
         _ => {
-            // TODO: Call HAL for other profile sources
+            // Call HAL for other profile sources
+            hal_set_profile_interval(interval, source);
         }
     }
+}
+
+// ============================================================================
+// HAL Interface Functions
+// ============================================================================
+
+/// HAL callback to start profile interrupt
+fn hal_start_profile_interrupt(source: ProfileSource) {
+    // In a full implementation, this would call into the HAL
+    // to configure the local APIC timer or performance counter
+    match source {
+        ProfileSource::Time => {
+            // Configure APIC timer for profiling
+            crate::serial_println!("[PROFILE] Starting time-based profile interrupt");
+        }
+        ProfileSource::AlignmentFixup => {
+            // Enable alignment exception trapping
+            crate::serial_println!("[PROFILE] Enabling alignment fixup profiling");
+        }
+        _ => {
+            // Configure performance counter
+            crate::serial_println!("[PROFILE] Starting profile source {:?}", source);
+        }
+    }
+}
+
+/// HAL callback to stop profile interrupt
+fn hal_stop_profile_interrupt(source: ProfileSource) {
+    match source {
+        ProfileSource::Time => {
+            crate::serial_println!("[PROFILE] Stopping time-based profile interrupt");
+        }
+        ProfileSource::AlignmentFixup => {
+            crate::serial_println!("[PROFILE] Disabling alignment fixup profiling");
+        }
+        _ => {
+            crate::serial_println!("[PROFILE] Stopping profile source {:?}", source);
+        }
+    }
+}
+
+/// Query profile interval from HAL
+fn hal_query_profile_interval(_source: ProfileSource) -> u32 {
+    // Default to 0 for unsupported sources
+    0
+}
+
+/// Set profile interval in HAL
+fn hal_set_profile_interval(_interval: u32, _source: ProfileSource) {
+    // HAL would configure hardware here
+}
+
+// ============================================================================
+// Profile Interrupt Handler
+// ============================================================================
+
+/// Profile interrupt handler
+///
+/// Called from the interrupt handler when a profile interrupt fires.
+/// Samples all active profiles and increments appropriate buckets.
+///
+/// # Safety
+/// Must be called with interrupts disabled at profile IRQL.
+pub unsafe fn ki_profile_interrupt(instruction_pointer: usize, processor: u32) {
+    PROFILE_STATS.total_interrupts += 1;
+
+    // Sample all global profiles
+    let count = GLOBAL_PROFILE_COUNT.load(Ordering::Relaxed) as usize;
+    for i in 0..count.min(MAX_ACTIVE_PROFILES) {
+        if let Some(profile_ptr) = GLOBAL_PROFILE_LIST[i] {
+            let profile = &*profile_ptr;
+
+            // Check if profile is active and matches our processor
+            if profile.is_started() && (profile.affinity & (1u64 << processor)) != 0 {
+                profile.record_hit(instruction_pointer);
+                PROFILE_STATS.total_hits += 1;
+            }
+        }
+    }
+}
+
+/// Profile alignment fixup handler
+///
+/// Called when an alignment exception occurs and alignment profiling is active.
+pub unsafe fn ki_profile_alignment_fixup(address: usize, processor: u32) {
+    if !PROFILE_ALIGNMENT_FIXUP.load(Ordering::Relaxed) {
+        return;
+    }
+
+    // Sample alignment profiles
+    let count = GLOBAL_PROFILE_COUNT.load(Ordering::Relaxed) as usize;
+    for i in 0..count.min(MAX_ACTIVE_PROFILES) {
+        if let Some(profile_ptr) = GLOBAL_PROFILE_LIST[i] {
+            let profile = &*profile_ptr;
+
+            if profile.is_started()
+                && profile.source == ProfileSource::AlignmentFixup
+                && (profile.affinity & (1u64 << processor)) != 0
+            {
+                profile.record_hit(address);
+                PROFILE_STATS.total_hits += 1;
+            }
+        }
+    }
+}
+
+/// Get profile statistics
+pub fn get_profile_stats() -> ProfileStats {
+    unsafe { PROFILE_STATS }
+}
+
+// ============================================================================
+// IPI Target Functions for Multi-Processor Profile Control
+// ============================================================================
+
+/// IPI target to start profile interrupt on remote processor
+pub fn ki_start_profile_interrupt_ipi(source: ProfileSource) {
+    hal_start_profile_interrupt(source);
+}
+
+/// IPI target to stop profile interrupt on remote processor
+pub fn ki_stop_profile_interrupt_ipi(source: ProfileSource) {
+    hal_stop_profile_interrupt(source);
 }
 
 // ============================================================================
@@ -358,13 +587,145 @@ pub fn ke_initialize_profile(
 }
 
 /// Start profiling (KeStartProfile)
+///
+/// This function starts profile data gathering. The profile object is marked
+/// started and registered with the profile interrupt procedure.
+///
+/// If the number of active profiles for this source was previously zero on
+/// any processor, then the profile interrupt is enabled on those processors.
 pub unsafe fn ke_start_profile(profile: &KProfile, buffer: *mut u32) -> bool {
-    profile.start(buffer)
+    // Acquire profile lock
+    let _guard = PROFILE_LOCK.lock();
+
+    // If already started, return false
+    if profile.started.swap(true, Ordering::AcqRel) {
+        return false;
+    }
+
+    // Set the buffer pointer
+    *profile.buffer.get() = buffer;
+
+    // Add to global profile list (for system-wide profiles)
+    if profile.process.is_none() {
+        let count = GLOBAL_PROFILE_COUNT.load(Ordering::Relaxed) as usize;
+        if count < MAX_ACTIVE_PROFILES {
+            GLOBAL_PROFILE_LIST[count] = Some(profile as *const KProfile);
+            GLOBAL_PROFILE_COUNT.store((count + 1) as u32, Ordering::Release);
+        }
+    }
+
+    // Find or allocate active source entry
+    if let Some(source_entry) = find_or_allocate_source(profile.source) {
+        // Compute which processors need to start the profile interrupt
+        let new_affinity = profile.affinity & !source_entry.affinity;
+
+        // Increment reference counts
+        for proc in 0..MAX_CPUS {
+            if (profile.affinity & (1u64 << proc)) != 0 {
+                source_entry.processor_count[proc] += 1;
+            }
+        }
+
+        // Update active affinity
+        source_entry.affinity |= profile.affinity;
+
+        // Start profile interrupt on processors that didn't have it
+        if new_affinity != 0 {
+            // For alignment fixup, enable exception handling
+            if profile.source == ProfileSource::AlignmentFixup {
+                PROFILE_ALIGNMENT_FIXUP.store(true, Ordering::Release);
+            }
+
+            // Start profile interrupt (would use IPI for remote processors)
+            hal_start_profile_interrupt(profile.source);
+        }
+    }
+
+    PROFILE_STATS.active_profiles += 1;
+    true
 }
 
 /// Stop profiling (KeStopProfile)
+///
+/// This function stops profile data gathering. The object is marked stopped
+/// and removed from the active profile list.
+///
+/// If the number of active profiles for this source goes to zero on any
+/// processor, then the profile interrupt is disabled on those processors.
 pub fn ke_stop_profile(profile: &KProfile) -> bool {
-    profile.stop()
+    // Acquire profile lock
+    let _guard = PROFILE_LOCK.lock();
+
+    // If not started, return false
+    if !profile.started.swap(false, Ordering::AcqRel) {
+        return false;
+    }
+
+    // Clear the buffer pointer
+    unsafe {
+        *profile.buffer.get() = core::ptr::null_mut();
+    }
+
+    // Remove from global profile list
+    if profile.process.is_none() {
+        unsafe {
+            let count = GLOBAL_PROFILE_COUNT.load(Ordering::Relaxed) as usize;
+            let profile_ptr = profile as *const KProfile;
+
+            for i in 0..count {
+                if GLOBAL_PROFILE_LIST[i] == Some(profile_ptr) {
+                    // Shift remaining entries down
+                    for j in i..count - 1 {
+                        GLOBAL_PROFILE_LIST[j] = GLOBAL_PROFILE_LIST[j + 1];
+                    }
+                    GLOBAL_PROFILE_LIST[count - 1] = None;
+                    GLOBAL_PROFILE_COUNT.store((count - 1) as u32, Ordering::Release);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Update active source entry
+    unsafe {
+        if let Some(source_entry) = find_source(profile.source) {
+            let mut stop_affinity: u64 = 0;
+
+            // Decrement reference counts and find processors to stop
+            for proc in 0..MAX_CPUS {
+                if (profile.affinity & (1u64 << proc)) != 0 {
+                    if source_entry.processor_count[proc] > 0 {
+                        source_entry.processor_count[proc] -= 1;
+                        if source_entry.processor_count[proc] == 0 {
+                            stop_affinity |= 1u64 << proc;
+                        }
+                    }
+                }
+            }
+
+            // Update active affinity
+            source_entry.affinity &= !stop_affinity;
+
+            // If no more profiles for this source, clean up
+            if source_entry.affinity == 0 {
+                source_entry.in_use = false;
+                PROFILE_STATS.active_sources = PROFILE_STATS.active_sources.saturating_sub(1);
+
+                if profile.source == ProfileSource::AlignmentFixup {
+                    PROFILE_ALIGNMENT_FIXUP.store(false, Ordering::Release);
+                }
+            }
+
+            // Stop profile interrupt on processors that no longer need it
+            if stop_affinity != 0 {
+                hal_stop_profile_interrupt(profile.source);
+            }
+        }
+
+        PROFILE_STATS.active_profiles = PROFILE_STATS.active_profiles.saturating_sub(1);
+    }
+
+    true
 }
 
 // ============================================================================
