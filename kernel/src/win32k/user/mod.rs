@@ -92,6 +92,7 @@ pub mod ime;
 pub mod multilang;
 pub mod dde;
 pub mod help;
+pub mod theme;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -473,6 +474,9 @@ pub fn init() {
 
     // Initialize help system
     help::init();
+
+    // Initialize theme support
+    theme::init();
 
     // Register built-in window classes
     register_builtin_classes();
