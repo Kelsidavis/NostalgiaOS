@@ -36,6 +36,28 @@
 use core::sync::atomic::{AtomicU8, AtomicU32, AtomicBool, Ordering};
 use spin::Mutex;
 
+pub mod idle;
+
+// Re-export idle detection types
+pub use idle::{
+    IdleDeviceEntry,
+    IdleDeviceSnapshot,
+    IdleStats,
+    po_register_device_for_idle_detection,
+    po_unregister_device_for_idle_detection,
+    po_set_device_busy,
+    po_set_device_busy_by_ptr,
+    po_is_device_idle,
+    po_get_idle_device_power_state,
+    po_set_device_wake_capable,
+    po_enable_idle_detection,
+    po_is_idle_detection_enabled,
+    po_idle_tick,
+    po_force_idle_scan,
+    po_get_idle_stats,
+    po_get_idle_device_snapshots,
+};
+
 // ============================================================================
 // System Power States
 // ============================================================================
@@ -386,6 +408,9 @@ pub fn init() {
 
     // Assume AC power
     PO_FLAGS.store(po_flags::AC_POWER, Ordering::SeqCst);
+
+    // Initialize idle detection subsystem
+    idle::init();
 
     PO_INITIALIZED.store(true, Ordering::SeqCst);
 
@@ -747,29 +772,37 @@ impl Default for IdleState {
     }
 }
 
-/// Register device for idle detection
+/// Register device for idle detection (legacy wrapper)
+///
+/// For full functionality, use po_register_device_for_idle_detection
 pub fn register_device_for_idle(
-    _conservation_timeout: u32,
-    _performance_timeout: u32,
+    conservation_timeout: u32,
+    performance_timeout: u32,
 ) -> Option<u32> {
-    // TODO: Implement idle detection registration
-    // Returns a handle that can be used to unregister
-    Some(0)
+    // Use a placeholder device address since legacy API doesn't provide one
+    po_register_device_for_idle_detection(
+        0x1000, // Placeholder device
+        conservation_timeout,
+        performance_timeout,
+        DevicePowerState::D3,
+    )
 }
 
-/// Unregister device from idle detection
-pub fn unregister_device_for_idle(_handle: u32) {
-    // TODO: Implement
+/// Unregister device from idle detection (legacy wrapper)
+pub fn unregister_device_for_idle(handle: u32) {
+    po_unregister_device_for_idle_detection(handle);
 }
 
-/// Report device busy (reset idle timer)
-pub fn device_busy(_handle: u32) {
-    // TODO: Implement
+/// Report device busy (reset idle timer) (legacy wrapper)
+pub fn device_busy(handle: u32) {
+    po_set_device_busy(handle);
 }
 
 /// Report device idle
-pub fn device_idle(_handle: u32) {
-    // TODO: Implement
+pub fn device_idle(handle: u32) {
+    // Device idle is handled automatically by timeout
+    // This is just a hint that can be used for immediate idle transition
+    let _ = handle;
 }
 
 // ============================================================================
