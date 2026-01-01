@@ -34,6 +34,7 @@ pub mod bus;
 pub mod dma;
 pub mod interrupt;
 pub mod keyboard;
+pub mod mce;
 pub mod mouse;
 pub mod pci;
 pub mod pic;
@@ -112,6 +113,15 @@ pub use bus::{
     hal_register_bus, hal_query_bus, hal_enumerate_buses,
     hal_scan_pci_bus, hal_get_bus_stats, hal_is_bus_initialized,
     pci_read_config_word, pci_read_config_dword,
+};
+
+// Re-export MCE types
+pub use mce::{
+    McaBankStatus, ErrorLogEntry, CpuMceState, ErrorSeverity, ErrorSource, MceStats,
+    MAX_MCA_BANKS, MAX_MCE_CPUS, MAX_ERROR_LOG,
+    mce_is_supported, mce_get_bank_count, mce_init_cpu, mce_poll_errors,
+    mce_exception_handler, mce_get_error_log, mce_clear_error_log,
+    mce_get_stats, mce_get_global_stats, mce_is_initialized,
 };
 
 // TODO: Future submodules
