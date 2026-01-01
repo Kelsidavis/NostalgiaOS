@@ -46,6 +46,7 @@ pub mod raise;
 pub mod slist;
 pub mod interlocked;
 pub mod timezone;
+pub mod pooltag;
 // pub mod pool;      // Uses mm::pool
 // pub mod timer;     // Uses ke::timer
 
@@ -73,3 +74,4 @@ pub use raise::*;
 pub use slist::*;
 pub use interlocked::*;
 pub use timezone::*;
+pub use pooltag::*;
