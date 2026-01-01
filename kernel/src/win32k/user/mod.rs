@@ -63,6 +63,9 @@ pub mod ipaddress;
 pub mod rebar;
 pub mod comboboxex;
 pub mod syslink;
+pub mod imagelist;
+pub mod propsheet;
+pub mod wizard;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -357,6 +360,15 @@ pub fn init() {
 
     // Initialize syslink control
     syslink::init();
+
+    // Initialize imagelist
+    imagelist::init();
+
+    // Initialize property sheet
+    propsheet::init();
+
+    // Initialize wizard control
+    wizard::init();
 
     // Register built-in window classes
     register_builtin_classes();
