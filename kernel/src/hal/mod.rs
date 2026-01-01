@@ -37,6 +37,7 @@ pub mod interrupt;
 pub mod keyboard;
 pub mod mce;
 pub mod mouse;
+pub mod mp;
 pub mod pci;
 pub mod pic;
 pub mod port;
@@ -152,6 +153,21 @@ pub use cmos::{
     cmos_get_base_memory, cmos_get_extended_memory,
     hal_read_cmos_data, hal_write_cmos_data,
     cmos_get_stats, cmos_is_initialized,
+};
+
+// Re-export MP types
+pub use mp::{
+    ProcessorState, IpiType, IpiDestination, ProcessorInfo, CpuTopology, MpStats,
+    IPI_VECTOR_TLB_FLUSH, IPI_VECTOR_RESCHEDULE, IPI_VECTOR_CALL_FUNCTION,
+    mp_get_apic_id, mp_send_ipi, mp_send_ipi_fixed, mp_send_ipi_all,
+    mp_send_nmi, mp_send_init, mp_send_sipi,
+    mp_start_ap, mp_start_all_aps, mp_ap_ready,
+    mp_register_processor, mp_set_apic_base,
+    mp_get_processor_count, mp_get_active_processor_count, mp_get_bsp_apic_id,
+    mp_is_bsp, mp_get_processor_info, mp_get_processor_by_apic_id, mp_get_topology,
+    mp_flush_tlb_all, mp_request_reschedule,
+    mp_get_stats, mp_is_initialized,
+    ke_number_processors, ke_get_current_processor_number, hal_start_next_processor, hal_request_ipi,
 };
 
 // TODO: Future submodules
