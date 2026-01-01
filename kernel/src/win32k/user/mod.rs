@@ -72,6 +72,9 @@ pub mod richedit;
 pub mod flatscroll;
 pub mod mrulist;
 pub mod customdraw;
+pub mod subclass;
+pub mod taskdialog;
+pub mod splitbutton;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -393,6 +396,15 @@ pub fn init() {
 
     // Initialize custom draw support
     customdraw::init();
+
+    // Initialize subclass helpers
+    subclass::init();
+
+    // Initialize task dialog
+    taskdialog::init();
+
+    // Initialize split button
+    splitbutton::init();
 
     // Register built-in window classes
     register_builtin_classes();
