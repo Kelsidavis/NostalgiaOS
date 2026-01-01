@@ -38,6 +38,7 @@ pub mod atom;
 pub mod harderr;
 pub mod nbqueue;
 pub mod probe;
+pub mod event_pair;
 // pub mod pool;      // Uses mm::pool
 // pub mod timer;     // Uses ke::timer
 
@@ -57,3 +58,4 @@ pub use atom::*;
 pub use harderr::*;
 pub use nbqueue::*;
 pub use probe::*;
+pub use event_pair::*;
