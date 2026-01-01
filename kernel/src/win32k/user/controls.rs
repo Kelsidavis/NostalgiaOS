@@ -633,3 +633,429 @@ pub fn draw_group_box(
         super::super::gdi::draw::gdi_text_out(hdc, text_x - offset.x, text_y - offset.y, text);
     }
 }
+
+// ============================================================================
+// Scrollbar Control
+// ============================================================================
+
+/// Scrollbar type
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScrollbarType {
+    #[default]
+    Horizontal = 0,
+    Vertical = 1,
+    Control = 2,  // Standalone scrollbar control
+}
+
+/// Scrollbar arrow types
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollArrow {
+    LineUp = 0,      // Up or left arrow
+    LineDown = 1,    // Down or right arrow
+    PageUp = 2,      // Page up or left (track above thumb)
+    PageDown = 3,    // Page down or right (track below thumb)
+    Thumb = 4,       // The thumb/slider
+}
+
+/// Scrollbar state
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ScrollbarState {
+    /// Minimum scroll position
+    pub min: i32,
+    /// Maximum scroll position
+    pub max: i32,
+    /// Current position
+    pub pos: i32,
+    /// Page size (visible portion)
+    pub page: i32,
+    /// Is up/left arrow pressed?
+    pub arrow_up_pressed: bool,
+    /// Is down/right arrow pressed?
+    pub arrow_down_pressed: bool,
+    /// Is thumb being dragged?
+    pub thumb_dragging: bool,
+    /// Is scrollbar disabled?
+    pub disabled: bool,
+}
+
+impl ScrollbarState {
+    /// Create a new scrollbar state
+    pub fn new(min: i32, max: i32, pos: i32, page: i32) -> Self {
+        Self {
+            min,
+            max,
+            pos: pos.clamp(min, max),
+            page,
+            arrow_up_pressed: false,
+            arrow_down_pressed: false,
+            thumb_dragging: false,
+            disabled: false,
+        }
+    }
+
+    /// Calculate thumb position as a ratio (0.0 to 1.0)
+    pub fn thumb_ratio(&self) -> f32 {
+        let range = self.max - self.min;
+        if range <= 0 {
+            0.0
+        } else {
+            (self.pos - self.min) as f32 / range as f32
+        }
+    }
+
+    /// Calculate thumb size as a ratio (0.0 to 1.0)
+    pub fn thumb_size_ratio(&self) -> f32 {
+        let total = self.max - self.min + self.page;
+        if total <= 0 {
+            1.0
+        } else {
+            (self.page as f32 / total as f32).clamp(0.1, 1.0)
+        }
+    }
+}
+
+/// Scrollbar metrics
+const SCROLLBAR_ARROW_SIZE: i32 = 17;  // Arrow button size
+const SCROLLBAR_MIN_THUMB: i32 = 8;    // Minimum thumb size
+
+/// Draw a complete scrollbar
+pub fn draw_scrollbar(
+    hdc: GdiHandle,
+    rect: &Rect,
+    sb_type: ScrollbarType,
+    state: &ScrollbarState,
+) {
+    let surface_handle = dc::get_dc_surface(hdc);
+    let surf = match surface::get_surface(surface_handle) {
+        Some(s) => s,
+        None => return,
+    };
+
+    let offset = dc::get_dc(hdc)
+        .map(|d| d.viewport_org)
+        .unwrap_or(Point::new(0, 0));
+
+    let left = rect.left + offset.x;
+    let top = rect.top + offset.y;
+    let right = rect.right + offset.x;
+    let bottom = rect.bottom + offset.y;
+
+    let is_vertical = sb_type == ScrollbarType::Vertical;
+
+    // Calculate track area (between arrows)
+    let (track_start, track_end, track_length) = if is_vertical {
+        let ts = top + SCROLLBAR_ARROW_SIZE;
+        let te = bottom - SCROLLBAR_ARROW_SIZE;
+        (ts, te, te - ts)
+    } else {
+        let ts = left + SCROLLBAR_ARROW_SIZE;
+        let te = right - SCROLLBAR_ARROW_SIZE;
+        (ts, te, te - ts)
+    };
+
+    // Calculate thumb dimensions
+    let thumb_size_ratio = state.thumb_size_ratio();
+    let thumb_size = ((track_length as f32 * thumb_size_ratio) as i32).max(SCROLLBAR_MIN_THUMB);
+    let usable_track = track_length - thumb_size;
+
+    let thumb_offset = if usable_track > 0 {
+        ((usable_track as f32 * state.thumb_ratio()) as i32).clamp(0, usable_track)
+    } else {
+        0
+    };
+
+    // Draw arrow buttons
+    if is_vertical {
+        // Up arrow
+        let up_rect = Rect::new(left, top, right, top + SCROLLBAR_ARROW_SIZE);
+        draw_scrollbar_arrow(&surf, &up_rect, true, true, state.arrow_up_pressed, state.disabled);
+
+        // Down arrow
+        let down_rect = Rect::new(left, bottom - SCROLLBAR_ARROW_SIZE, right, bottom);
+        draw_scrollbar_arrow(&surf, &down_rect, true, false, state.arrow_down_pressed, state.disabled);
+
+        // Draw track (shaded area)
+        let track_rect = Rect::new(left, track_start, right, track_end);
+        draw_scrollbar_track(&surf, &track_rect, true);
+
+        // Draw thumb
+        let thumb_top = track_start + thumb_offset;
+        let thumb_rect = Rect::new(left, thumb_top, right, thumb_top + thumb_size);
+        draw_scrollbar_thumb(&surf, &thumb_rect, true, state.thumb_dragging, state.disabled);
+    } else {
+        // Left arrow
+        let left_rect = Rect::new(left, top, left + SCROLLBAR_ARROW_SIZE, bottom);
+        draw_scrollbar_arrow(&surf, &left_rect, false, true, state.arrow_up_pressed, state.disabled);
+
+        // Right arrow
+        let right_rect = Rect::new(right - SCROLLBAR_ARROW_SIZE, top, right, bottom);
+        draw_scrollbar_arrow(&surf, &right_rect, false, false, state.arrow_down_pressed, state.disabled);
+
+        // Draw track
+        let track_rect = Rect::new(track_start, top, track_end, bottom);
+        draw_scrollbar_track(&surf, &track_rect, false);
+
+        // Draw thumb
+        let thumb_left = track_start + thumb_offset;
+        let thumb_rect = Rect::new(thumb_left, top, thumb_left + thumb_size, bottom);
+        draw_scrollbar_thumb(&surf, &thumb_rect, false, state.thumb_dragging, state.disabled);
+    }
+}
+
+/// Draw a scrollbar arrow button
+fn draw_scrollbar_arrow(
+    surf: &surface::Surface,
+    rect: &Rect,
+    vertical: bool,
+    is_up_left: bool,
+    pressed: bool,
+    disabled: bool,
+) {
+    let left = rect.left;
+    let top = rect.top;
+    let right = rect.right;
+    let bottom = rect.bottom;
+
+    // Fill background
+    surf.fill_rect(rect, ColorRef::BUTTON_FACE);
+
+    // Draw 3D border
+    if pressed && !disabled {
+        // Pressed: sunken
+        surf.hline(left, right, top, ColorRef::BUTTON_SHADOW);
+        surf.vline(left, top, bottom, ColorRef::BUTTON_SHADOW);
+        surf.hline(left, right, bottom - 1, ColorRef::BUTTON_HIGHLIGHT);
+        surf.vline(right - 1, top, bottom, ColorRef::BUTTON_HIGHLIGHT);
+    } else {
+        // Normal: raised
+        surf.hline(left, right, top, ColorRef::BUTTON_HIGHLIGHT);
+        surf.vline(left, top, bottom, ColorRef::BUTTON_HIGHLIGHT);
+        surf.hline(left + 1, right, bottom - 1, ColorRef::BUTTON_SHADOW);
+        surf.hline(left, right, bottom - 2, ColorRef::DARK_GRAY);
+        surf.vline(right - 1, top + 1, bottom, ColorRef::BUTTON_SHADOW);
+        surf.vline(right - 2, top, bottom, ColorRef::DARK_GRAY);
+    }
+
+    // Draw arrow
+    let cx = left + (right - left) / 2;
+    let cy = top + (bottom - top) / 2;
+    let arrow_color = if disabled { ColorRef::GRAY } else { ColorRef::BLACK };
+    let offset = if pressed && !disabled { 1 } else { 0 };
+
+    if vertical {
+        if is_up_left {
+            // Up arrow
+            draw_arrow_up(surf, cx + offset, cy + offset, arrow_color);
+        } else {
+            // Down arrow
+            draw_arrow_down(surf, cx + offset, cy + offset, arrow_color);
+        }
+    } else {
+        if is_up_left {
+            // Left arrow
+            draw_arrow_left(surf, cx + offset, cy + offset, arrow_color);
+        } else {
+            // Right arrow
+            draw_arrow_right(surf, cx + offset, cy + offset, arrow_color);
+        }
+    }
+}
+
+/// Draw up arrow
+fn draw_arrow_up(surf: &surface::Surface, cx: i32, cy: i32, color: ColorRef) {
+    for i in 0..4 {
+        surf.hline(cx - i, cx + i + 1, cy - 2 + i, color);
+    }
+}
+
+/// Draw down arrow
+fn draw_arrow_down(surf: &surface::Surface, cx: i32, cy: i32, color: ColorRef) {
+    for i in 0..4 {
+        surf.hline(cx - i, cx + i + 1, cy + 2 - i, color);
+    }
+}
+
+/// Draw left arrow
+fn draw_arrow_left(surf: &surface::Surface, cx: i32, cy: i32, color: ColorRef) {
+    for i in 0..4 {
+        surf.vline(cx - 2 + i, cy - i, cy + i + 1, color);
+    }
+}
+
+/// Draw right arrow
+fn draw_arrow_right(surf: &surface::Surface, cx: i32, cy: i32, color: ColorRef) {
+    for i in 0..4 {
+        surf.vline(cx + 2 - i, cy - i, cy + i + 1, color);
+    }
+}
+
+/// Draw scrollbar track (shaft)
+fn draw_scrollbar_track(surf: &surface::Surface, rect: &Rect, _vertical: bool) {
+    // Classic Windows dithered pattern
+    let pattern_color1 = ColorRef::BUTTON_FACE;
+    let pattern_color2 = ColorRef::WHITE;
+
+    for y in rect.top..rect.bottom {
+        for x in rect.left..rect.right {
+            let color = if (x + y) % 2 == 0 { pattern_color1 } else { pattern_color2 };
+            surf.set_pixel(x, y, color);
+        }
+    }
+}
+
+/// Draw scrollbar thumb
+fn draw_scrollbar_thumb(
+    surf: &surface::Surface,
+    rect: &Rect,
+    _vertical: bool,
+    dragging: bool,
+    disabled: bool,
+) {
+    let left = rect.left;
+    let top = rect.top;
+    let right = rect.right;
+    let bottom = rect.bottom;
+
+    // Fill thumb
+    let face_color = if disabled {
+        ColorRef::BUTTON_FACE
+    } else if dragging {
+        ColorRef::rgb(200, 196, 188)
+    } else {
+        ColorRef::BUTTON_FACE
+    };
+    surf.fill_rect(rect, face_color);
+
+    if !disabled {
+        // Draw 3D border
+        surf.hline(left, right, top, ColorRef::BUTTON_HIGHLIGHT);
+        surf.vline(left, top, bottom, ColorRef::BUTTON_HIGHLIGHT);
+        surf.hline(left + 1, right, bottom - 1, ColorRef::BUTTON_SHADOW);
+        surf.hline(left, right, bottom - 2, ColorRef::DARK_GRAY);
+        surf.vline(right - 1, top + 1, bottom, ColorRef::BUTTON_SHADOW);
+        surf.vline(right - 2, top, bottom, ColorRef::DARK_GRAY);
+    }
+}
+
+/// Scrollbar hit test
+pub fn scrollbar_hit_test(
+    rect: &Rect,
+    sb_type: ScrollbarType,
+    state: &ScrollbarState,
+    x: i32,
+    y: i32,
+) -> Option<ScrollArrow> {
+    let is_vertical = sb_type == ScrollbarType::Vertical;
+
+    let left = rect.left;
+    let top = rect.top;
+    let right = rect.right;
+    let bottom = rect.bottom;
+
+    // Check if point is in scrollbar
+    if x < left || x >= right || y < top || y >= bottom {
+        return None;
+    }
+
+    if is_vertical {
+        // Up arrow
+        if y < top + SCROLLBAR_ARROW_SIZE {
+            return Some(ScrollArrow::LineUp);
+        }
+        // Down arrow
+        if y >= bottom - SCROLLBAR_ARROW_SIZE {
+            return Some(ScrollArrow::LineDown);
+        }
+
+        // Calculate thumb position
+        let track_start = top + SCROLLBAR_ARROW_SIZE;
+        let track_end = bottom - SCROLLBAR_ARROW_SIZE;
+        let track_length = track_end - track_start;
+        let thumb_size_ratio = state.thumb_size_ratio();
+        let thumb_size = ((track_length as f32 * thumb_size_ratio) as i32).max(SCROLLBAR_MIN_THUMB);
+        let usable_track = track_length - thumb_size;
+        let thumb_offset = if usable_track > 0 {
+            ((usable_track as f32 * state.thumb_ratio()) as i32).clamp(0, usable_track)
+        } else {
+            0
+        };
+        let thumb_top = track_start + thumb_offset;
+        let thumb_bottom = thumb_top + thumb_size;
+
+        if y < thumb_top {
+            Some(ScrollArrow::PageUp)
+        } else if y >= thumb_bottom {
+            Some(ScrollArrow::PageDown)
+        } else {
+            Some(ScrollArrow::Thumb)
+        }
+    } else {
+        // Left arrow
+        if x < left + SCROLLBAR_ARROW_SIZE {
+            return Some(ScrollArrow::LineUp);
+        }
+        // Right arrow
+        if x >= right - SCROLLBAR_ARROW_SIZE {
+            return Some(ScrollArrow::LineDown);
+        }
+
+        // Calculate thumb position
+        let track_start = left + SCROLLBAR_ARROW_SIZE;
+        let track_end = right - SCROLLBAR_ARROW_SIZE;
+        let track_length = track_end - track_start;
+        let thumb_size_ratio = state.thumb_size_ratio();
+        let thumb_size = ((track_length as f32 * thumb_size_ratio) as i32).max(SCROLLBAR_MIN_THUMB);
+        let usable_track = track_length - thumb_size;
+        let thumb_offset = if usable_track > 0 {
+            ((usable_track as f32 * state.thumb_ratio()) as i32).clamp(0, usable_track)
+        } else {
+            0
+        };
+        let thumb_left = track_start + thumb_offset;
+        let thumb_right = thumb_left + thumb_size;
+
+        if x < thumb_left {
+            Some(ScrollArrow::PageUp)
+        } else if x >= thumb_right {
+            Some(ScrollArrow::PageDown)
+        } else {
+            Some(ScrollArrow::Thumb)
+        }
+    }
+}
+
+/// Convert track position to scroll position
+pub fn track_to_scroll_pos(
+    rect: &Rect,
+    sb_type: ScrollbarType,
+    state: &ScrollbarState,
+    track_pos: i32,
+) -> i32 {
+    let is_vertical = sb_type == ScrollbarType::Vertical;
+
+    let (track_start, track_length) = if is_vertical {
+        let ts = rect.top + SCROLLBAR_ARROW_SIZE;
+        let te = rect.bottom - SCROLLBAR_ARROW_SIZE;
+        (ts, te - ts)
+    } else {
+        let ts = rect.left + SCROLLBAR_ARROW_SIZE;
+        let te = rect.right - SCROLLBAR_ARROW_SIZE;
+        (ts, te - ts)
+    };
+
+    let thumb_size_ratio = state.thumb_size_ratio();
+    let thumb_size = ((track_length as f32 * thumb_size_ratio) as i32).max(SCROLLBAR_MIN_THUMB);
+    let usable_track = track_length - thumb_size;
+
+    if usable_track <= 0 {
+        return state.min;
+    }
+
+    let relative_pos = track_pos - track_start;
+    let ratio = relative_pos as f32 / usable_track as f32;
+    let range = state.max - state.min;
+
+    (state.min + (range as f32 * ratio) as i32).clamp(state.min, state.max)
+}

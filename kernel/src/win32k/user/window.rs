@@ -482,6 +482,43 @@ fn get_child_windows(hwnd: HWND) -> [HWND; 64] {
     children
 }
 
+/// Get a child window by its control ID
+pub fn get_child_by_id(hwnd: HWND, id: u32) -> HWND {
+    if !hwnd.is_valid() {
+        return HWND::NULL;
+    }
+
+    let table = WINDOW_TABLE.lock();
+    let parent_index = hwnd.index() as usize;
+
+    if parent_index >= MAX_WINDOWS {
+        return HWND::NULL;
+    }
+
+    if let Some(ref wnd) = table.entries[parent_index].window {
+        let mut child = wnd.child;
+
+        while child.is_valid() {
+            let child_index = child.index() as usize;
+            if child_index >= MAX_WINDOWS {
+                break;
+            }
+
+            if let Some(ref child_wnd) = table.entries[child_index].window {
+                // Check if this child has the matching ID (stored in menu field for controls)
+                if child_wnd.menu == id {
+                    return child;
+                }
+                child = child_wnd.sibling;
+            } else {
+                break;
+            }
+        }
+    }
+
+    HWND::NULL
+}
+
 /// Show/hide a window
 pub fn show_window(hwnd: HWND, cmd: ShowCommand) -> bool {
     if !hwnd.is_valid() {

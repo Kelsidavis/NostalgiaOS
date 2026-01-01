@@ -81,6 +81,25 @@ pub const WM_MOUSEWHEEL: u32 = 0x020A;
 // Timer
 pub const WM_TIMER: u32 = 0x0113;
 
+// Command/Control messages
+pub const WM_COMMAND: u32 = 0x0111;
+pub const WM_SYSCOMMAND: u32 = 0x0112;
+
+// Dialog messages
+pub const WM_INITDIALOG: u32 = 0x0110;
+
+// Menu messages
+pub const WM_INITMENU: u32 = 0x0116;
+pub const WM_INITMENUPOPUP: u32 = 0x0117;
+pub const WM_MENUSELECT: u32 = 0x011F;
+pub const WM_MENUCHAR: u32 = 0x0120;
+pub const WM_ENTERIDLE: u32 = 0x0121;
+pub const WM_MENURBUTTONUP: u32 = 0x0122;
+pub const WM_MENUDRAG: u32 = 0x0123;
+pub const WM_MENUGETOBJECT: u32 = 0x0124;
+pub const WM_UNINITMENUPOPUP: u32 = 0x0125;
+pub const WM_MENUCOMMAND: u32 = 0x0126;
+
 // User-defined messages
 pub const WM_USER: u32 = 0x0400;
 pub const WM_APP: u32 = 0x8000;

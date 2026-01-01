@@ -32,6 +32,9 @@ pub mod paint;
 pub mod cursor;
 pub mod controls;
 pub mod timer;
+pub mod menu;
+pub mod dialog;
+pub mod icon;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -234,6 +237,15 @@ pub fn init() {
     // Initialize timer system
     timer::init();
 
+    // Initialize menu system
+    menu::init();
+
+    // Initialize dialog system
+    dialog::init();
+
+    // Initialize icon/cursor system
+    icon::init();
+
     // Register built-in window classes
     register_builtin_classes();
 
@@ -264,6 +276,9 @@ fn register_builtin_classes() {
 
     // Register scrollbar class
     class::register_system_class("ScrollBar", 0);
+
+    // Register dialog class
+    class::register_system_class("Dialog", 0);
 
     crate::serial_println!("[USER] Registered built-in window classes");
 }
@@ -485,4 +500,146 @@ pub fn get_tick_count() -> u64 {
 /// Process expired timers (should be called from message loop)
 pub fn process_timers() {
     timer::process_timers()
+}
+
+// ============================================================================
+// Menu API
+// ============================================================================
+
+// Re-export menu types
+pub use menu::{MenuFlags, MenuItemType, MenuItemState, TrackPopupFlags};
+
+/// Create a menu
+pub fn create_menu() -> super::HMENU {
+    menu::create_menu()
+}
+
+/// Create a popup menu
+pub fn create_popup_menu() -> super::HMENU {
+    menu::create_popup_menu()
+}
+
+/// Destroy a menu
+pub fn destroy_menu(hmenu: super::HMENU) -> bool {
+    menu::destroy_menu(hmenu)
+}
+
+/// Append a menu item
+pub fn append_menu(hmenu: super::HMENU, flags: MenuFlags, id: u32, text: &str) -> bool {
+    menu::append_menu(hmenu, flags, id, text)
+}
+
+/// Insert a menu item
+pub fn insert_menu(hmenu: super::HMENU, position: u32, flags: MenuFlags, id: u32, text: &str) -> bool {
+    menu::insert_menu(hmenu, position, flags, id, text)
+}
+
+/// Remove a menu item
+pub fn remove_menu(hmenu: super::HMENU, position: u32, flags: MenuFlags) -> bool {
+    menu::remove_menu(hmenu, position, flags)
+}
+
+/// Check or uncheck a menu item
+pub fn check_menu_item(hmenu: super::HMENU, id: u32, check: bool) -> bool {
+    menu::check_menu_item(hmenu, id, check)
+}
+
+/// Enable or disable a menu item
+pub fn enable_menu_item(hmenu: super::HMENU, id: u32, enable: bool) -> bool {
+    menu::enable_menu_item(hmenu, id, enable)
+}
+
+/// Get menu item count
+pub fn get_menu_item_count(hmenu: super::HMENU) -> i32 {
+    menu::get_menu_item_count(hmenu)
+}
+
+/// Get submenu at position
+pub fn get_sub_menu(hmenu: super::HMENU, position: i32) -> super::HMENU {
+    menu::get_sub_menu(hmenu, position)
+}
+
+/// Track and display a popup menu
+pub fn track_popup_menu(hmenu: super::HMENU, flags: TrackPopupFlags, x: i32, y: i32, hwnd: HWND) -> u32 {
+    menu::track_popup_menu(hmenu, flags, x, y, hwnd)
+}
+
+/// Draw a menu bar
+pub fn draw_menu_bar(hwnd: HWND, hmenu: super::HMENU, rect: &Rect) {
+    menu::draw_menu_bar(hwnd, hmenu, rect)
+}
+
+/// Close active popup menu
+pub fn close_popup_menu() {
+    menu::close_popup_menu()
+}
+
+// ============================================================================
+// Dialog API
+// ============================================================================
+
+// Re-export dialog types
+pub use dialog::{DialogStyle, DialogTemplate, DialogControlClass, MessageBoxFlags};
+pub use dialog::{IDOK, IDCANCEL, IDABORT, IDRETRY, IDIGNORE, IDYES, IDNO};
+
+/// Create a modeless dialog
+pub fn create_dialog(template: &DialogTemplate, parent: HWND) -> HWND {
+    dialog::create_dialog(template, parent)
+}
+
+/// Create and run a modal dialog
+pub fn dialog_box(template: &DialogTemplate, parent: HWND) -> i32 {
+    dialog::dialog_box(template, parent)
+}
+
+/// End a modal dialog
+pub fn end_dialog(hwnd: HWND, result: i32) -> bool {
+    dialog::end_dialog(hwnd, result)
+}
+
+/// Get dialog control handle by ID
+pub fn get_dlg_item(hwnd: HWND, id: i32) -> HWND {
+    dialog::get_dlg_item(hwnd, id)
+}
+
+/// Set dialog control text
+pub fn set_dlg_item_text(hwnd: HWND, id: i32, text: &str) -> bool {
+    dialog::set_dlg_item_text(hwnd, id, text)
+}
+
+/// Display a message box
+pub fn message_box(parent: HWND, text: &str, caption: &str, flags: MessageBoxFlags) -> i32 {
+    dialog::message_box(parent, text, caption, flags)
+}
+
+// ============================================================================
+// Icon API
+// ============================================================================
+
+// Re-export icon types
+pub use icon::{HICON, HCURSOR, StandardIcon, StandardCursor};
+
+/// Load a standard icon
+pub fn load_icon(icon_id: StandardIcon) -> icon::HICON {
+    icon::load_icon(icon_id)
+}
+
+/// Load a standard cursor
+pub fn load_cursor(cursor_id: StandardCursor) -> icon::HCURSOR {
+    icon::load_cursor(cursor_id)
+}
+
+/// Create an icon from pixel data
+pub fn create_icon(width: i32, height: i32, pixels: &[u32], mask: &[u8]) -> icon::HICON {
+    icon::create_icon(width, height, pixels, mask)
+}
+
+/// Destroy an icon
+pub fn destroy_icon(hicon: icon::HICON) -> bool {
+    icon::destroy_icon(hicon)
+}
+
+/// Draw an icon
+pub fn draw_icon(hdc: super::HDC, x: i32, y: i32, hicon: icon::HICON) -> bool {
+    icon::draw_icon(hdc, x, y, hicon)
 }
