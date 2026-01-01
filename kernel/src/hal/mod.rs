@@ -30,6 +30,7 @@
 pub mod acpi;
 pub mod apic;
 pub mod ata;
+pub mod dma;
 pub mod interrupt;
 pub mod keyboard;
 pub mod mouse;
@@ -69,6 +70,20 @@ pub use timer::{
     hal_calibrate_timers, hal_get_calibration, hal_is_calibrated,
     hal_stall_execution, hal_stall_execution_ns, hal_get_timer_stats,
     hal_is_timer_initialized,
+};
+
+// Re-export DMA types
+pub use dma::{
+    DmaAdapter, DmaAdapterStats, DeviceDescription, InterfaceType,
+    DmaWidth, DmaSpeed, DmaMode, DmaDirection,
+    ScatterGatherElement, ScatterGatherList, GlobalDmaStats,
+    MAX_DMA_ADAPTERS, MAX_SG_ELEMENTS, MAX_MAP_REGISTERS,
+    DEVICE_DESCRIPTION_VERSION,
+    hal_get_dma_adapter, hal_put_dma_adapter,
+    hal_allocate_common_buffer, hal_free_common_buffer,
+    hal_allocate_adapter_channel, hal_free_adapter_channel,
+    hal_map_transfer, hal_flush_adapter_buffers, hal_read_dma_counter,
+    hal_get_dma_stats, hal_get_adapter_stats, hal_is_dma_initialized,
 };
 
 // TODO: Future submodules
