@@ -36,6 +36,7 @@ pub mod iocp;
 pub mod pipe;
 pub mod ramdisk;
 pub mod pnp;
+pub mod csq;
 
 // Re-export main structures and types
 pub use irp::{
@@ -241,6 +242,29 @@ pub use pnp::{
     MAX_DEVICE_NODES,
 };
 
+pub use csq::{
+    IoCsq,
+    IoCsqIrpContext,
+    CsqInsertIrpFn,
+    CsqInsertIrpExFn,
+    CsqRemoveIrpFn,
+    CsqPeekNextIrpFn,
+    CsqAcquireLockFn,
+    CsqReleaseLockFn,
+    CsqCompleteCanceledIrpFn,
+    CsqStats,
+    io_csq_initialize,
+    io_csq_initialize_ex,
+    io_csq_insert_irp,
+    io_csq_insert_irp_ex,
+    io_csq_remove_irp,
+    io_csq_remove_next_irp,
+    get_csq_stats,
+    IO_TYPE_CSQ,
+    IO_TYPE_CSQ_EX,
+    IO_TYPE_CSQ_IRP_CONTEXT,
+};
+
 /// Initialize the I/O Manager
 ///
 /// This initializes all I/O subsystems in the correct order:
@@ -277,6 +301,9 @@ pub fn init() {
 
     // Initialize PnP manager
     pnp::init();
+
+    // Initialize Cancel-Safe Queue support
+    csq::init();
 
     crate::serial_println!("[IO] I/O Manager initialized");
 }
