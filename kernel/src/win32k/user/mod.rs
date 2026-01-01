@@ -66,6 +66,9 @@ pub mod syslink;
 pub mod imagelist;
 pub mod propsheet;
 pub mod wizard;
+pub mod draglist;
+pub mod nativefont;
+pub mod richedit;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -369,6 +372,15 @@ pub fn init() {
 
     // Initialize wizard control
     wizard::init();
+
+    // Initialize draglist control
+    draglist::init();
+
+    // Initialize native font control
+    nativefont::init();
+
+    // Initialize rich edit control
+    richedit::init();
 
     // Register built-in window classes
     register_builtin_classes();
