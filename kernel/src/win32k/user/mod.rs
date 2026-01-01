@@ -76,6 +76,8 @@ pub mod subclass;
 pub mod taskdialog;
 pub mod splitbutton;
 pub mod bufferedpaint;
+pub mod dpa;
+pub mod strhelp;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -409,6 +411,12 @@ pub fn init() {
 
     // Initialize buffered paint
     bufferedpaint::init();
+
+    // Initialize DPA/DSA arrays
+    dpa::init();
+
+    // Initialize string helpers
+    strhelp::init();
 
     // Register built-in window classes
     register_builtin_classes();
