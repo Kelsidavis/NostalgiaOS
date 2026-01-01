@@ -40,6 +40,7 @@ pub mod ethread;
 pub mod job;
 pub mod peb;
 pub mod teb;
+pub mod quota;
 
 // Re-exports for convenience
 pub use cid::{
@@ -113,6 +114,25 @@ pub use teb::{
     get_teb_pool_stats, ps_get_teb_snapshots,
 };
 
+pub use quota::{
+    QuotaBlock, QuotaUsage, QuotaLimits, QuotaLimitsEx, PoolType,
+    MAX_QUOTA_BLOCKS,
+    DEFAULT_PAGED_POOL_LIMIT, DEFAULT_NONPAGED_POOL_LIMIT,
+    DEFAULT_PAGEFILE_LIMIT, DEFAULT_WORKING_SET_LIMIT,
+    // Allocation and management
+    allocate_quota_block, allocate_quota_block_with_limits,
+    get_quota_block, release_quota_block,
+    // NT API compatibility
+    ps_charge_pool_quota, ps_return_pool_quota,
+    ps_charge_process_non_paged_pool_quota, ps_return_process_non_paged_pool_quota,
+    ps_charge_process_paged_pool_quota, ps_return_process_paged_pool_quota,
+    ps_charge_process_page_file_quota, ps_return_process_page_file_quota,
+    ps_query_quota_limits, ps_set_quota_limits,
+    // Inspection
+    QuotaStats, QuotaBlockSnapshot,
+    get_quota_stats, get_quota_block_snapshots, get_quota_block_count,
+};
+
 /// Initialize the Process Manager
 ///
 /// # Safety
@@ -125,6 +145,9 @@ pub unsafe fn init() {
 
     // Initialize the system process (PID 0)
     eprocess::init_system_process();
+
+    // Initialize quota management
+    quota::init();
 
     crate::serial_println!("[PS] Process Manager initialized");
 }
