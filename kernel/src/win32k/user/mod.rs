@@ -97,6 +97,7 @@ pub mod oleauto;
 pub mod print;
 pub mod gdihelp;
 pub mod credui;
+pub mod power;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -493,6 +494,9 @@ pub fn init() {
 
     // Initialize credential UI
     credui::init();
+
+    // Initialize power management UI
+    power::init();
 
     // Register built-in window classes
     register_builtin_classes();
