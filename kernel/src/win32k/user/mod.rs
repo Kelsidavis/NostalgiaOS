@@ -81,6 +81,8 @@ pub mod strhelp;
 pub mod format;
 pub mod comdlg;
 pub mod reghelp;
+pub mod shellpath;
+pub mod notify;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -429,6 +431,12 @@ pub fn init() {
 
     // Initialize registry helpers
     reghelp::init();
+
+    // Initialize shell path helpers
+    shellpath::init();
+
+    // Initialize notification area
+    notify::init();
 
     // Register built-in window classes
     register_builtin_classes();
