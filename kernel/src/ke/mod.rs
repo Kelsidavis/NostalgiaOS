@@ -69,6 +69,9 @@ pub mod debug;
 // Bug check (BSOD)
 pub mod bugcheck;
 
+// Crash dump
+pub mod crashdump;
+
 // Device queue
 pub mod device_queue;
 
@@ -205,6 +208,21 @@ pub use bugcheck::{
     ke_bugcheck, ke_bugcheck_ex,
     is_bugcheck_active, get_bugcheck_data,
     BugCheckData, codes as bugcheck_codes,
+};
+
+// Re-export crashdump types
+pub use crashdump::{
+    DumpHeader64, MinidumpHeader, MinidumpDirectory,
+    PhysicalMemoryDescriptor, PhysicalMemoryRun,
+    CrashDumpConfig, CrashDumpInfo, CrashDumpStats,
+    dump_type, stream_type,
+    DUMP_SIGNATURE, DUMP_VALID_DUMP64,
+    write_crash_dump, write_dump_header,
+    get_config as get_crashdump_config,
+    set_config as set_crashdump_config,
+    get_last_dump_info, get_stats as get_crashdump_stats,
+    is_enabled as is_crashdump_enabled,
+    set_enabled as set_crashdump_enabled,
 };
 
 // Re-export device queue types

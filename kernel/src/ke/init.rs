@@ -55,6 +55,9 @@ pub unsafe fn init() {
     // Initialize the timer subsystem
     timer::ki_init_timer_system();
 
+    // Initialize crash dump subsystem
+    super::crashdump::init();
+
     crate::kprintln!("[KE] Kernel executive initialized");
     crate::serial_println!("[KE] Kernel executive initialized");
     crate::serial_println!("[KE] KPRCB and KPCR initialized for BSP");

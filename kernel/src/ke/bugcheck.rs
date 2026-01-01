@@ -410,7 +410,10 @@ pub fn ke_bugcheck_ex(code: u32, p1: u64, p2: u64, p3: u64, p4: u64) -> ! {
     // Display the blue screen
     display_bugcheck_screen(unsafe { &BUGCHECK_DATA });
 
-    // TODO: Write crash dump
+    // Write crash dump
+    unsafe {
+        super::crashdump::write_crash_dump(code, p1, p2, p3, p4);
+    }
 
     // TODO: Call bugcheck callbacks
 
