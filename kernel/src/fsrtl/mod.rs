@@ -21,6 +21,7 @@ pub mod tunnel;
 pub mod oplock;
 pub mod fastio;
 pub mod stackovf;
+pub mod unc;
 
 // Re-export key types
 pub use mcb::{
@@ -132,4 +133,26 @@ pub use stackovf::{
     get_stats as get_stack_overflow_stats, reset_stats as reset_stack_overflow_stats,
     // Init
     init as init_stack_overflow,
+};
+
+pub use unc::{
+    // Types
+    UncProvider, MupState, UncPath, UncProviderRegistrationEx, UncStats,
+    // Flag modules
+    provider_flags,
+    // Constants
+    MAX_UNC_PROVIDERS,
+    // Registration
+    fsrtl_register_unc_provider, fsrtl_deregister_unc_provider,
+    fsrtl_register_unc_provider_ex,
+    // DFS
+    fsrtl_is_dfs_enabled, fsrtl_set_dfs_enabled,
+    // Query
+    get_provider_count, get_provider_info, find_provider_by_name,
+    // Path parsing
+    fsrtl_parse_unc_path, fsrtl_is_unc_path, fsrtl_is_dfs_path,
+    // Statistics
+    get_unc_stats,
+    // Init
+    init as init_unc,
 };
