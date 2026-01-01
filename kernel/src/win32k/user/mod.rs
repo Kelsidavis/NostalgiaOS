@@ -89,6 +89,8 @@ pub mod verinfo;
 pub mod access;
 pub mod shellexec;
 pub mod ime;
+pub mod multilang;
+pub mod dde;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -461,6 +463,12 @@ pub fn init() {
 
     // Initialize IME support
     ime::init();
+
+    // Initialize multilingual support
+    multilang::init();
+
+    // Initialize DDE support
+    dde::init();
 
     // Register built-in window classes
     register_builtin_classes();
