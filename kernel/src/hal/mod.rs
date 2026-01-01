@@ -30,6 +30,7 @@
 pub mod acpi;
 pub mod apic;
 pub mod ata;
+pub mod bus;
 pub mod dma;
 pub mod interrupt;
 pub mod keyboard;
@@ -99,6 +100,18 @@ pub use ppm::{
     ppm_set_power_policy, ppm_get_power_policy,
     ppm_register_processor, ppm_unregister_processor,
     ppm_get_stats, ppm_get_processor_info, ppm_is_initialized,
+};
+
+// Re-export bus types
+pub use bus::{
+    BusType, BusDataType, PciSlotNumber, BusAddress, AddressSpace,
+    BusInfo, SlotInfo, ResourceDescriptor, ResourceType, BusStats,
+    MAX_BUSES,
+    hal_get_bus_data, hal_set_bus_data,
+    hal_translate_bus_address, hal_get_interrupt_vector,
+    hal_register_bus, hal_query_bus, hal_enumerate_buses,
+    hal_scan_pci_bus, hal_get_bus_stats, hal_is_bus_initialized,
+    pci_read_config_word, pci_read_config_dword,
 };
 
 // TODO: Future submodules
