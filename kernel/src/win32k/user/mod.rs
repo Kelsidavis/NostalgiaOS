@@ -102,6 +102,7 @@ pub mod network;
 pub mod error;
 pub mod console;
 pub mod security;
+pub mod fontmgr;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -513,6 +514,9 @@ pub fn init() {
 
     // Initialize security UI
     security::init();
+
+    // Initialize font management
+    fontmgr::init();
 
     // Register built-in window classes
     register_builtin_classes();
