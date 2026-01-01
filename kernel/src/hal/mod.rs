@@ -42,6 +42,7 @@ pub mod mp;
 pub mod pci;
 pub mod pic;
 pub mod port;
+pub mod power;
 pub mod ppm;
 pub mod profile;
 pub mod rtc;
@@ -196,6 +197,18 @@ pub use display::{
     display_set_gop, display_get_info, display_get_mode, display_is_initialized,
     display_get_stats,
     hal_display_string, hal_query_display_parameters, inbv_display_string, inbv_set_text_color,
+};
+
+// Re-export power types
+pub use power::{
+    SleepState, GlobalState, WakeSource, ShutdownAction, SleepSupport,
+    PowerStateInfo, AcpiFadt, SleepTypeValues, PowerStats,
+    power_set_fadt, power_set_sleep_types,
+    power_get_sleep_support, power_is_s3_supported, power_is_s4_supported, power_is_s5_supported,
+    power_enter_sleep_state, power_exit_sleep_state, power_get_current_state,
+    power_shutdown, power_enable_rtc_wake, power_disable_rtc_wake, power_get_last_wake_source,
+    power_get_state_info, power_is_initialized, power_is_acpi_available, power_get_stats,
+    hal_system_shutdown, hal_return_to_firmware, nt_set_system_power_state,
 };
 
 // TODO: Future submodules
