@@ -36,6 +36,7 @@ pub mod schannel;
 pub mod lsa;
 pub mod sam;
 pub mod ntlm;
+pub mod gpo;
 
 // Re-export SID types
 pub use sid::{
@@ -219,6 +220,7 @@ pub fn init() {
     lsa::init();
     sam::init();
     ntlm::init();
+    gpo::init();
 
     crate::serial_println!("[SE] Security Reference Monitor initialized");
 }
