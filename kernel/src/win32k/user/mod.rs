@@ -121,6 +121,9 @@ pub mod pagesetup;
 pub mod progress;
 pub mod splash;
 pub mod taskbar;
+pub mod browsefolder;
+pub mod aboutbox;
+pub mod fileprops;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -589,6 +592,15 @@ pub fn init() {
 
     // Initialize taskbar integration
     taskbar::init();
+
+    // Initialize browse folder dialog
+    browsefolder::init();
+
+    // Initialize about box
+    aboutbox::init();
+
+    // Initialize file properties dialog
+    fileprops::init();
 
     // Register built-in window classes
     register_builtin_classes();
