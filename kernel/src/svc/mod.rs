@@ -56,6 +56,7 @@ pub mod w32time;
 pub mod seclogon;
 pub mod lanmanwks;
 pub mod lanmansrv;
+pub mod tapisrv;
 
 pub use types::*;
 pub use database::*;
@@ -124,6 +125,9 @@ pub fn scm_initialize() {
 
     // Initialize Server service
     lanmansrv::init();
+
+    // Initialize Telephony service
+    tapisrv::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
