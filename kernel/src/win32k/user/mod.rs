@@ -127,6 +127,9 @@ pub mod fileprops;
 pub mod screensaver;
 pub mod balloon;
 pub mod commandbar;
+pub mod displaysettings;
+pub mod volume;
+pub mod datetime;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -613,6 +616,15 @@ pub fn init() {
 
     // Initialize command bar
     commandbar::init();
+
+    // Initialize display settings
+    displaysettings::init();
+
+    // Initialize volume control
+    volume::init();
+
+    // Initialize date/time
+    datetime::init();
 
     // Register built-in window classes
     register_builtin_classes();
