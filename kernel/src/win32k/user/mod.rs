@@ -130,6 +130,8 @@ pub mod commandbar;
 pub mod displaysettings;
 pub mod volume;
 pub mod datetime;
+pub mod regional;
+pub mod keyboard;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -625,6 +627,12 @@ pub fn init() {
 
     // Initialize date/time
     datetime::init();
+
+    // Initialize regional settings
+    regional::init();
+
+    // Initialize keyboard settings
+    keyboard::init();
 
     // Register built-in window classes
     register_builtin_classes();
