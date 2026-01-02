@@ -205,6 +205,9 @@ pub mod smtpvs;
 pub mod pop3svc;
 pub mod nntpvs;
 pub mod ftpvs;
+pub mod wwwsvc;
+pub mod aspnetcfg;
+pub mod apppool;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -925,6 +928,15 @@ pub fn init() {
 
     // Initialize FTP Virtual Server
     ftpvs::init();
+
+    // Initialize WWW Service
+    wwwsvc::init();
+
+    // Initialize ASP.NET Configuration
+    aspnetcfg::init();
+
+    // Initialize Application Pool
+    apppool::init();
 
     // Register built-in window classes
     register_builtin_classes();
