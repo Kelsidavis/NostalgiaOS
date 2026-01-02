@@ -62,6 +62,7 @@ pub mod shellhw;
 pub mod pnpsvc;
 pub mod themes;
 pub mod wersvc;
+pub mod termsrv;
 
 pub use types::*;
 pub use database::*;
@@ -148,6 +149,9 @@ pub fn scm_initialize() {
 
     // Initialize Windows Error Reporting service
     wersvc::init();
+
+    // Initialize Terminal Services
+    termsrv::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
