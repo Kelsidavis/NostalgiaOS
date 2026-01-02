@@ -432,6 +432,11 @@ fn phase1_init(boot_info: &BootInfo) {
     fs::init();
     kprintln!("  File system initialized");
 
+    // Initialize Kernel Transaction Manager
+    kprintln!("  Initializing kernel transaction manager...");
+    ex::ktm::init();
+    kprintln!("  Kernel transaction manager initialized");
+
     // Initialize LPC (Local Procedure Call)
     kprintln!("  Initializing LPC subsystem...");
     lpc::init();

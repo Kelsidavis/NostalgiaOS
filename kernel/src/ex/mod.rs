@@ -47,6 +47,7 @@ pub mod slist;
 pub mod interlocked;
 pub mod timezone;
 pub mod pooltag;
+pub mod ktm;
 // pub mod pool;      // Uses mm::pool
 // pub mod timer;     // Uses ke::timer
 
