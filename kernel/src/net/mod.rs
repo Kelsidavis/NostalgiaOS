@@ -47,6 +47,7 @@ pub mod netbt;
 pub mod ipsec;
 pub mod smb;
 pub mod winrm;
+pub mod firewall;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::vec::Vec;
@@ -158,6 +159,7 @@ pub fn init() {
     ipsec::init();
     smb::init();
     winrm::init();
+    firewall::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 
