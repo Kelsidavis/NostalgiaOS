@@ -68,6 +68,7 @@ pub mod dhcpc;
 pub mod nla;
 pub mod comsvcs;
 pub mod browser;
+pub mod messenger;
 
 pub use types::*;
 pub use database::*;
@@ -172,6 +173,9 @@ pub fn scm_initialize() {
 
     // Initialize Computer Browser service
     browser::init();
+
+    // Initialize Messenger service
+    messenger::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
