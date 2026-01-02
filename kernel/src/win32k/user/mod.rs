@@ -178,6 +178,9 @@ pub mod cisvc;
 pub mod dfsmgmt;
 pub mod msmq;
 pub mod ias;
+pub mod cluadmin;
+pub mod nlbmgr;
+pub mod azman;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -817,6 +820,15 @@ pub fn init() {
 
     // Initialize Internet Authentication Service
     ias::init();
+
+    // Initialize Cluster Administrator
+    cluadmin::init();
+
+    // Initialize Network Load Balancing Manager
+    nlbmgr::init();
+
+    // Initialize Authorization Manager
+    azman::init();
 
     // Register built-in window classes
     register_builtin_classes();
