@@ -66,6 +66,7 @@ pub mod termsrv;
 pub mod rpcss;
 pub mod dhcpc;
 pub mod nla;
+pub mod comsvcs;
 
 pub use types::*;
 pub use database::*;
@@ -164,6 +165,9 @@ pub fn scm_initialize() {
 
     // Initialize Network Location Awareness service
     nla::init();
+
+    // Initialize COM+ System Application service
+    comsvcs::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
