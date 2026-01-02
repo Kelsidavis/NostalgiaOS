@@ -202,6 +202,9 @@ pub mod netbridge;
 pub mod qospol;
 pub mod idxsvc;
 pub mod smtpvs;
+pub mod pop3svc;
+pub mod nntpvs;
+pub mod ftpvs;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -913,6 +916,15 @@ pub fn init() {
 
     // Initialize SMTP Virtual Server
     smtpvs::init();
+
+    // Initialize POP3 Service
+    pop3svc::init();
+
+    // Initialize NNTP Virtual Server
+    nntpvs::init();
+
+    // Initialize FTP Virtual Server
+    ftpvs::init();
 
     // Register built-in window classes
     register_builtin_classes();
