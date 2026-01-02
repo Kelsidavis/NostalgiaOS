@@ -157,6 +157,9 @@ pub mod autoupdate;
 pub mod remotecfg;
 pub mod sysrestore;
 pub mod odbccp;
+pub mod compmgmt;
+pub mod secpol;
+pub mod perfmon;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -733,6 +736,15 @@ pub fn init() {
 
     // Initialize ODBC Data Sources
     odbccp::init();
+
+    // Initialize Computer Management
+    compmgmt::init();
+
+    // Initialize Local Security Policy
+    secpol::init();
+
+    // Initialize Performance Monitor
+    perfmon::init();
 
     // Register built-in window classes
     register_builtin_classes();
