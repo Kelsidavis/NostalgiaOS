@@ -184,6 +184,9 @@ pub mod azman;
 pub mod ntmssnap;
 pub mod rsop;
 pub mod srp;
+pub mod aduc;
+pub mod adsite;
+pub mod addom;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -841,6 +844,15 @@ pub fn init() {
 
     // Initialize Software Restriction Policies
     srp::init();
+
+    // Initialize Active Directory Users and Computers
+    aduc::init();
+
+    // Initialize Active Directory Sites and Services
+    adsite::init();
+
+    // Initialize Active Directory Domains and Trusts
+    addom::init();
 
     // Register built-in window classes
     register_builtin_classes();
