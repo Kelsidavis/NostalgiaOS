@@ -136,6 +136,9 @@ pub mod mouse;
 pub mod accessibility;
 pub mod sounds;
 pub mod inetcpl;
+pub mod userscpl;
+pub mod printers;
+pub mod sysprops;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -649,6 +652,15 @@ pub fn init() {
 
     // Initialize internet options
     inetcpl::init();
+
+    // Initialize user accounts
+    userscpl::init();
+
+    // Initialize printers
+    printers::init();
+
+    // Initialize system properties
+    sysprops::init();
 
     // Register built-in window classes
     register_builtin_classes();
