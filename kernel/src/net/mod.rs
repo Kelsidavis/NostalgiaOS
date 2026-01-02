@@ -38,6 +38,7 @@ pub mod daytime;
 pub mod finger;
 pub mod whois;
 pub mod ident;
+pub mod tdi;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::vec::Vec;
@@ -140,6 +141,7 @@ pub fn init() {
     finger::init();
     whois::init();
     ident::init();
+    tdi::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 
