@@ -132,6 +132,7 @@ pub mod volume;
 pub mod datetime;
 pub mod regional;
 pub mod keyboard;
+pub mod mouse;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -633,6 +634,9 @@ pub fn init() {
 
     // Initialize keyboard settings
     keyboard::init();
+
+    // Initialize mouse settings
+    mouse::init();
 
     // Register built-in window classes
     register_builtin_classes();
