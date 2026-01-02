@@ -109,6 +109,9 @@ pub mod environ;
 pub mod shellnotify;
 pub mod sysinfo;
 pub mod taskschd;
+pub mod regmonitor;
+pub mod rundialog;
+pub mod session;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -541,6 +544,15 @@ pub fn init() {
 
     // Initialize task scheduler UI
     taskschd::init();
+
+    // Initialize registry monitoring
+    regmonitor::init();
+
+    // Initialize run dialog
+    rundialog::init();
+
+    // Initialize session management
+    session::init();
 
     // Register built-in window classes
     register_builtin_classes();
