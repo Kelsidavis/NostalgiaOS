@@ -166,6 +166,9 @@ pub mod certmgr;
 pub mod complus;
 pub mod gpedit;
 pub mod ntbackup;
+pub mod lusrmgr;
+pub mod fsmgmt;
+pub mod iismgr;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -769,6 +772,15 @@ pub fn init() {
 
     // Initialize Backup Utility
     ntbackup::init();
+
+    // Initialize Local Users and Groups
+    lusrmgr::init();
+
+    // Initialize Shared Folders
+    fsmgmt::init();
+
+    // Initialize IIS Manager
+    iismgr::init();
 
     // Register built-in window classes
     register_builtin_classes();
