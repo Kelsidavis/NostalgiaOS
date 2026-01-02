@@ -60,6 +60,7 @@ pub mod npfs;
 pub mod msfs;
 pub mod dfs;
 pub mod clfs;
+pub mod rdbss;
 
 // Re-export common types
 pub use path::{ParsedPath, PathComponent, MAX_PATH, MAX_COMPONENT};
@@ -565,6 +566,9 @@ pub fn init() {
 
     // Initialize Common Log File System
     clfs::init();
+
+    // Initialize Redirected Drive Buffering Subsystem
+    rdbss::init();
 
     // Initialize volume integration (auto-mounts detected volumes)
     volume::init();
