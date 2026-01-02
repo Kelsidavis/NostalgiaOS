@@ -133,6 +133,9 @@ pub mod datetime;
 pub mod regional;
 pub mod keyboard;
 pub mod mouse;
+pub mod accessibility;
+pub mod sounds;
+pub mod inetcpl;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -637,6 +640,15 @@ pub fn init() {
 
     // Initialize mouse settings
     mouse::init();
+
+    // Initialize accessibility options
+    accessibility::init();
+
+    // Initialize sound schemes
+    sounds::init();
+
+    // Initialize internet options
+    inetcpl::init();
 
     // Register built-in window classes
     register_builtin_classes();
