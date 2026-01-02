@@ -93,6 +93,7 @@ pub mod svc;
 pub mod verifier;
 pub mod wmi;
 pub mod kd;
+pub mod rpc;
 pub mod vdm;
 pub mod csr;
 pub mod win32k;
@@ -435,6 +436,11 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing LPC subsystem...");
     lpc::init();
     kprintln!("  LPC subsystem initialized");
+
+    // Initialize RPC (Remote Procedure Call)
+    kprintln!("  Initializing RPC subsystem...");
+    rpc::init();
+    kprintln!("  RPC subsystem initialized");
 
     // Initialize DBGK (Debugger Support)
     kprintln!("  Initializing debugger support...");
