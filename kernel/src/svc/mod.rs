@@ -69,6 +69,7 @@ pub mod nla;
 pub mod comsvcs;
 pub mod browser;
 pub mod messenger;
+pub mod alerter;
 
 pub use types::*;
 pub use database::*;
@@ -176,6 +177,9 @@ pub fn scm_initialize() {
 
     // Initialize Messenger service
     messenger::init();
+
+    // Initialize Alerter service
+    alerter::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
