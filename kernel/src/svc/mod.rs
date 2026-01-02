@@ -59,6 +59,7 @@ pub mod lanmansrv;
 pub mod tapisrv;
 pub mod appexp;
 pub mod shellhw;
+pub mod pnpsvc;
 
 pub use types::*;
 pub use database::*;
@@ -136,6 +137,9 @@ pub fn scm_initialize() {
 
     // Initialize Shell Hardware Detection service
     shellhw::init();
+
+    // Initialize Plug and Play service
+    pnpsvc::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
