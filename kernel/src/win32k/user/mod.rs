@@ -118,6 +118,9 @@ pub mod fontdlg;
 pub mod finddlg;
 pub mod printdlg;
 pub mod pagesetup;
+pub mod progress;
+pub mod splash;
+pub mod taskbar;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -577,6 +580,15 @@ pub fn init() {
 
     // Initialize page setup dialog
     pagesetup::init();
+
+    // Initialize progress dialog
+    progress::init();
+
+    // Initialize splash screen
+    splash::init();
+
+    // Initialize taskbar integration
+    taskbar::init();
 
     // Register built-in window classes
     register_builtin_classes();
