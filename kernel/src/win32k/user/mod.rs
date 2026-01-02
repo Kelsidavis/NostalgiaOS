@@ -145,6 +145,9 @@ pub mod admintools;
 pub mod poweropts;
 pub mod schedtasks;
 pub mod folderopts;
+pub mod netconnect;
+pub mod firewall;
+pub mod wireless;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -685,6 +688,15 @@ pub fn init() {
 
     // Initialize folder options
     folderopts::init();
+
+    // Initialize network connections
+    netconnect::init();
+
+    // Initialize Windows Firewall
+    firewall::init();
+
+    // Initialize wireless settings
+    wireless::init();
 
     // Register built-in window classes
     register_builtin_classes();

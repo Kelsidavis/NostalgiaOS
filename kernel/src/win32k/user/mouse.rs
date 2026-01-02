@@ -170,6 +170,7 @@ impl PointerScheme {
 }
 
 /// Mouse settings state
+#[derive(Clone, Copy)]
 pub struct MouseSettings {
     /// Mouse speed (1-20, 10 = default)
     pub speed: u32,
@@ -232,6 +233,7 @@ impl MouseSettings {
 }
 
 /// Mouse dialog state
+#[derive(Clone)]
 struct MouseDialog {
     /// Parent window
     parent: HWND,
@@ -939,6 +941,20 @@ pub fn get_effective_button(button: u32) -> u32 {
     }
 }
 
+/// Integer square root using Newton's method
+fn integer_sqrt(n: u32) -> u32 {
+    if n == 0 {
+        return 0;
+    }
+    let mut x = n;
+    let mut y = (x + 1) / 2;
+    while y < x {
+        x = y;
+        y = (x + n / x) / 2;
+    }
+    x
+}
+
 /// Calculate mouse movement with speed and acceleration
 pub fn calculate_movement(dx: i32, dy: i32) -> (i32, i32) {
     let settings = SETTINGS.lock();
@@ -954,7 +970,9 @@ pub fn calculate_movement(dx: i32, dy: i32) -> (i32, i32) {
 
     // Enhanced precision adds acceleration for larger movements
     if precision {
-        let magnitude = ((dx * dx + dy * dy) as f32).sqrt() as i32;
+        // Integer approximation of magnitude = sqrt(dx^2 + dy^2)
+        let sum_sq = dx * dx + dy * dy;
+        let magnitude = integer_sqrt(sum_sq as u32) as i32;
         if magnitude > 4 {
             let accel = 1 + magnitude / 10;
             out_dx = out_dx * accel;

@@ -788,9 +788,9 @@ fn handle_critical_battery() {
     drop(settings);
 
     match action {
-        power_action::HIBERNATE => initiate_hibernate(),
-        power_action::SHUTDOWN => initiate_shutdown(),
-        power_action::SLEEP => initiate_sleep(),
+        power_action::HIBERNATE => { initiate_hibernate(); },
+        power_action::SHUTDOWN => { initiate_shutdown(); },
+        power_action::SLEEP => { initiate_sleep(); },
         _ => {}
     }
 }
