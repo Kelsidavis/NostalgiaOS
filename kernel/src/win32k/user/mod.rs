@@ -106,6 +106,9 @@ pub mod fontmgr;
 pub mod appcompat;
 pub mod profile;
 pub mod environ;
+pub mod shellnotify;
+pub mod sysinfo;
+pub mod taskschd;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -529,6 +532,15 @@ pub fn init() {
 
     // Initialize environment variables
     environ::init();
+
+    // Initialize shell notifications
+    shellnotify::init();
+
+    // Initialize system information
+    sysinfo::init();
+
+    // Initialize task scheduler UI
+    taskschd::init();
 
     // Register built-in window classes
     register_builtin_classes();
