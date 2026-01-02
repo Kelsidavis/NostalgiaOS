@@ -41,6 +41,7 @@
 pub mod types;
 pub mod database;
 pub mod control;
+pub mod bits;
 
 pub use types::*;
 pub use database::*;
@@ -64,6 +65,9 @@ pub fn scm_initialize() {
 
     // Initialize the service database
     database::init_service_database();
+
+    // Initialize BITS
+    bits::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
