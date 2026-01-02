@@ -56,6 +56,7 @@ pub mod mount;
 pub mod fat32;
 pub mod ntfs;
 pub mod volume;
+pub mod npfs;
 
 // Re-export common types
 pub use path::{ParsedPath, PathComponent, MAX_PATH, MAX_COMPONENT};
@@ -551,6 +552,9 @@ pub fn init() {
     // Initialize file system drivers
     fat32::init();
     ntfs::init();
+
+    // Initialize pseudo-filesystems
+    npfs::init();
 
     // Initialize volume integration (auto-mounts detected volumes)
     volume::init();
