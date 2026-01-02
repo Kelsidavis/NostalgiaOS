@@ -35,6 +35,7 @@ pub mod ksecdd;
 pub mod schannel;
 pub mod lsa;
 pub mod sam;
+pub mod ntlm;
 
 // Re-export SID types
 pub use sid::{
@@ -217,6 +218,7 @@ pub fn init() {
     schannel::init();
     lsa::init();
     sam::init();
+    ntlm::init();
 
     crate::serial_println!("[SE] Security Reference Monitor initialized");
 }
