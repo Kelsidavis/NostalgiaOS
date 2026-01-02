@@ -67,6 +67,7 @@ pub mod rpcss;
 pub mod dhcpc;
 pub mod nla;
 pub mod comsvcs;
+pub mod browser;
 
 pub use types::*;
 pub use database::*;
@@ -168,6 +169,9 @@ pub fn scm_initialize() {
 
     // Initialize COM+ System Application service
     comsvcs::init();
+
+    // Initialize Computer Browser service
+    browser::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
