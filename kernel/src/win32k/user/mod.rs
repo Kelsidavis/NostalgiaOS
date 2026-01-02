@@ -181,6 +181,9 @@ pub mod ias;
 pub mod cluadmin;
 pub mod nlbmgr;
 pub mod azman;
+pub mod ntmssnap;
+pub mod rsop;
+pub mod srp;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -829,6 +832,15 @@ pub fn init() {
 
     // Initialize Authorization Manager
     azman::init();
+
+    // Initialize Removable Storage
+    ntmssnap::init();
+
+    // Initialize Resultant Set of Policy
+    rsop::init();
+
+    // Initialize Software Restriction Policies
+    srp::init();
 
     // Register built-in window classes
     register_builtin_classes();
