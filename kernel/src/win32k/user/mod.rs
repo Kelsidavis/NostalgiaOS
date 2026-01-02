@@ -193,6 +193,9 @@ pub mod wmictrl;
 pub mod faxconsole;
 pub mod telephony;
 pub mod remotestorage;
+pub mod certsvcs;
+pub mod sus;
+pub mod cmak;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -877,6 +880,15 @@ pub fn init() {
 
     // Initialize Remote Storage
     remotestorage::init();
+
+    // Initialize Certificate Services
+    certsvcs::init();
+
+    // Initialize Software Update Services
+    sus::init();
+
+    // Initialize Connection Manager Administration Kit
+    cmak::init();
 
     // Register built-in window classes
     register_builtin_classes();
