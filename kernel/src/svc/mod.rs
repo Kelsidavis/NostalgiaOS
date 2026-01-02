@@ -60,6 +60,7 @@ pub mod tapisrv;
 pub mod appexp;
 pub mod shellhw;
 pub mod pnpsvc;
+pub mod themes;
 
 pub use types::*;
 pub use database::*;
@@ -140,6 +141,9 @@ pub fn scm_initialize() {
 
     // Initialize Plug and Play service
     pnpsvc::init();
+
+    // Initialize Themes service
+    themes::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
