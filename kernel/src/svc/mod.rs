@@ -76,6 +76,7 @@ pub mod wins;
 pub mod rasman;
 pub mod dfs;
 pub mod ntfrs;
+pub mod ipsec;
 
 pub use types::*;
 pub use database::*;
@@ -204,6 +205,9 @@ pub fn scm_initialize() {
 
     // Initialize File Replication Service
     ntfrs::init();
+
+    // Initialize IPSec Policy Agent
+    ipsec::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
