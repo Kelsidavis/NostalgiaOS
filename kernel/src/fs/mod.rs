@@ -58,6 +58,7 @@ pub mod ntfs;
 pub mod volume;
 pub mod npfs;
 pub mod msfs;
+pub mod dfs;
 
 // Re-export common types
 pub use path::{ParsedPath, PathComponent, MAX_PATH, MAX_COMPONENT};
@@ -557,6 +558,9 @@ pub fn init() {
     // Initialize pseudo-filesystems
     npfs::init();
     msfs::init();
+
+    // Initialize distributed file system
+    dfs::init();
 
     // Initialize volume integration (auto-mounts detected volumes)
     volume::init();
