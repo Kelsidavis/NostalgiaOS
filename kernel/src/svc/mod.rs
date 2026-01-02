@@ -75,6 +75,7 @@ pub mod netlogon;
 pub mod wins;
 pub mod rasman;
 pub mod dfs;
+pub mod ntfrs;
 
 pub use types::*;
 pub use database::*;
@@ -200,6 +201,9 @@ pub fn scm_initialize() {
 
     // Initialize Distributed File System
     dfs::init();
+
+    // Initialize File Replication Service
+    ntfrs::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
