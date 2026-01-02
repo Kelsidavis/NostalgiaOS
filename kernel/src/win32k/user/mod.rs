@@ -187,6 +187,9 @@ pub mod srp;
 pub mod aduc;
 pub mod adsite;
 pub mod addom;
+pub mod schmmgmt;
+pub mod printmgmt;
+pub mod wmictrl;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -853,6 +856,15 @@ pub fn init() {
 
     // Initialize Active Directory Domains and Trusts
     addom::init();
+
+    // Initialize AD Schema Manager
+    schmmgmt::init();
+
+    // Initialize Print Management
+    printmgmt::init();
+
+    // Initialize WMI Control
+    wmictrl::init();
 
     // Register built-in window classes
     register_builtin_classes();
