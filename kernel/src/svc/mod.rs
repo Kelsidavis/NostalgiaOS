@@ -73,6 +73,7 @@ pub mod alerter;
 pub mod clipbook;
 pub mod netlogon;
 pub mod wins;
+pub mod rasman;
 
 pub use types::*;
 pub use database::*;
@@ -192,6 +193,9 @@ pub fn scm_initialize() {
 
     // Initialize WINS Client service
     wins::init();
+
+    // Initialize Remote Access Service
+    rasman::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
