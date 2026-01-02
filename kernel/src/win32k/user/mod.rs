@@ -124,6 +124,9 @@ pub mod taskbar;
 pub mod browsefolder;
 pub mod aboutbox;
 pub mod fileprops;
+pub mod screensaver;
+pub mod balloon;
+pub mod commandbar;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -601,6 +604,15 @@ pub fn init() {
 
     // Initialize file properties dialog
     fileprops::init();
+
+    // Initialize screen saver
+    screensaver::init();
+
+    // Initialize balloon tooltips
+    balloon::init();
+
+    // Initialize command bar
+    commandbar::init();
 
     // Register built-in window classes
     register_builtin_classes();
