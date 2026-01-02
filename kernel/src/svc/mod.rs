@@ -71,6 +71,7 @@ pub mod browser;
 pub mod messenger;
 pub mod alerter;
 pub mod clipbook;
+pub mod netlogon;
 
 pub use types::*;
 pub use database::*;
@@ -184,6 +185,9 @@ pub fn scm_initialize() {
 
     // Initialize ClipBook service
     clipbook::init();
+
+    // Initialize Netlogon service
+    netlogon::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
