@@ -196,6 +196,9 @@ pub mod remotestorage;
 pub mod certsvcs;
 pub mod sus;
 pub mod cmak;
+pub mod uddi;
+pub mod liclog;
+pub mod netbridge;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -889,6 +892,15 @@ pub fn init() {
 
     // Initialize Connection Manager Administration Kit
     cmak::init();
+
+    // Initialize UDDI Services
+    uddi::init();
+
+    // Initialize License Logging Service
+    liclog::init();
+
+    // Initialize Network Bridge
+    netbridge::init();
 
     // Register built-in window classes
     register_builtin_classes();
