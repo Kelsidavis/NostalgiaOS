@@ -50,6 +50,7 @@ pub mod cryptsvc;
 pub mod eventlog;
 pub mod remreg;
 pub mod msdtc;
+pub mod dnsclient;
 
 pub use types::*;
 pub use database::*;
@@ -100,6 +101,9 @@ pub fn scm_initialize() {
 
     // Initialize Distributed Transaction Coordinator
     msdtc::init();
+
+    // Initialize DNS Client Service
+    dnsclient::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
