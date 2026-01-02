@@ -151,6 +151,9 @@ pub mod wireless;
 pub mod devmgr;
 pub mod services;
 pub mod eventlog;
+pub mod diskmgmt;
+pub mod securitycenter;
+pub mod autoupdate;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -709,6 +712,15 @@ pub fn init() {
 
     // Initialize Event Viewer
     eventlog::init();
+
+    // Initialize Disk Management
+    diskmgmt::init();
+
+    // Initialize Security Center
+    securitycenter::init();
+
+    // Initialize Automatic Updates
+    autoupdate::init();
 
     // Register built-in window classes
     register_builtin_classes();
