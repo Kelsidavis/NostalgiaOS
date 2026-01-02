@@ -115,6 +115,9 @@ pub mod session;
 pub mod filedlg;
 pub mod colordlg;
 pub mod fontdlg;
+pub mod finddlg;
+pub mod printdlg;
+pub mod pagesetup;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -565,6 +568,15 @@ pub fn init() {
 
     // Initialize font dialog
     fontdlg::init();
+
+    // Initialize find/replace dialog
+    finddlg::init();
+
+    // Initialize print dialog
+    printdlg::init();
+
+    // Initialize page setup dialog
+    pagesetup::init();
 
     // Register built-in window classes
     register_builtin_classes();
