@@ -78,6 +78,7 @@ pub mod dfs;
 pub mod ntfrs;
 pub mod ipsec;
 pub mod scardsvr;
+pub mod ups;
 
 pub use types::*;
 pub use database::*;
@@ -212,6 +213,9 @@ pub fn scm_initialize() {
 
     // Initialize Smart Card service
     scardsvr::init();
+
+    // Initialize UPS service
+    ups::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
