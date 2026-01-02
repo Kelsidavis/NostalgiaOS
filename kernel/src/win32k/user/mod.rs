@@ -160,6 +160,9 @@ pub mod odbccp;
 pub mod compmgmt;
 pub mod secpol;
 pub mod perfmon;
+pub mod taskmgr;
+pub mod regedit;
+pub mod certmgr;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -745,6 +748,15 @@ pub fn init() {
 
     // Initialize Performance Monitor
     perfmon::init();
+
+    // Initialize Task Manager
+    taskmgr::init();
+
+    // Initialize Registry Editor
+    regedit::init();
+
+    // Initialize Certificate Manager
+    certmgr::init();
 
     // Register built-in window classes
     register_builtin_classes();
