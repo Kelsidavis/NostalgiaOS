@@ -64,6 +64,7 @@ pub mod themes;
 pub mod wersvc;
 pub mod termsrv;
 pub mod rpcss;
+pub mod dhcpc;
 
 pub use types::*;
 pub use database::*;
@@ -156,6 +157,9 @@ pub fn scm_initialize() {
 
     // Initialize RPC Service
     rpcss::init();
+
+    // Initialize DHCP Client service
+    dhcpc::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
