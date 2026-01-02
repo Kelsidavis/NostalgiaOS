@@ -93,6 +93,8 @@ pub mod svc;
 pub mod verifier;
 pub mod wmi;
 pub mod kd;
+pub mod vdm;
+pub mod csr;
 pub mod win32k;
 
 mod framebuffer;
@@ -516,6 +518,16 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing network subsystem...");
     net::init();
     kprintln!("  Network subsystem initialized");
+
+    // Initialize VDM (Virtual DOS Machine) subsystem
+    kprintln!("  Initializing VDM subsystem...");
+    vdm::init();
+    kprintln!("  VDM subsystem initialized");
+
+    // Initialize CSR (Client/Server Runtime) subsystem
+    kprintln!("  Initializing CSR subsystem...");
+    csr::init();
+    kprintln!("  CSR subsystem initialized");
 
     // Initialize Win32k (Graphical) subsystem
     kprintln!("  Initializing Win32k graphical subsystem...");

@@ -37,6 +37,7 @@ pub mod pipe;
 pub mod ramdisk;
 pub mod pnp;
 pub mod csq;
+pub mod volmgr;
 
 // Re-export main structures and types
 pub use irp::{
@@ -265,6 +266,33 @@ pub use csq::{
     IO_TYPE_CSQ_IRP_CONTEXT,
 };
 
+pub use volmgr::{
+    DynamicVolume,
+    DynamicVolumeType,
+    DynamicVolumeSnapshot,
+    VolumeMember,
+    MemberState,
+    VolumeState,
+    VolMgrStats,
+    create_simple_volume,
+    create_spanned_volume,
+    create_striped_volume,
+    create_mirrored_volume,
+    create_raid5_volume,
+    get_dynamic_volume,
+    delete_dynamic_volume,
+    volmgr_read,
+    volmgr_write,
+    fail_member,
+    start_rebuild,
+    dynamic_volume_count,
+    get_volmgr_stats,
+    get_dynamic_volume_snapshots,
+    list_dynamic_volumes,
+    MAX_DYNAMIC_VOLUMES,
+    DEFAULT_STRIPE_SIZE,
+};
+
 /// Initialize the I/O Manager
 ///
 /// This initializes all I/O subsystems in the correct order:
@@ -321,6 +349,9 @@ pub fn init_storage() {
 
     // Initialize disk subsystem (scans partitions)
     disk::init();
+
+    // Initialize volume manager (dynamic disks, RAID)
+    volmgr::init();
 
     crate::serial_println!("[IO] Storage subsystem initialized");
 }

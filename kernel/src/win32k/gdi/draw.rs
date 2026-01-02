@@ -94,6 +94,11 @@ pub fn gdi_line_to(hdc: GdiHandle, x: i32, y: i32) -> bool {
     true
 }
 
+/// Public line drawing function for use by path module
+pub fn draw_line_internal(surf: &surface::Surface, x0: i32, y0: i32, x1: i32, y1: i32, color: ColorRef, width: i32) {
+    draw_line(surf, x0, y0, x1, y1, color, width);
+}
+
 /// Bresenham's line algorithm
 fn draw_line(surf: &surface::Surface, x0: i32, y0: i32, x1: i32, y1: i32, color: ColorRef, width: i32) {
     let dx = (x1 - x0).abs();

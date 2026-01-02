@@ -34,6 +34,11 @@ pub mod region;
 pub mod draw;
 pub mod font;
 pub mod palette;
+pub mod path;
+pub mod transform;
+pub mod dib;
+pub mod icm;
+pub mod emf;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -171,6 +176,21 @@ pub fn init() {
 
     // Initialize palette manager
     palette::init();
+
+    // Initialize path subsystem
+    path::init();
+
+    // Initialize transform subsystem
+    transform::init();
+
+    // Initialize DIB subsystem
+    dib::init();
+
+    // Initialize ICM subsystem
+    icm::init();
+
+    // Initialize EMF subsystem
+    emf::init();
 
     // Create stock objects
     create_stock_objects();
@@ -409,4 +429,286 @@ pub fn draw_edge_raised(hdc: GdiHandle, rect: &Rect) -> bool {
 /// Draw a 3D sunken edge
 pub fn draw_edge_sunken(hdc: GdiHandle, rect: &Rect) -> bool {
     draw::draw_edge_sunken(hdc, rect)
+}
+
+// ============================================================================
+// Path API
+// ============================================================================
+
+/// Begin recording a path
+pub fn begin_path(hdc: GdiHandle) -> bool {
+    path::begin_path(hdc)
+}
+
+/// End recording a path
+pub fn end_path(hdc: GdiHandle) -> bool {
+    path::end_path(hdc)
+}
+
+/// Abort path recording
+pub fn abort_path(hdc: GdiHandle) -> bool {
+    path::abort_path(hdc)
+}
+
+/// Close the current figure in the path
+pub fn close_figure(hdc: GdiHandle) -> bool {
+    path::close_figure(hdc)
+}
+
+/// Stroke the path with the current pen
+pub fn stroke_path(hdc: GdiHandle) -> bool {
+    path::stroke_path(hdc)
+}
+
+/// Fill the path with the current brush
+pub fn fill_path(hdc: GdiHandle) -> bool {
+    path::fill_path(hdc)
+}
+
+/// Stroke and fill the path
+pub fn stroke_and_fill_path(hdc: GdiHandle) -> bool {
+    path::stroke_and_fill_path(hdc)
+}
+
+/// Widen the path to stroked outline
+pub fn widen_path(hdc: GdiHandle) -> bool {
+    path::widen_path(hdc)
+}
+
+/// Flatten curves in path to line segments
+pub fn flatten_path(hdc: GdiHandle) -> bool {
+    path::flatten_path(hdc)
+}
+
+/// Get path data
+pub fn get_path(hdc: GdiHandle, points: &mut [Point], types: &mut [u8]) -> i32 {
+    path::get_path(hdc, points, types)
+}
+
+/// Add cubic bezier curve to path
+pub fn poly_bezier_to(hdc: GdiHandle, points: &[Point]) -> bool {
+    path::path_bezier_to(hdc, points)
+}
+
+// ============================================================================
+// Transform API
+// ============================================================================
+
+// Re-export transform types
+pub use transform::{XForm, GM_COMPATIBLE, GM_ADVANCED, MWT_IDENTITY, MWT_LEFTMULTIPLY, MWT_RIGHTMULTIPLY};
+pub use transform::{MM_TEXT, MM_LOMETRIC, MM_HIMETRIC, MM_LOENGLISH, MM_HIENGLISH, MM_TWIPS, MM_ISOTROPIC, MM_ANISOTROPIC};
+
+/// Set the graphics mode
+pub fn set_graphics_mode(hdc: GdiHandle, mode: u32) -> u32 {
+    transform::set_graphics_mode(hdc, mode)
+}
+
+/// Get the graphics mode
+pub fn get_graphics_mode(hdc: GdiHandle) -> u32 {
+    transform::get_graphics_mode(hdc)
+}
+
+/// Set the world transform
+pub fn set_world_transform(hdc: GdiHandle, xform: &transform::XForm) -> bool {
+    transform::set_world_transform(hdc, xform)
+}
+
+/// Get the world transform
+pub fn get_world_transform(hdc: GdiHandle, xform: &mut transform::XForm) -> bool {
+    transform::get_world_transform(hdc, xform)
+}
+
+/// Modify the world transform
+pub fn modify_world_transform(hdc: GdiHandle, xform: &transform::XForm, mode: u32) -> bool {
+    transform::modify_world_transform(hdc, xform, mode)
+}
+
+/// Set the mapping mode
+pub fn set_map_mode(hdc: GdiHandle, mode: u32) -> u32 {
+    transform::set_map_mode(hdc, mode)
+}
+
+/// Get the mapping mode
+pub fn get_map_mode(hdc: GdiHandle) -> u32 {
+    transform::get_map_mode(hdc)
+}
+
+/// Set window origin
+pub fn set_window_org_ex(hdc: GdiHandle, x: i32, y: i32) -> Point {
+    transform::set_window_org(hdc, x, y)
+}
+
+/// Get window origin
+pub fn get_window_org_ex(hdc: GdiHandle) -> Point {
+    transform::get_window_org(hdc)
+}
+
+/// Set viewport origin
+pub fn set_viewport_org_ex(hdc: GdiHandle, x: i32, y: i32) -> Point {
+    transform::set_viewport_org(hdc, x, y)
+}
+
+/// Get viewport origin
+pub fn get_viewport_org_ex(hdc: GdiHandle) -> Point {
+    transform::get_viewport_org(hdc)
+}
+
+/// Set window extent
+pub fn set_window_ext_ex(hdc: GdiHandle, x: i32, y: i32) -> Point {
+    transform::set_window_ext(hdc, x, y)
+}
+
+/// Get window extent
+pub fn get_window_ext_ex(hdc: GdiHandle) -> Point {
+    transform::get_window_ext(hdc)
+}
+
+/// Set viewport extent
+pub fn set_viewport_ext_ex(hdc: GdiHandle, x: i32, y: i32) -> Point {
+    transform::set_viewport_ext(hdc, x, y)
+}
+
+/// Get viewport extent
+pub fn get_viewport_ext_ex(hdc: GdiHandle) -> Point {
+    transform::get_viewport_ext(hdc)
+}
+
+/// Transform logical points to device points
+pub fn lp_to_dp_points(hdc: GdiHandle, points: &mut [Point]) -> bool {
+    transform::lp_to_dp(hdc, points)
+}
+
+/// Transform device points to logical points
+pub fn dp_to_lp_points(hdc: GdiHandle, points: &mut [Point]) -> bool {
+    transform::dp_to_lp(hdc, points)
+}
+
+// ============================================================================
+// DIB API
+// ============================================================================
+
+// Re-export DIB types
+pub use dib::{BitmapInfoHeader, RgbQuad, BlendFunction};
+pub use dib::{BI_RGB, BI_RLE8, BI_RLE4, BI_BITFIELDS, DIB_RGB_COLORS, DIB_PAL_COLORS};
+pub use dib::{BLACKONWHITE, WHITEONBLACK, COLORONCOLOR, HALFTONE};
+pub use dib::{AC_SRC_OVER, AC_SRC_ALPHA};
+
+/// Create a DIB section
+pub fn create_dib_section(hdc: GdiHandle, header: &dib::BitmapInfoHeader, usage: u32) -> (GdiHandle, *mut u8) {
+    dib::create_dib_section(hdc, header, usage)
+}
+
+/// Delete a DIB section
+pub fn delete_dib_section(handle: GdiHandle) -> bool {
+    dib::delete_dib_section(handle)
+}
+
+/// Set stretch blt mode
+pub fn set_stretch_blt_mode(hdc: GdiHandle, mode: u32) -> u32 {
+    dib::set_stretch_blt_mode(hdc, mode)
+}
+
+/// Get stretch blt mode
+pub fn get_stretch_blt_mode(hdc: GdiHandle) -> u32 {
+    dib::get_stretch_blt_mode(hdc)
+}
+
+/// StretchBlt - stretch or compress a bitmap
+pub fn stretch_blt(
+    hdc_dest: GdiHandle, x_dest: i32, y_dest: i32, width_dest: i32, height_dest: i32,
+    hdc_src: GdiHandle, x_src: i32, y_src: i32, width_src: i32, height_src: i32,
+    rop: Rop3,
+) -> bool {
+    dib::stretch_blt(hdc_dest, x_dest, y_dest, width_dest, height_dest,
+                     hdc_src, x_src, y_src, width_src, height_src, rop)
+}
+
+/// Set DIB bits to a device
+pub fn set_di_bits(hdc: GdiHandle, hbitmap: GdiHandle, start: u32, count: u32, bits: &[u8], header: &dib::BitmapInfoHeader, usage: u32) -> u32 {
+    dib::set_di_bits(hdc, hbitmap, start, count, bits, header, usage)
+}
+
+/// Get DIB bits from a device
+pub fn get_di_bits(hdc: GdiHandle, hbitmap: GdiHandle, start: u32, count: u32, bits: &mut [u8], header: &mut dib::BitmapInfoHeader, usage: u32) -> u32 {
+    dib::get_di_bits(hdc, hbitmap, start, count, bits, header, usage)
+}
+
+/// StretchDIBits - stretch DIB to device
+pub fn stretch_di_bits(
+    hdc: GdiHandle, x_dest: i32, y_dest: i32, width_dest: i32, height_dest: i32,
+    x_src: i32, y_src: i32, width_src: i32, height_src: i32,
+    bits: &[u8], header: &dib::BitmapInfoHeader, usage: u32, rop: Rop3,
+) -> i32 {
+    dib::stretch_di_bits(hdc, x_dest, y_dest, width_dest, height_dest,
+                         x_src, y_src, width_src, height_src, bits, header, usage, rop)
+}
+
+/// Create a compatible bitmap
+pub fn create_compatible_bitmap(hdc: GdiHandle, width: i32, height: i32) -> GdiHandle {
+    dib::create_compatible_bitmap(hdc, width, height)
+}
+
+/// AlphaBlend - blend with alpha channel
+pub fn alpha_blend(
+    hdc_dest: GdiHandle, x_dest: i32, y_dest: i32, width_dest: i32, height_dest: i32,
+    hdc_src: GdiHandle, x_src: i32, y_src: i32, width_src: i32, height_src: i32,
+    blend_function: dib::BlendFunction,
+) -> bool {
+    dib::alpha_blend(hdc_dest, x_dest, y_dest, width_dest, height_dest,
+                     hdc_src, x_src, y_src, width_src, height_src, blend_function)
+}
+
+/// TransparentBlt - blit with transparency
+pub fn transparent_blt(
+    hdc_dest: GdiHandle, x_dest: i32, y_dest: i32, width_dest: i32, height_dest: i32,
+    hdc_src: GdiHandle, x_src: i32, y_src: i32, width_src: i32, height_src: i32,
+    transparent_color: ColorRef,
+) -> bool {
+    dib::transparent_blt(hdc_dest, x_dest, y_dest, width_dest, height_dest,
+                         hdc_src, x_src, y_src, width_src, height_src, transparent_color)
+}
+
+// ============================================================================
+// ICM API
+// ============================================================================
+
+// Re-export ICM types
+pub use icm::{HColorSpace, LogColorSpace, CieXyz, CieXyzTriple};
+pub use icm::{ICM_OFF, ICM_ON, ICM_QUERY, ICM_DONE_OUTSIDEDC};
+pub use icm::{LCS_CALIBRATED_RGB, LCS_sRGB, LCS_WINDOWS_COLOR_SPACE};
+pub use icm::{LCS_GM_BUSINESS, LCS_GM_GRAPHICS, LCS_GM_IMAGES, LCS_GM_ABS_COLORIMETRIC};
+
+/// Set ICM mode
+pub fn set_icm_mode(hdc: GdiHandle, mode: u32) -> u32 {
+    icm::set_icm_mode(hdc, mode)
+}
+
+/// Get ICM mode
+pub fn get_icm_mode(hdc: GdiHandle) -> u32 {
+    icm::get_icm_mode(hdc)
+}
+
+/// Create a color space
+pub fn create_color_space(lcs: &icm::LogColorSpace) -> icm::HColorSpace {
+    icm::create_color_space(lcs)
+}
+
+/// Delete a color space
+pub fn delete_color_space(hcs: icm::HColorSpace) -> bool {
+    icm::delete_color_space(hcs)
+}
+
+/// Set color space for DC
+pub fn set_color_space(hdc: GdiHandle, hcs: icm::HColorSpace) -> icm::HColorSpace {
+    icm::set_color_space(hdc, hcs)
+}
+
+/// Get color space for DC
+pub fn get_color_space_handle(hdc: GdiHandle) -> icm::HColorSpace {
+    icm::get_color_space(hdc)
+}
+
+/// Get the stock sRGB color space
+pub fn get_stock_color_space() -> icm::HColorSpace {
+    icm::get_stock_color_space()
 }

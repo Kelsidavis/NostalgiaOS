@@ -22,6 +22,7 @@ pub mod oplock;
 pub mod fastio;
 pub mod stackovf;
 pub mod unc;
+pub mod fltmgr;
 
 // Re-export key types
 pub use mcb::{
@@ -155,4 +156,27 @@ pub use unc::{
     get_unc_stats,
     // Init
     init as init_unc,
+};
+
+pub use fltmgr::{
+    // Types
+    FltFilter, FltInstance, FltPort, FltRegistration, FltCallbackData,
+    FltOperationCallback, FltOperation, FltIoParams,
+    FltPreopCallbackStatus, FltPostopCallbackStatus,
+    FltPreOperationCallback, FltPostOperationCallback,
+    FltMgrStats, FltFilterSnapshot,
+    // Constants
+    MAX_MINIFILTERS, MAX_INSTANCES, MAX_CALLBACKS, PORT_BUFFER_SIZE,
+    // Filter registration
+    flt_register_filter, flt_unregister_filter, flt_start_filtering,
+    // Instance management
+    flt_attach_volume, flt_detach_volume,
+    // Communication ports
+    flt_create_communication_port, flt_close_communication_port, flt_send_message,
+    // Callback invocation
+    flt_invoke_pre_callbacks, flt_invoke_post_callbacks,
+    // Statistics
+    get_fltmgr_stats, get_filter_snapshots, list_filters,
+    // Init
+    init as init_fltmgr,
 };

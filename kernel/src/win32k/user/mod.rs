@@ -208,6 +208,7 @@ pub mod ftpvs;
 pub mod wwwsvc;
 pub mod aspnetcfg;
 pub mod apppool;
+pub mod shellns;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -937,6 +938,9 @@ pub fn init() {
 
     // Initialize Application Pool
     apppool::init();
+
+    // Initialize Shell Namespace
+    shellns::init();
 
     // Register built-in window classes
     register_builtin_classes();
