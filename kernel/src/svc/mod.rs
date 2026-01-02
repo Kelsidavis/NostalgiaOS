@@ -42,6 +42,7 @@ pub mod types;
 pub mod database;
 pub mod control;
 pub mod bits;
+pub mod scheduler;
 
 pub use types::*;
 pub use database::*;
@@ -68,6 +69,9 @@ pub fn scm_initialize() {
 
     // Initialize BITS
     bits::init();
+
+    // Initialize Task Scheduler
+    scheduler::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
