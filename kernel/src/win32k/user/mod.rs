@@ -199,6 +199,9 @@ pub mod cmak;
 pub mod uddi;
 pub mod liclog;
 pub mod netbridge;
+pub mod qospol;
+pub mod idxsvc;
+pub mod smtpvs;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -901,6 +904,15 @@ pub fn init() {
 
     // Initialize Network Bridge
     netbridge::init();
+
+    // Initialize QoS Policy Management
+    qospol::init();
+
+    // Initialize Indexing Service Extended
+    idxsvc::init();
+
+    // Initialize SMTP Virtual Server
+    smtpvs::init();
 
     // Register built-in window classes
     register_builtin_classes();
