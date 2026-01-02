@@ -148,6 +148,9 @@ pub mod folderopts;
 pub mod netconnect;
 pub mod firewall;
 pub mod wireless;
+pub mod devmgr;
+pub mod services;
+pub mod eventlog;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -697,6 +700,15 @@ pub fn init() {
 
     // Initialize wireless settings
     wireless::init();
+
+    // Initialize Device Manager
+    devmgr::init();
+
+    // Initialize Services
+    services::init();
+
+    // Initialize Event Viewer
+    eventlog::init();
 
     // Register built-in window classes
     register_builtin_classes();
