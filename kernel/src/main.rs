@@ -472,6 +472,11 @@ fn phase1_init(boot_info: &BootInfo) {
     ex::harderr::exp_harderr_init();
     kprintln!("  Hard error subsystem initialized");
 
+    // Initialize Windows Error Reporting
+    kprintln!("  Initializing Windows Error Reporting...");
+    ex::wer::init();
+    kprintln!("  Windows Error Reporting initialized");
+
     // Initialize Non-Blocking Queue subsystem
     kprintln!("  Initializing non-blocking queue subsystem...");
     ex::nbqueue::exp_nbqueue_init();

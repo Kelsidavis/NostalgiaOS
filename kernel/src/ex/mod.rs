@@ -48,6 +48,7 @@ pub mod interlocked;
 pub mod timezone;
 pub mod pooltag;
 pub mod ktm;
+pub mod wer;
 // pub mod pool;      // Uses mm::pool
 // pub mod timer;     // Uses ke::timer
 
