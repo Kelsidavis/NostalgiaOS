@@ -40,6 +40,7 @@ pub mod whois;
 pub mod ident;
 pub mod tdi;
 pub mod ndis;
+pub mod afd;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::vec::Vec;
@@ -144,6 +145,7 @@ pub fn init() {
     ident::init();
     tdi::init();
     ndis::init();
+    afd::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 
