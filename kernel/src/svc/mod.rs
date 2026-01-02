@@ -70,6 +70,7 @@ pub mod comsvcs;
 pub mod browser;
 pub mod messenger;
 pub mod alerter;
+pub mod clipbook;
 
 pub use types::*;
 pub use database::*;
@@ -180,6 +181,9 @@ pub fn scm_initialize() {
 
     // Initialize Alerter service
     alerter::init();
+
+    // Initialize ClipBook service
+    clipbook::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
