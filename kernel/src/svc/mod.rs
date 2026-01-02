@@ -53,6 +53,7 @@ pub mod msdtc;
 pub mod dnsclient;
 pub mod wmi;
 pub mod w32time;
+pub mod seclogon;
 
 pub use types::*;
 pub use database::*;
@@ -112,6 +113,9 @@ pub fn scm_initialize() {
 
     // Initialize Windows Time Service
     w32time::init();
+
+    // Initialize Secondary Logon (RunAs)
+    seclogon::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
