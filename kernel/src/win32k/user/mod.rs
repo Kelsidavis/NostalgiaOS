@@ -139,6 +139,9 @@ pub mod inetcpl;
 pub mod userscpl;
 pub mod printers;
 pub mod sysprops;
+pub mod fontscpl;
+pub mod appwiz;
+pub mod admintools;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -661,6 +664,15 @@ pub fn init() {
 
     // Initialize system properties
     sysprops::init();
+
+    // Initialize fonts control panel
+    fontscpl::init();
+
+    // Initialize add/remove programs
+    appwiz::init();
+
+    // Initialize administrative tools
+    admintools::init();
 
     // Register built-in window classes
     register_builtin_classes();
