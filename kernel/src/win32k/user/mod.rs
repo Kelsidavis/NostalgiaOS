@@ -163,6 +163,9 @@ pub mod perfmon;
 pub mod taskmgr;
 pub mod regedit;
 pub mod certmgr;
+pub mod complus;
+pub mod gpedit;
+pub mod ntbackup;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -757,6 +760,15 @@ pub fn init() {
 
     // Initialize Certificate Manager
     certmgr::init();
+
+    // Initialize Component Services
+    complus::init();
+
+    // Initialize Group Policy Editor
+    gpedit::init();
+
+    // Initialize Backup Utility
+    ntbackup::init();
 
     // Register built-in window classes
     register_builtin_classes();
