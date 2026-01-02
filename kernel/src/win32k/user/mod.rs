@@ -190,6 +190,9 @@ pub mod addom;
 pub mod schmmgmt;
 pub mod printmgmt;
 pub mod wmictrl;
+pub mod faxconsole;
+pub mod telephony;
+pub mod remotestorage;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -865,6 +868,15 @@ pub fn init() {
 
     // Initialize WMI Control
     wmictrl::init();
+
+    // Initialize Fax Service Console
+    faxconsole::init();
+
+    // Initialize Telephony (TAPI)
+    telephony::init();
+
+    // Initialize Remote Storage
+    remotestorage::init();
 
     // Register built-in window classes
     register_builtin_classes();
