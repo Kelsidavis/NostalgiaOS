@@ -57,6 +57,7 @@ pub mod seclogon;
 pub mod lanmanwks;
 pub mod lanmansrv;
 pub mod tapisrv;
+pub mod appexp;
 
 pub use types::*;
 pub use database::*;
@@ -128,6 +129,9 @@ pub fn scm_initialize() {
 
     // Initialize Telephony service
     tapisrv::init();
+
+    // Initialize Application Experience service
+    appexp::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
