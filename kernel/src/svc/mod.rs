@@ -61,6 +61,7 @@ pub mod appexp;
 pub mod shellhw;
 pub mod pnpsvc;
 pub mod themes;
+pub mod wersvc;
 
 pub use types::*;
 pub use database::*;
@@ -144,6 +145,9 @@ pub fn scm_initialize() {
 
     // Initialize Themes service
     themes::init();
+
+    // Initialize Windows Error Reporting service
+    wersvc::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
