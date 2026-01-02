@@ -142,6 +142,9 @@ pub mod sysprops;
 pub mod fontscpl;
 pub mod appwiz;
 pub mod admintools;
+pub mod poweropts;
+pub mod schedtasks;
+pub mod folderopts;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -673,6 +676,15 @@ pub fn init() {
 
     // Initialize administrative tools
     admintools::init();
+
+    // Initialize power options
+    poweropts::init();
+
+    // Initialize scheduled tasks
+    schedtasks::init();
+
+    // Initialize folder options
+    folderopts::init();
 
     // Register built-in window classes
     register_builtin_classes();
