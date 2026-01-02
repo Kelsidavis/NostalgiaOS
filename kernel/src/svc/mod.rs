@@ -45,6 +45,7 @@ pub mod bits;
 pub mod scheduler;
 pub mod wuauserv;
 pub mod spooler;
+pub mod vss;
 
 pub use types::*;
 pub use database::*;
@@ -80,6 +81,9 @@ pub fn scm_initialize() {
 
     // Initialize Print Spooler
     spooler::init();
+
+    // Initialize Volume Shadow Copy Service
+    vss::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
