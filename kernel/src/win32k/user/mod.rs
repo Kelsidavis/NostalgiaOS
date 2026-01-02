@@ -154,6 +154,9 @@ pub mod eventlog;
 pub mod diskmgmt;
 pub mod securitycenter;
 pub mod autoupdate;
+pub mod remotecfg;
+pub mod sysrestore;
+pub mod odbccp;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -721,6 +724,15 @@ pub fn init() {
 
     // Initialize Automatic Updates
     autoupdate::init();
+
+    // Initialize Remote Desktop Configuration
+    remotecfg::init();
+
+    // Initialize System Restore
+    sysrestore::init();
+
+    // Initialize ODBC Data Sources
+    odbccp::init();
 
     // Register built-in window classes
     register_builtin_classes();
