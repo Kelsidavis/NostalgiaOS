@@ -38,6 +38,7 @@ pub mod ramdisk;
 pub mod pnp;
 pub mod csq;
 pub mod volmgr;
+pub mod mup;
 
 // Re-export main structures and types
 pub use irp::{
@@ -332,6 +333,9 @@ pub fn init() {
 
     // Initialize Cancel-Safe Queue support
     csq::init();
+
+    // Initialize Multiple UNC Provider
+    mup::init();
 
     crate::serial_println!("[IO] I/O Manager initialized");
 }
