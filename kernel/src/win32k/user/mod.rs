@@ -172,6 +172,9 @@ pub mod iismgr;
 pub mod dnsmgmt;
 pub mod dhcpmgmt;
 pub mod rras;
+pub mod tsmgr;
+pub mod winsmgr;
+pub mod cisvc;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -793,6 +796,15 @@ pub fn init() {
 
     // Initialize Routing and Remote Access
     rras::init();
+
+    // Initialize Terminal Services Manager
+    tsmgr::init();
+
+    // Initialize WINS Manager
+    winsmgr::init();
+
+    // Initialize Indexing Service
+    cisvc::init();
 
     // Register built-in window classes
     register_builtin_classes();
