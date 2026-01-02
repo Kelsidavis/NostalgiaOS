@@ -42,6 +42,7 @@ pub mod tdi;
 pub mod ndis;
 pub mod afd;
 pub mod wsk;
+pub mod httpsys;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::vec::Vec;
@@ -148,6 +149,7 @@ pub fn init() {
     ndis::init();
     afd::init();
     wsk::init();
+    httpsys::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 
