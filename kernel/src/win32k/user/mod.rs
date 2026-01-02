@@ -175,6 +175,9 @@ pub mod rras;
 pub mod tsmgr;
 pub mod winsmgr;
 pub mod cisvc;
+pub mod dfsmgmt;
+pub mod msmq;
+pub mod ias;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -805,6 +808,15 @@ pub fn init() {
 
     // Initialize Indexing Service
     cisvc::init();
+
+    // Initialize DFS Management
+    dfsmgmt::init();
+
+    // Initialize Message Queuing
+    msmq::init();
+
+    // Initialize Internet Authentication Service
+    ias::init();
 
     // Register built-in window classes
     register_builtin_classes();
