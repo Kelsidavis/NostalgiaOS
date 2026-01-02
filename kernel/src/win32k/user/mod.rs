@@ -169,6 +169,9 @@ pub mod ntbackup;
 pub mod lusrmgr;
 pub mod fsmgmt;
 pub mod iismgr;
+pub mod dnsmgmt;
+pub mod dhcpmgmt;
+pub mod rras;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -781,6 +784,15 @@ pub fn init() {
 
     // Initialize IIS Manager
     iismgr::init();
+
+    // Initialize DNS Manager
+    dnsmgmt::init();
+
+    // Initialize DHCP Manager
+    dhcpmgmt::init();
+
+    // Initialize Routing and Remote Access
+    rras::init();
 
     // Register built-in window classes
     register_builtin_classes();
