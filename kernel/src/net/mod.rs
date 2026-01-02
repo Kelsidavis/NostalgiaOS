@@ -44,6 +44,7 @@ pub mod afd;
 pub mod wsk;
 pub mod httpsys;
 pub mod netbt;
+pub mod ipsec;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use alloc::vec::Vec;
@@ -152,6 +153,7 @@ pub fn init() {
     wsk::init();
     httpsys::init();
     netbt::init();
+    ipsec::init();
 
     NETWORK_INITIALIZED.store(true, Ordering::SeqCst);
 
