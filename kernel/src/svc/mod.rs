@@ -58,6 +58,7 @@ pub mod lanmanwks;
 pub mod lanmansrv;
 pub mod tapisrv;
 pub mod appexp;
+pub mod shellhw;
 
 pub use types::*;
 pub use database::*;
@@ -132,6 +133,9 @@ pub fn scm_initialize() {
 
     // Initialize Application Experience service
     appexp::init();
+
+    // Initialize Shell Hardware Detection service
+    shellhw::init();
 
     // Start boot-start drivers (already loaded by bootloader)
     // These are just registered, not actually started yet
