@@ -112,6 +112,9 @@ pub mod taskschd;
 pub mod regmonitor;
 pub mod rundialog;
 pub mod session;
+pub mod filedlg;
+pub mod colordlg;
+pub mod fontdlg;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -553,6 +556,15 @@ pub fn init() {
 
     // Initialize session management
     session::init();
+
+    // Initialize file dialogs
+    filedlg::init();
+
+    // Initialize color dialog
+    colordlg::init();
+
+    // Initialize font dialog
+    fontdlg::init();
 
     // Register built-in window classes
     register_builtin_classes();
