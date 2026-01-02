@@ -61,6 +61,7 @@ pub mod msfs;
 pub mod dfs;
 pub mod clfs;
 pub mod rdbss;
+pub mod efs;
 
 // Re-export common types
 pub use path::{ParsedPath, PathComponent, MAX_PATH, MAX_COMPONENT};
@@ -569,6 +570,9 @@ pub fn init() {
 
     // Initialize Redirected Drive Buffering Subsystem
     rdbss::init();
+
+    // Initialize Encrypting File System
+    efs::init();
 
     // Initialize volume integration (auto-mounts detected volumes)
     volume::init();
