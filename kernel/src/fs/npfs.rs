@@ -23,19 +23,19 @@ use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use crate::ke::SpinLock;
 
 /// Maximum number of named pipes
-const MAX_NAMED_PIPES: usize = 1024;
+const MAX_NAMED_PIPES: usize = 32;
 
 /// Maximum number of pipe instances per name
-const MAX_PIPE_INSTANCES: usize = 255;
+const MAX_PIPE_INSTANCES: usize = 8;
 
 /// Maximum buffer size
-const MAX_BUFFER_SIZE: usize = 65536;
+const MAX_BUFFER_SIZE: usize = 4096;
 
 /// Default buffer size
-const DEFAULT_BUFFER_SIZE: usize = 4096;
+const DEFAULT_BUFFER_SIZE: usize = 1024;
 
 /// Maximum pipe name length
-const MAX_PIPE_NAME_LEN: usize = 256;
+const MAX_PIPE_NAME_LEN: usize = 128;
 
 // ============================================================================
 // Pipe Types and Modes

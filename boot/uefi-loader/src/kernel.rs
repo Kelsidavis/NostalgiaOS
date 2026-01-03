@@ -17,8 +17,8 @@ pub const KERNEL_PHYSICAL_BASE: u64 = 0x100_0000;
 /// Using -2GB from top of address space
 pub const KERNEL_VIRTUAL_BASE: u64 = 0xFFFF_FFFF_8000_0000;
 
-/// Maximum kernel size (16 MB)
-pub const MAX_KERNEL_SIZE: usize = 16 * 1024 * 1024;
+/// Maximum kernel size (64 MB)
+pub const MAX_KERNEL_SIZE: usize = 64 * 1024 * 1024;
 
 /// Loaded kernel information
 pub struct LoadedKernel {

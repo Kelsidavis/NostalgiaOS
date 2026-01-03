@@ -31,28 +31,28 @@ use core::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 // ============================================================================
 
 /// Maximum WMI namespaces
-pub const MAX_NAMESPACES: usize = 32;
+pub const MAX_NAMESPACES: usize = 4;
 
 /// Maximum WMI classes per namespace
-pub const MAX_CLASSES: usize = 128;
+pub const MAX_CLASSES: usize = 16;
 
 /// Maximum WMI providers
-pub const MAX_PROVIDERS: usize = 32;
+pub const MAX_PROVIDERS: usize = 8;
 
 /// Maximum WMI instances
-pub const MAX_INSTANCES: usize = 256;
+pub const MAX_INSTANCES: usize = 32;
 
 /// Maximum properties per class
-pub const MAX_PROPERTIES: usize = 32;
+pub const MAX_PROPERTIES: usize = 8;
 
 /// Maximum event subscriptions
-pub const MAX_SUBSCRIPTIONS: usize = 64;
+pub const MAX_SUBSCRIPTIONS: usize = 8;
 
 /// Maximum name length
-pub const MAX_NAME: usize = 128;
+pub const MAX_NAME: usize = 64;
 
 /// Maximum value length
-pub const MAX_VALUE: usize = 256;
+pub const MAX_VALUE: usize = 64;
 
 // ============================================================================
 // Types

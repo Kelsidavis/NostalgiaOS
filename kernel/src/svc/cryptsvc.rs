@@ -33,28 +33,28 @@ use core::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 // ============================================================================
 
 /// Maximum certificates per store
-pub const MAX_CERTIFICATES: usize = 256;
+pub const MAX_CERTIFICATES: usize = 16;
 
 /// Maximum certificate stores
-pub const MAX_STORES: usize = 16;
+pub const MAX_STORES: usize = 4;
 
 /// Maximum certificate name length
-pub const MAX_CERT_NAME: usize = 128;
+pub const MAX_CERT_NAME: usize = 64;
 
 /// Maximum certificate thumbprint length (SHA-1 = 20 bytes, SHA-256 = 32 bytes)
 pub const MAX_THUMBPRINT: usize = 32;
 
 /// Maximum certificate subject/issuer DN length
-pub const MAX_DN_LEN: usize = 256;
+pub const MAX_DN_LEN: usize = 64;
 
 /// Maximum catalog entries
-pub const MAX_CATALOG_ENTRIES: usize = 64;
+pub const MAX_CATALOG_ENTRIES: usize = 8;
 
 /// Maximum CTL entries (Certificate Trust List)
-pub const MAX_CTL_ENTRIES: usize = 32;
+pub const MAX_CTL_ENTRIES: usize = 8;
 
 /// Maximum key containers
-pub const MAX_KEY_CONTAINERS: usize = 32;
+pub const MAX_KEY_CONTAINERS: usize = 8;
 
 // ============================================================================
 // Certificate Store Types

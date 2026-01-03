@@ -28,22 +28,22 @@ pub const WINRM_HTTP_PORT: u16 = 5985;
 pub const WINRM_HTTPS_PORT: u16 = 5986;
 
 /// Maximum sessions
-pub const MAX_WINRM_SESSIONS: usize = 32;
+pub const MAX_WINRM_SESSIONS: usize = 4;
 
 /// Maximum shells per session
-pub const MAX_SHELLS: usize = 4;
+pub const MAX_SHELLS: usize = 2;
 
 /// Maximum commands per shell
-pub const MAX_COMMANDS: usize = 8;
+pub const MAX_COMMANDS: usize = 4;
 
 /// Maximum subscriptions
-pub const MAX_SUBSCRIPTIONS: usize = 16;
+pub const MAX_SUBSCRIPTIONS: usize = 4;
 
 /// Maximum message size
-pub const MAX_MESSAGE_SIZE: usize = 65536; // 64KB
+pub const MAX_MESSAGE_SIZE: usize = 4096;
 
 /// Command output buffer size
-pub const OUTPUT_BUFFER_SIZE: usize = 1024;
+pub const OUTPUT_BUFFER_SIZE: usize = 256;
 
 /// WS-Management namespace
 pub const WSMAN_NAMESPACE: &str = "http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd";

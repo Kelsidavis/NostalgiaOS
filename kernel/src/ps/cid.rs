@@ -49,10 +49,10 @@ impl Default for ClientId {
 }
 
 /// Maximum number of processes
-pub const MAX_PROCESSES: usize = 64;
+pub const MAX_PROCESSES: usize = 16;
 
 /// Maximum number of threads
-pub const MAX_THREADS: usize = 256;
+pub const MAX_THREADS: usize = 32;
 
 /// CID table entry type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

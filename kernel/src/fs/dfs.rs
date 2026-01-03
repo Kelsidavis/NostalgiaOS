@@ -20,19 +20,19 @@ use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use crate::ke::SpinLock;
 
 /// Maximum namespace roots
-const MAX_ROOTS: usize = 64;
+const MAX_ROOTS: usize = 4;
 
 /// Maximum links per root
-const MAX_LINKS_PER_ROOT: usize = 256;
+const MAX_LINKS_PER_ROOT: usize = 8;
 
 /// Maximum targets per link
-const MAX_TARGETS_PER_LINK: usize = 8;
+const MAX_TARGETS_PER_LINK: usize = 4;
 
 /// Maximum path length
-const MAX_PATH_LEN: usize = 260;
+const MAX_PATH_LEN: usize = 128;
 
 /// Maximum server name length
-const MAX_SERVER_NAME: usize = 256;
+const MAX_SERVER_NAME: usize = 64;
 
 /// Referral cache TTL (seconds)
 const DEFAULT_REFERRAL_TTL: u32 = 300;

@@ -27,13 +27,13 @@ use core::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use spin::Mutex;
 
 /// Maximum ClipBook pages
-const MAX_PAGES: usize = 64;
+const MAX_PAGES: usize = 4;
 
 /// Maximum page name length
 const MAX_PAGE_NAME: usize = 32;
 
 /// Maximum page data size
-const MAX_PAGE_SIZE: usize = 65536;
+const MAX_PAGE_SIZE: usize = 4096;
 
 /// Clipboard format
 #[repr(u32)]

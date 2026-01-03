@@ -34,25 +34,25 @@ use core::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
 // ============================================================================
 
 /// Maximum events per log
-pub const MAX_EVENTS: usize = 1024;
+pub const MAX_EVENTS: usize = 64;
 
 /// Maximum event logs
-pub const MAX_LOGS: usize = 16;
+pub const MAX_LOGS: usize = 8;
 
 /// Maximum event sources
-pub const MAX_SOURCES: usize = 64;
+pub const MAX_SOURCES: usize = 16;
 
 /// Maximum event description length
-pub const MAX_DESCRIPTION: usize = 1024;
+pub const MAX_DESCRIPTION: usize = 256;
 
 /// Maximum source name length
-pub const MAX_SOURCE_NAME: usize = 64;
+pub const MAX_SOURCE_NAME: usize = 32;
 
 /// Maximum log name length
 pub const MAX_LOG_NAME: usize = 32;
 
 /// Maximum data size
-pub const MAX_DATA_SIZE: usize = 256;
+pub const MAX_DATA_SIZE: usize = 64;
 
 // ============================================================================
 // Event Types

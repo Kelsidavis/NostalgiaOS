@@ -53,10 +53,10 @@ use crate::ke::SpinLock;
 // ============================================================================
 
 /// Maximum number of DLLs that can be loaded
-pub const MAX_DLLS: usize = 16;
+pub const MAX_DLLS: usize = 8;
 
-/// Maximum size of a single DLL (256KB)
-pub const MAX_DLL_SIZE: usize = 0x40000;
+/// Maximum size of a single DLL (64KB)
+pub const MAX_DLL_SIZE: usize = 0x10000;
 
 /// DLL buffer pool
 static mut DLL_BUFFER_POOL: [[u8; MAX_DLL_SIZE]; MAX_DLLS] = [[0; MAX_DLL_SIZE]; MAX_DLLS];

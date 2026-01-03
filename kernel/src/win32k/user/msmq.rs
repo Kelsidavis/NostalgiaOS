@@ -28,19 +28,19 @@ type HWND = UserHandle;
 // ============================================================================
 
 /// Maximum queues per computer
-const MAX_QUEUES: usize = 64;
+const MAX_QUEUES: usize = 8;
 
 /// Maximum messages per queue
-const MAX_MESSAGES: usize = 1024;
+const MAX_MESSAGES: usize = 16;
 
 /// Maximum queue name length
-const MAX_NAME_LEN: usize = 124;
+const MAX_NAME_LEN: usize = 64;
 
 /// Maximum label length
-const MAX_LABEL_LEN: usize = 124;
+const MAX_LABEL_LEN: usize = 64;
 
 /// Maximum message body size
-const MAX_BODY_SIZE: usize = 4096;
+const MAX_BODY_SIZE: usize = 256;
 
 // ============================================================================
 // Queue Type

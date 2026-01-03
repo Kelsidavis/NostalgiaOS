@@ -27,22 +27,22 @@ type HWND = UserHandle;
 // ============================================================================
 
 /// Maximum DFS roots
-const MAX_ROOTS: usize = 16;
+const MAX_ROOTS: usize = 4;
 
 /// Maximum links per root
-const MAX_LINKS: usize = 128;
+const MAX_LINKS: usize = 8;
 
 /// Maximum targets per link
-const MAX_TARGETS: usize = 8;
+const MAX_TARGETS: usize = 4;
 
 /// Maximum name length
-const MAX_NAME_LEN: usize = 64;
+const MAX_NAME_LEN: usize = 32;
 
 /// Maximum path length
-const MAX_PATH_LEN: usize = 260;
+const MAX_PATH_LEN: usize = 128;
 
 /// Maximum comment length
-const MAX_COMMENT_LEN: usize = 256;
+const MAX_COMMENT_LEN: usize = 64;
 
 // ============================================================================
 // DFS Root Type

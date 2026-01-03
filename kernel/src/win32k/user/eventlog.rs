@@ -19,25 +19,25 @@ use super::UserHandle;
 // ============================================================================
 
 /// Maximum event logs
-const MAX_LOGS: usize = 8;
+const MAX_LOGS: usize = 4;
 
 /// Maximum events per log
-const MAX_EVENTS: usize = 1000;
+const MAX_EVENTS: usize = 32;
 
 /// Maximum log name length
-const MAX_NAME: usize = 64;
+const MAX_NAME: usize = 32;
 
 /// Maximum source name length
-const MAX_SOURCE: usize = 64;
+const MAX_SOURCE: usize = 32;
 
 /// Maximum message length
-const MAX_MESSAGE: usize = 512;
+const MAX_MESSAGE: usize = 128;
 
 /// Maximum computer name length
-const MAX_COMPUTER: usize = 64;
+const MAX_COMPUTER: usize = 32;
 
 /// Maximum user name length
-const MAX_USER: usize = 64;
+const MAX_USER: usize = 32;
 
 // ============================================================================
 // Event Type

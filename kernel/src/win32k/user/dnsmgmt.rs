@@ -27,19 +27,19 @@ type HWND = UserHandle;
 // ============================================================================
 
 /// Maximum number of DNS zones
-const MAX_ZONES: usize = 64;
+const MAX_ZONES: usize = 8;
 
 /// Maximum records per zone
-const MAX_RECORDS_PER_ZONE: usize = 256;
+const MAX_RECORDS_PER_ZONE: usize = 32;
 
 /// Maximum forwarders
-const MAX_FORWARDERS: usize = 8;
+const MAX_FORWARDERS: usize = 4;
 
 /// Maximum name length
-const MAX_NAME_LEN: usize = 255;
+const MAX_NAME_LEN: usize = 64;
 
 /// Maximum record data length
-const MAX_DATA_LEN: usize = 512;
+const MAX_DATA_LEN: usize = 128;
 
 // ============================================================================
 // DNS Record Types

@@ -26,22 +26,22 @@ use core::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use spin::Mutex;
 
 /// Maximum DFS roots
-const MAX_ROOTS: usize = 8;
+const MAX_ROOTS: usize = 4;
 
 /// Maximum links per root
-const MAX_LINKS: usize = 128;
+const MAX_LINKS: usize = 8;
 
 /// Maximum targets per link
-const MAX_TARGETS: usize = 4;
+const MAX_TARGETS: usize = 2;
 
 /// Maximum path length
-const MAX_PATH: usize = 260;
+const MAX_PATH: usize = 128;
 
 /// Maximum server name length
-const MAX_SERVER: usize = 64;
+const MAX_SERVER: usize = 32;
 
 /// Maximum comment length
-const MAX_COMMENT: usize = 128;
+const MAX_COMMENT: usize = 64;
 
 /// DFS root type
 #[repr(u32)]
