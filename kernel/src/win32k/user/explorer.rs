@@ -364,6 +364,9 @@ fn process_mouse_input(event: mouse::MouseEvent) {
         // Normal mouse movement
         if event.dx != 0 || event.dy != 0 {
             input::process_mouse_move(x, y);
+
+            // Update cursor based on what we're hovering over
+            update_cursor_for_position(x, y);
         }
     }
 
@@ -656,6 +659,45 @@ fn end_window_resize() {
 /// Check if we're currently resizing a window
 fn is_resizing() -> bool {
     RESIZING_WINDOW.lock().is_valid()
+}
+
+/// Update cursor based on what we're hovering over
+fn update_cursor_for_position(x: i32, y: i32) {
+    // Don't change cursor if we're dragging or resizing
+    if DRAGGING_WINDOW.lock().is_valid() || RESIZING_WINDOW.lock().is_valid() {
+        return;
+    }
+
+    // Check if we're over the taskbar
+    let (_, height) = super::super::gdi::surface::get_primary_dimensions();
+    let taskbar_y = height as i32 - TASKBAR_HEIGHT;
+    if y >= taskbar_y {
+        cursor::set_cursor(cursor::StandardCursor::Arrow);
+        return;
+    }
+
+    // Find window at this position
+    let hwnd = window::window_from_point(Point::new(x, y));
+    if !hwnd.is_valid() {
+        cursor::set_cursor(cursor::StandardCursor::Arrow);
+        return;
+    }
+
+    // Perform hit test
+    let lparam = ((y as isize) << 16) | ((x as isize) & 0xFFFF);
+    let hit = message::send_message(hwnd, message::WM_NCHITTEST, 0, lparam);
+
+    // Set cursor based on hit test result
+    let new_cursor = match hit {
+        message::hittest::HTLEFT | message::hittest::HTRIGHT => cursor::StandardCursor::SizeWE,
+        message::hittest::HTTOP | message::hittest::HTBOTTOM => cursor::StandardCursor::SizeNS,
+        message::hittest::HTTOPLEFT | message::hittest::HTBOTTOMRIGHT => cursor::StandardCursor::SizeNWSE,
+        message::hittest::HTTOPRIGHT | message::hittest::HTBOTTOMLEFT => cursor::StandardCursor::SizeNESW,
+        message::hittest::HTCLIENT => cursor::StandardCursor::Arrow, // Could be IBeam for text
+        _ => cursor::StandardCursor::Arrow,
+    };
+
+    cursor::set_cursor(new_cursor);
 }
 
 /// Handle click on the taskbar
