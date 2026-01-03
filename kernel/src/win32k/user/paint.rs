@@ -299,12 +299,12 @@ fn draw_caption(hdc: HDC, wnd: &window::Window, metrics: &FrameMetrics) {
 
     // Draw caption buttons
     if metrics.has_sys_menu || metrics.has_min_box || metrics.has_max_box {
-        draw_caption_buttons(hdc, &caption_rect, metrics);
+        draw_caption_buttons(hdc, &caption_rect, metrics, wnd.maximized);
     }
 }
 
 /// Draw caption buttons (minimize, maximize, close)
-fn draw_caption_buttons(hdc: HDC, caption_rect: &Rect, metrics: &FrameMetrics) {
+fn draw_caption_buttons(hdc: HDC, caption_rect: &Rect, metrics: &FrameMetrics, is_maximized: bool) {
     let button_width = 16;
     let button_height = 14;
     let button_y = caption_rect.top + (caption_rect.height() - button_height) / 2;
@@ -324,10 +324,14 @@ fn draw_caption_buttons(hdc: HDC, caption_rect: &Rect, metrics: &FrameMetrics) {
         button_x -= button_width + 2;
     }
 
-    // Maximize button
+    // Maximize/Restore button
     if metrics.has_max_box {
         let btn_rect = Rect::new(button_x, button_y, button_x + button_width, button_y + button_height);
-        draw_caption_button(&surf, &btn_rect, CaptionButton::Maximize);
+        if is_maximized {
+            draw_caption_button(&surf, &btn_rect, CaptionButton::Restore);
+        } else {
+            draw_caption_button(&surf, &btn_rect, CaptionButton::Maximize);
+        }
         button_x -= button_width;
     }
 
@@ -343,6 +347,7 @@ fn draw_caption_buttons(hdc: HDC, caption_rect: &Rect, metrics: &FrameMetrics) {
 enum CaptionButton {
     Close,
     Maximize,
+    Restore,
     Minimize,
 }
 
@@ -381,6 +386,21 @@ fn draw_caption_button(surf: &surface::Surface, rect: &Rect, button: CaptionButt
             surf.hline(bx, bx + 6, by + 5, glyph_color);
             surf.vline(bx, by, by + 6, glyph_color);
             surf.vline(bx + 5, by, by + 6, glyph_color);
+        }
+        CaptionButton::Restore => {
+            // Draw restore icon (two overlapping boxes)
+            let bx = cx - 3;
+            let by = cy - 3;
+            // Back box (smaller, offset up-right)
+            surf.hline(bx + 2, bx + 6, by, glyph_color);
+            surf.hline(bx + 2, bx + 6, by + 1, glyph_color); // Thick top
+            surf.vline(bx + 6, by, by + 4, glyph_color);
+            // Front box (main, offset down-left)
+            surf.hline(bx, bx + 5, by + 2, glyph_color);
+            surf.hline(bx, bx + 5, by + 3, glyph_color); // Thick top
+            surf.hline(bx, bx + 5, by + 6, glyph_color);
+            surf.vline(bx, by + 2, by + 7, glyph_color);
+            surf.vline(bx + 4, by + 2, by + 7, glyph_color);
         }
         CaptionButton::Minimize => {
             // Draw minimize line (underscore)

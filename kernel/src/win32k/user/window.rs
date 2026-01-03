@@ -89,6 +89,9 @@ pub struct Window {
     /// Window is maximized
     pub maximized: bool,
 
+    /// Saved rect for restore (after maximize)
+    pub restore_rect: Option<Rect>,
+
     /// Window needs repainting
     pub needs_paint: bool,
 
@@ -134,6 +137,7 @@ impl Default for Window {
             enabled: true,
             minimized: false,
             maximized: false,
+            restore_rect: None,
             needs_paint: true,
             invalid_rect: None,
             owner_pid: 0,

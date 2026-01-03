@@ -389,7 +389,7 @@ pub fn unlock(_password: &str) -> bool {
 // ============================================================================
 
 /// Initiate shutdown
-pub fn shutdown(reboot: bool) {
+pub fn shutdown(reboot: bool) -> ! {
     let mut session = SESSION.lock();
 
     crate::serial_println!("[WINLOGON] Initiating {}...",
@@ -399,17 +399,11 @@ pub fn shutdown(reboot: bool) {
 
     // TODO: Notify all processes to terminate
     // TODO: Save user profile
-    // TODO: Call ExitWindowsEx equivalent
 
     drop(session);
 
-    if reboot {
-        // TODO: Trigger system reboot via HAL
-        crate::serial_println!("[WINLOGON] System would reboot here");
-    } else {
-        // TODO: Trigger system shutdown via HAL
-        crate::serial_println!("[WINLOGON] System would shutdown here");
-    }
+    // Call HAL to perform actual shutdown/restart
+    crate::hal::power::power_shutdown(reboot)
 }
 
 // ============================================================================

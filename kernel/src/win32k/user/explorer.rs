@@ -76,14 +76,17 @@ static ALT_TAB_INDEX: AtomicU32 = AtomicU32::new(0);
 /// Start menu visible
 static START_MENU_VISIBLE: AtomicBool = AtomicBool::new(false);
 
-/// Start menu item count
-const START_MENU_ITEMS: usize = 6;
+/// Start menu item count (right side items)
+const START_MENU_ITEMS: usize = 8;
 
 /// Start menu item height
 const START_MENU_ITEM_HEIGHT: i32 = 24;
 
-/// Start menu width
-const START_MENU_WIDTH: i32 = 180;
+/// Start menu total width (sidebar + items)
+const START_MENU_WIDTH: i32 = 220;
+
+/// Start menu sidebar width (blue user panel)
+const START_MENU_SIDEBAR_WIDTH: i32 = 54;
 
 // ============================================================================
 // Window Dragging State
@@ -1788,14 +1791,23 @@ pub fn get_taskbar_hwnd() -> HWND {
 // Start Menu
 // ============================================================================
 
-/// Start menu item names
-const START_MENU_ITEM_NAMES: [&str; START_MENU_ITEMS] = [
-    "Programs",
-    "Documents",
-    "Settings",
-    "Run...",
-    "Shut Down...",
-    "Log Off",
+/// Start menu item structure
+struct StartMenuItem {
+    name: &'static str,
+    has_submenu: bool,
+    is_separator: bool,
+}
+
+/// Start menu items (Windows 2003 style)
+const START_MENU_ITEM_LIST: [StartMenuItem; START_MENU_ITEMS] = [
+    StartMenuItem { name: "Programs", has_submenu: true, is_separator: false },
+    StartMenuItem { name: "Documents", has_submenu: true, is_separator: false },
+    StartMenuItem { name: "Settings", has_submenu: true, is_separator: false },
+    StartMenuItem { name: "Search", has_submenu: true, is_separator: false },
+    StartMenuItem { name: "Help and Support", has_submenu: false, is_separator: false },
+    StartMenuItem { name: "Run...", has_submenu: false, is_separator: false },
+    StartMenuItem { name: "Shut Down...", has_submenu: false, is_separator: false },
+    StartMenuItem { name: "Log Off", has_submenu: false, is_separator: false },
 ];
 
 /// Toggle Start menu visibility
@@ -1825,7 +1837,7 @@ fn hide_start_menu() {
     paint_taskbar();
 }
 
-/// Paint the Start menu
+/// Paint the Start menu with Windows 2003 styling
 fn paint_start_menu() {
     if !START_MENU_VISIBLE.load(Ordering::SeqCst) {
         return;
@@ -1835,8 +1847,8 @@ fn paint_start_menu() {
         let (_, height) = super::super::gdi::surface::get_primary_dimensions();
         let taskbar_y = height as i32 - TASKBAR_HEIGHT;
 
-        // Calculate menu position (above Start button)
-        let menu_height = START_MENU_ITEMS as i32 * START_MENU_ITEM_HEIGHT + 4;
+        // Calculate menu dimensions
+        let menu_height = START_MENU_ITEMS as i32 * START_MENU_ITEM_HEIGHT + 40; // Extra for user header
         let menu_x = 2;
         let menu_y = taskbar_y - menu_height;
 
@@ -1845,34 +1857,88 @@ fn paint_start_menu() {
             menu_x + START_MENU_WIDTH, taskbar_y
         );
 
-        // Draw menu background
-        let bg_brush = brush::create_solid_brush(ColorRef::BUTTON_FACE);
-        super::super::gdi::fill_rect(hdc, &menu_rect, bg_brush);
+        // Get surface for direct drawing
+        let surface_handle = dc::get_dc_surface(hdc);
+        if let Some(surf) = super::super::gdi::surface::get_surface(surface_handle) {
+            // Draw menu background (gray)
+            surf.fill_rect(&menu_rect, ColorRef::BUTTON_FACE);
 
-        // Draw raised edge
-        super::super::gdi::draw_edge_raised(hdc, &menu_rect);
+            // Draw blue sidebar on the left (Windows 2003 style)
+            let sidebar_rect = Rect::new(
+                menu_x,
+                menu_y,
+                menu_x + START_MENU_SIDEBAR_WIDTH,
+                taskbar_y,
+            );
+            // Gradient-like blue sidebar (simplified - use solid color)
+            surf.fill_rect(&sidebar_rect, ColorRef::rgb(0, 51, 153)); // Dark blue
+
+            // Draw user header area at top of sidebar
+            let header_rect = Rect::new(
+                menu_x,
+                menu_y,
+                menu_x + START_MENU_WIDTH,
+                menu_y + 36,
+            );
+            surf.fill_rect(&header_rect, ColorRef::rgb(0, 51, 153)); // Match sidebar
+
+            // Draw user icon (simple white square placeholder)
+            let icon_x = menu_x + 6;
+            let icon_y = menu_y + 6;
+            surf.fill_rect(&Rect::new(icon_x, icon_y, icon_x + 24, icon_y + 24), ColorRef::WHITE);
+            surf.fill_rect(&Rect::new(icon_x + 2, icon_y + 2, icon_x + 22, icon_y + 22), ColorRef::rgb(128, 128, 192));
+
+            // Draw username
+            dc::set_text_color(hdc, ColorRef::WHITE);
+            dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+            super::super::gdi::text_out(hdc, menu_x + 36, menu_y + 10, "Administrator");
+
+            // Draw 3D border around menu
+            // Top and left highlight
+            surf.hline(menu_rect.left, menu_rect.right - 1, menu_rect.top, ColorRef::WHITE);
+            surf.vline(menu_rect.left, menu_rect.top, menu_rect.bottom - 1, ColorRef::WHITE);
+            // Bottom and right shadow
+            surf.hline(menu_rect.left, menu_rect.right, menu_rect.bottom - 1, ColorRef::DARK_GRAY);
+            surf.vline(menu_rect.right - 1, menu_rect.top, menu_rect.bottom, ColorRef::DARK_GRAY);
+
+            // Draw separator between header and items
+            let sep_y = menu_y + 36;
+            surf.hline(menu_x, menu_x + START_MENU_WIDTH, sep_y, ColorRef::BUTTON_SHADOW);
+            surf.hline(menu_x, menu_x + START_MENU_WIDTH, sep_y + 1, ColorRef::WHITE);
+        }
 
         // Draw menu items
-        dc::set_text_color(hdc, ColorRef::BLACK);
-        dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+        let items_start_y = menu_y + 38;
+        let items_x = menu_x + START_MENU_SIDEBAR_WIDTH + 4;
 
-        for (i, name) in START_MENU_ITEM_NAMES.iter().enumerate() {
-            let item_y = menu_y + 2 + (i as i32 * START_MENU_ITEM_HEIGHT);
-            let item_rect = Rect::new(
-                menu_x + 2, item_y,
-                menu_x + START_MENU_WIDTH - 2, item_y + START_MENU_ITEM_HEIGHT
-            );
+        for (i, item) in START_MENU_ITEM_LIST.iter().enumerate() {
+            let item_y = items_start_y + (i as i32 * START_MENU_ITEM_HEIGHT);
+
+            // Draw separator before Shut Down (after Help)
+            if i == 6 {
+                if let Some(surf) = super::super::gdi::surface::get_surface(dc::get_dc_surface(hdc)) {
+                    let sep_y2 = item_y - 2;
+                    surf.hline(items_x, menu_x + START_MENU_WIDTH - 4, sep_y2, ColorRef::BUTTON_SHADOW);
+                    surf.hline(items_x, menu_x + START_MENU_WIDTH - 4, sep_y2 + 1, ColorRef::WHITE);
+                }
+            }
 
             // Draw item text
-            super::super::gdi::text_out(hdc, item_rect.left + 8, item_rect.top + 4, name);
+            dc::set_text_color(hdc, ColorRef::BLACK);
+            super::super::gdi::text_out(hdc, items_x + 4, item_y + 4, item.name);
 
-            // Draw separator after Settings
-            if i == 2 {
-                let sep_y = item_y + START_MENU_ITEM_HEIGHT - 2;
-                let sep_pen = pen::create_pen(pen::PenStyle::Solid, 1, ColorRef::BUTTON_SHADOW);
-                dc::select_object(hdc, sep_pen);
-                super::super::gdi::move_to(hdc, menu_x + 4, sep_y);
-                super::super::gdi::line_to(hdc, menu_x + START_MENU_WIDTH - 4, sep_y);
+            // Draw submenu arrow if has submenu
+            if item.has_submenu {
+                if let Some(surf) = super::super::gdi::surface::get_surface(dc::get_dc_surface(hdc)) {
+                    let arrow_x = menu_x + START_MENU_WIDTH - 12;
+                    let arrow_y = item_y + 8;
+                    // Draw simple right arrow
+                    surf.set_pixel(arrow_x, arrow_y, ColorRef::BLACK);
+                    surf.set_pixel(arrow_x + 1, arrow_y + 1, ColorRef::BLACK);
+                    surf.set_pixel(arrow_x + 2, arrow_y + 2, ColorRef::BLACK);
+                    surf.set_pixel(arrow_x + 1, arrow_y + 3, ColorRef::BLACK);
+                    surf.set_pixel(arrow_x, arrow_y + 4, ColorRef::BLACK);
+                }
             }
         }
 
@@ -1888,7 +1954,7 @@ pub fn handle_start_menu_click(x: i32, y: i32) -> bool {
 
     let (_, height) = super::super::gdi::surface::get_primary_dimensions();
     let taskbar_y = height as i32 - TASKBAR_HEIGHT;
-    let menu_height = START_MENU_ITEMS as i32 * START_MENU_ITEM_HEIGHT + 4;
+    let menu_height = START_MENU_ITEMS as i32 * START_MENU_ITEM_HEIGHT + 40;
     let menu_y = taskbar_y - menu_height;
 
     // Check if click is in menu area
@@ -1897,35 +1963,44 @@ pub fn handle_start_menu_click(x: i32, y: i32) -> bool {
         return true;
     }
 
+    // Check if click is in items area (not in header)
+    let items_start_y = menu_y + 38;
+    if y < items_start_y {
+        // Click in header - do nothing
+        return true;
+    }
+
     // Determine which item was clicked
-    let relative_y = y - menu_y - 2;
+    let relative_y = y - items_start_y;
     let item_index = relative_y / START_MENU_ITEM_HEIGHT;
 
     if item_index >= 0 && (item_index as usize) < START_MENU_ITEMS {
         let item = item_index as usize;
-        crate::serial_println!("[EXPLORER] Start menu item clicked: {}", START_MENU_ITEM_NAMES[item]);
+        crate::serial_println!("[EXPLORER] Start menu item clicked: {}", START_MENU_ITEM_LIST[item].name);
 
         match item {
-            3 => {
+            5 => {
                 // Run... - for now, create a test window
                 hide_start_menu();
                 create_test_window();
             }
-            4 => {
+            6 => {
                 // Shut Down...
                 hide_start_menu();
                 crate::serial_println!("[EXPLORER] Initiating shutdown...");
                 winlogon::shutdown(false);
+                // Note: shutdown never returns
             }
-            5 => {
+            7 => {
                 // Log Off
                 hide_start_menu();
                 crate::serial_println!("[EXPLORER] Initiating logoff...");
                 winlogon::logoff();
             }
             _ => {
+                // Items with submenus - just hide for now
                 hide_start_menu();
-                // TODO: Implement other menu items
+                // TODO: Implement submenus for Programs, Documents, Settings, Search
             }
         }
     }

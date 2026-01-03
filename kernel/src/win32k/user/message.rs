@@ -673,11 +673,18 @@ fn handle_sys_command(hwnd: HWND, wparam: usize, _lparam: isize) -> isize {
         syscmd::SC_MAXIMIZE => {
             // Maximize the window
             crate::serial_println!("[USER/Msg] SC_MAXIMIZE: maximizing window {:#x}", hwnd.raw());
-            if super::window::get_window(hwnd).is_some() {
+            if let Some(wnd) = super::window::get_window(hwnd) {
+                // Save current rect for restore (only if not already maximized)
+                if !wnd.maximized {
+                    super::window::with_window_mut(hwnd, |w| {
+                        w.restore_rect = Some(w.rect);
+                    });
+                }
+
                 // Get screen dimensions for maximize
                 let (width, height) = super::super::gdi::surface::get_primary_dimensions();
                 // Leave room for taskbar
-                let taskbar_height = 28;
+                let taskbar_height = 30;
                 super::window::set_window_pos(
                     hwnd,
                     0, 0,
@@ -689,20 +696,39 @@ fn handle_sys_command(hwnd: HWND, wparam: usize, _lparam: isize) -> isize {
                     w.maximized = true;
                     w.minimized = false;
                 });
-                super::paint::draw_window_frame(hwnd);
+                super::paint::repaint_all();
+                super::explorer::paint_taskbar();
             }
             0
         }
         syscmd::SC_RESTORE => {
             // Restore the window from minimized or maximized state
             crate::serial_println!("[USER/Msg] SC_RESTORE: restoring window {:#x}", hwnd.raw());
+
+            // Get saved rect if maximized
+            let restore_rect = super::window::get_window(hwnd)
+                .and_then(|w| w.restore_rect);
+
+            if let Some(saved_rect) = restore_rect {
+                // Restore to saved position/size
+                super::window::set_window_pos(
+                    hwnd,
+                    saved_rect.left,
+                    saved_rect.top,
+                    saved_rect.width(),
+                    saved_rect.height(),
+                    0
+                );
+            }
+
             super::window::show_window(hwnd, super::ShowCommand::Restore);
-            // TODO: Restore to saved size/position before maximize
             super::window::with_window_mut(hwnd, |w| {
                 w.maximized = false;
                 w.minimized = false;
+                w.restore_rect = None;
             });
             super::paint::repaint_all();
+            super::explorer::paint_taskbar();
             0
         }
         syscmd::SC_MOVE => {
