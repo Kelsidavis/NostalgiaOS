@@ -30,7 +30,7 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
-use super::super::{UserHandle, HINSTANCE};
+use super::super::HINSTANCE;
 
 // ============================================================================
 // Resource Types (RT_*)

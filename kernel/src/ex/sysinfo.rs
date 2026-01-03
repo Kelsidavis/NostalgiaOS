@@ -6,10 +6,8 @@
 //! Based on Windows Server 2003 base/ntos/ex/sysinfo.c
 
 use crate::etw::NtStatus;
-use alloc::string::String;
 use alloc::vec::Vec;
 use core::mem::size_of;
-use core::sync::atomic::Ordering;
 
 extern crate alloc;
 

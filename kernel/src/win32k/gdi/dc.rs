@@ -16,7 +16,7 @@
 //! - `windows/core/ntgdi/gre/dcobj.cxx`
 //! - `windows/core/ntgdi/inc/dcobj.hxx`
 
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::AtomicU16;
 use crate::ke::spinlock::SpinLock;
 use super::super::{GdiHandle, GdiObjectType, ColorRef, Point, Rect, W32Status};
 use super::{Rop2, surface::SurfaceHandle};
@@ -215,7 +215,7 @@ pub fn init() {
 
 /// Allocate a new DC slot
 fn allocate_dc_slot() -> Option<u16> {
-    let mut table = DC_TABLE.lock();
+    let table = DC_TABLE.lock();
 
     // Find a free slot
     for i in 1..MAX_DC_COUNT {

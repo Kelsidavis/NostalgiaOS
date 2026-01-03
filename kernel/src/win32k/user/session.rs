@@ -9,7 +9,7 @@
 //! - GINA (Graphical Identification and Authentication) patterns
 //! - ExitWindowsEx and related APIs
 
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use crate::ke::spinlock::SpinLock;
 use super::super::{HWND, UserHandle};
 
@@ -614,7 +614,7 @@ pub fn shutdown_dialog_proc(
     hwnd: HWND,
     msg: u32,
     wparam: usize,
-    lparam: isize,
+    _lparam: isize,
 ) -> isize {
     match msg {
         super::message::WM_COMMAND => {

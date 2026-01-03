@@ -445,7 +445,7 @@ pub struct CaretDrawInfo {
 ///
 /// This should be called by the paint system when drawing a window
 /// that contains the caret.
-pub fn draw_caret(dc: super::super::GdiHandle) {
+pub fn draw_caret(_dc: super::super::GdiHandle) {
     let info = match get_caret_draw_info() {
         Some(info) => info,
         None => return,

@@ -266,7 +266,7 @@ pub fn init() {
 pub fn make_drag_list(hwnd_list: HWND, hwnd_parent: HWND) -> bool {
     let mut lists = DRAG_LISTS.lock();
 
-    for (i, state) in lists.iter_mut().enumerate() {
+    for (_i, state) in lists.iter_mut().enumerate() {
         if !state.in_use {
             state.reset();
             state.in_use = true;

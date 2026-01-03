@@ -588,7 +588,7 @@ pub fn run_dialog_proc(
     hwnd: HWND,
     msg: u32,
     wparam: usize,
-    lparam: isize,
+    _lparam: isize,
 ) -> isize {
     match msg {
         super::message::WM_COMMAND => {

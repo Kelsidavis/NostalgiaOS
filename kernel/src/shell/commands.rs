@@ -6480,7 +6480,7 @@ fn show_pit_status() {
 
 /// Memory map and physical memory diagnostics
 pub fn cmd_memmap(args: &[&str]) {
-    use crate::mm;
+    
 
     if args.is_empty() || eq_ignore_case(args[0], "regions") {
         show_memory_regions();
@@ -6978,7 +6978,7 @@ fn show_extended_features() {
         return;
     }
 
-    let (_, ebx, ecx, edx) = cpuid(7, 0);
+    let (_, ebx, ecx, _edx) = cpuid(7, 0);
 
     outln!("  EBX Features:");
     let ebx_features = [
@@ -7325,7 +7325,7 @@ fn walk_page_tables(vaddr: u64) {
 }
 
 /// Decode page table entry flags
-fn decode_pte(pte: u64, level: &str) {
+fn decode_pte(pte: u64, _level: &str) {
     let flags = [
         (0, "P", "Present"),
         (1, "R/W", "Read/Write"),
@@ -8458,7 +8458,7 @@ fn show_apic_lvt() {
             let delivery = (val >> 8) & 0x7;
             let status = (val >> 12) & 0x1;
             let polarity = (val >> 13) & 0x1;
-            let remote = (val >> 14) & 0x1;
+            let _remote = (val >> 14) & 0x1;
             let trigger = (val >> 15) & 0x1;
             let masked = (val >> 16) & 0x1;
 
@@ -8602,7 +8602,7 @@ fn show_ioapic() {
 
             let vector = lo & 0xFF;
             let delivery = (lo >> 8) & 0x7;
-            let dest_mode = (lo >> 11) & 0x1;
+            let _dest_mode = (lo >> 11) & 0x1;
             let polarity = (lo >> 13) & 0x1;
             let trigger = (lo >> 15) & 0x1;
             let masked = (lo >> 16) & 0x1;
@@ -8934,7 +8934,7 @@ fn show_idt_summary() {
             let entry = core::ptr::read_unaligned(entry_ptr);
 
             let offset_lo = (entry & 0xFFFF) as u64;
-            let selector = ((entry >> 16) & 0xFFFF) as u16;
+            let _selector = ((entry >> 16) & 0xFFFF) as u16;
             let ist = ((entry >> 32) & 0x7) as u8;
             let gate_type = ((entry >> 40) & 0xF) as u8;
             let dpl = ((entry >> 45) & 0x3) as u8;
@@ -11865,7 +11865,7 @@ fn show_ob_directory(dir_index: u8) {
 }
 
 fn show_ob_tree() {
-    use crate::ob::{ob_get_directory_entries, ob_get_directory_name};
+    use crate::ob::ob_get_directory_entries;
 
     outln!("Object Namespace Tree");
     outln!("=====================");
@@ -11940,7 +11940,7 @@ pub fn cmd_handles(args: &[&str]) {
 }
 
 fn show_handle_stats() {
-    use crate::ob::{ob_get_handle_stats, handle_attributes};
+    use crate::ob::ob_get_handle_stats;
 
     outln!("System Handle Table Statistics");
     outln!("==============================");
@@ -11957,7 +11957,7 @@ fn show_handle_stats() {
 }
 
 fn show_handle_list() {
-    use crate::ob::{ob_get_handle_snapshots, ob_get_handle_stats, handle_attributes};
+    use crate::ob::{ob_get_handle_snapshots, ob_get_handle_stats};
 
     let stats = ob_get_handle_stats();
     let (handles, count) = ob_get_handle_snapshots(32);
@@ -12187,7 +12187,7 @@ fn show_irql_current() {
     use crate::ke::kpcr::{ke_get_current_irql, irql, get_current_kpcr};
 
     let current_irql = ke_get_current_irql();
-    let kpcr = get_current_kpcr();
+    let _kpcr = get_current_kpcr();
 
     outln!("Current IRQL State");
     outln!("==================");
@@ -12324,7 +12324,7 @@ fn show_apc_stats() {
     use crate::ke::prcb::get_current_prcb;
 
     let prcb = get_current_prcb();
-    let apc_pending = ki_check_apc_pending();
+    let _apc_pending = ki_check_apc_pending();
 
     outln!("APC Queue Statistics");
     outln!("====================");
@@ -15748,7 +15748,7 @@ fn show_reg_enum(path: &str) {
 
 /// NTFS file system command
 pub fn cmd_ntfs(args: &[&str]) {
-    use crate::fs::ntfs;
+    
 
     if args.is_empty() {
         show_ntfs_info();
@@ -15799,7 +15799,7 @@ pub fn cmd_ntfs(args: &[&str]) {
 }
 
 fn show_ntfs_info() {
-    use crate::fs::ntfs;
+    
 
     outln!("NTFS File System Driver");
     outln!("=======================");
@@ -17884,7 +17884,7 @@ pub fn cmd_serial(args: &[&str]) {
             return;
         }
 
-        let port_num: u8 = match args[1].parse() {
+        let _port_num: u8 = match args[1].parse() {
             Ok(n) if n >= 1 && n <= 4 => n,
             _ => {
                 outln!("Invalid port number (use 1-4)");
@@ -18841,7 +18841,7 @@ pub fn cmd_tracert(args: &[&str]) {
             Ok(()) => {
                 // Wait for response (timeout ~3 seconds)
                 let timeout_ticks = 3000u64 * 1000;
-                let mut received = false;
+                let received = false;
 
                 while crate::hal::apic::get_tick_count() - start < timeout_ticks {
                     // Check for reply in the pending buffer
@@ -19062,7 +19062,7 @@ pub fn cmd_ping(args: &[&str]) {
                 sent += 1;
 
                 // Wait for reply with timeout
-                let timeout_ticks = 4000u64 * 1000; // 4 seconds
+                let _timeout_ticks = 4000u64 * 1000; // 4 seconds
                 let mut got_reply = false;
 
                 // Simple delay to simulate waiting
@@ -21330,7 +21330,7 @@ fn set_volume_label(drive: char, new_label: &str) -> bool {
 /// LABEL command - display or set volume label
 pub fn cmd_label(args: &[&str]) {
     use crate::ex::eventlog::{log_info, log_warning, EventSource};
-    use crate::io::disk::{get_volume_stats, io_get_volume_snapshots};
+    use crate::io::disk::get_volume_stats;
 
     // Determine drive letter
     let drive = if !args.is_empty() && args[0].len() == 2 && args[0].ends_with(':') {
@@ -21839,7 +21839,7 @@ pub fn cmd_pushd(args: &[&str]) {
     let full_path = resolve_path(new_dir);
 
     // Verify directory exists
-    let mut offset = 0u32;
+    let offset = 0u32;
     match fs::readdir(&full_path, offset) {
         Ok(_) | Err(fs::FsStatus::NoMoreEntries) => {
             // Directory exists
@@ -22622,8 +22622,8 @@ pub fn cmd_mode(args: &[&str]) {
 
 /// START command - start a program
 pub fn cmd_start(args: &[&str]) {
-    use crate::ps::{get_cid_stats, get_process_cid_snapshots, CidEntryType};
-    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+    use crate::ps::get_cid_stats;
+    use crate::ex::eventlog::{log_info, EventSource};
     use crate::hal::apic::get_tick_count;
 
     if args.is_empty() {
@@ -23571,7 +23571,7 @@ pub fn cmd_for(args: &[&str]) {
 
 /// GOTO command - label jumping
 pub fn cmd_goto(args: &[&str]) {
-    use crate::ex::eventlog::{log_info, log_warning, EventSource};
+    use crate::ex::eventlog::{log_info, EventSource};
 
     if args.is_empty() || eq_ignore_case(args[0], "/?") || eq_ignore_case(args[0], "help") {
         outln!("Directs batch program to a labeled line.");
@@ -24221,7 +24221,7 @@ pub fn cmd_schtasks(args: &[&str]) {
         for i in 0..count {
             let snap = &snapshots[i];
             let status = if snap.signaled { "Running" } else { "Ready" };
-            let task_type = if snap.period > 0 { "Periodic" } else { "OneShot" };
+            let _task_type = if snap.period > 0 { "Periodic" } else { "OneShot" };
 
             if snap.due_time > 0 {
                 outln!("\\System\\Timer_{:04X}              {:02}:{:02}:{:02}             {}",
@@ -24262,7 +24262,7 @@ pub fn cmd_schtasks(args: &[&str]) {
         outln!("Example:");
         outln!("  SCHTASKS /Create /SC DAILY /TN MyTask /TR C:\\script.bat");
     } else if subcmd == "/DELETE" {
-        use crate::ex::eventlog::{log_info, log_warning, EventSource};
+        use crate::ex::eventlog::{log_info, EventSource};
 
         if args.len() < 3 {
             outln!("ERROR: Missing task name. Use /TN taskname");
@@ -24814,7 +24814,7 @@ pub fn cmd_defrag(args: &[&str]) {
     });
 
     use crate::fs::mount::{get_mount_point, list_mounts};
-    use crate::fs::vfs::FsType;
+    
     use crate::io::disk::get_volume_stats;
     use crate::ex::eventlog::{log_info, EventSource};
     use crate::cc::cc_get_stats;
@@ -24828,7 +24828,7 @@ pub fn cmd_defrag(args: &[&str]) {
     // Get real volume info
     let drive_letter = volume.chars().next().unwrap_or('C').to_ascii_uppercase();
 
-    if let Some(mp) = get_mount_point(drive_letter) {
+    if let Some(_mp) = get_mount_point(drive_letter) {
         let vol_stats = get_volume_stats();
         let cache_stats = cc_get_stats();
         let pool_stats = mm_get_pool_stats();
@@ -25246,8 +25246,8 @@ pub fn cmd_setx(args: &[&str]) {
 
 /// RUNAS command - run as different user
 pub fn cmd_runas(args: &[&str]) {
-    use crate::se::{get_token_stats, se_get_token_snapshots};
-    use crate::se::token::TokenType;
+    use crate::se::get_token_stats;
+    
     use crate::ps::get_cid_stats;
     use crate::ex::eventlog::{log_info, log_warning, EventSource};
     use crate::hal::apic::get_tick_count;
@@ -25523,7 +25523,7 @@ pub fn cmd_compact(args: &[&str]) {
 
         // Collect stats from directory
         let mut file_count = 0u32;
-        let mut compressed_count = 0u32;
+        let compressed_count = 0u32;
         let mut total_bytes = 0u64;
         let mut stored_bytes = 0u64;
 
@@ -25755,7 +25755,7 @@ pub fn cmd_wmic(args: &[&str]) {
 
     } else if alias == "LOGICALDISK" {
         let vol_stats = get_volume_stats();
-        let (snapshots, count) = io_get_volume_snapshots(8);
+        let (_snapshots, _count) = io_get_volume_snapshots(8);
         let mounts = list_mounts();
 
         outln!("");
@@ -26497,13 +26497,13 @@ pub fn cmd_fsutil(args: &[&str]) {
             }
 
         } else if cmd2 == "statistics" {
-            let drive = if args.len() > 2 {
+            let _drive = if args.len() > 2 {
                 args[2].chars().next().unwrap_or('C').to_ascii_uppercase()
             } else {
                 'C'
             };
 
-            let vol_stats = get_volume_stats();
+            let _vol_stats = get_volume_stats();
             let pool_stats = mm_get_pool_stats();
 
             outln!("");
@@ -27753,7 +27753,7 @@ pub fn cmd_convert(args: &[&str]) {
 
     use crate::fs::mount::{get_mount_point, list_mounts};
     use crate::fs::vfs::FsType;
-    use crate::io::disk::{get_volume_stats, io_get_volume_snapshots};
+    use crate::io::disk::get_volume_stats;
     use crate::ex::eventlog::{log_info, log_warning, EventSource};
 
     let volume = args[0];
@@ -28465,7 +28465,7 @@ pub fn cmd_typeperf(args: &[&str]) {
         let pool_stats = mm_get_pool_stats();
         let cid_stats = get_cid_stats();
         let net_stats = net::get_stats();
-        let etw_stats = etw::etw_get_statistics();
+        let _etw_stats = etw::etw_get_statistics();
         let perf_stats = perf::get_stats();
         let hook_stats = perf::hooks::get_stats();
 
@@ -29821,8 +29821,6 @@ pub fn cmd_secedit(args: &[&str]) {
     use crate::se::{
         get_token_stats, se_get_token_snapshots,
         token_type_name, impersonation_level_name,
-        privilege_values, privilege_luids,
-        SID_LOCAL_SYSTEM, SID_BUILTIN_ADMINISTRATORS, SID_BUILTIN_USERS,
     };
     use crate::ex::eventlog::{log_info, log_warning, EventSource};
 
@@ -30567,7 +30565,7 @@ pub fn cmd_prnjobs(args: &[&str]) {
         unsafe {
             for job in PRINT_JOBS.iter() {
                 if job.status != PrintJobStatus::Empty {
-                    let filename = core::str::from_utf8(&job.filename[..job.name_len]).unwrap_or("");
+                    let _filename = core::str::from_utf8(&job.filename[..job.name_len]).unwrap_or("");
                     let status = match job.status {
                         PrintJobStatus::Pending => "Pending",
                         PrintJobStatus::Printing => "Printing",

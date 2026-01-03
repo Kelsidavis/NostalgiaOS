@@ -422,7 +422,7 @@ pub fn release_name(name: &[u8], suffix: u8) -> Result<(), u32> {
 
 /// Resolve a NetBIOS name to IP
 pub fn resolve_name(name: &[u8], suffix: u8) -> Result<[u8; 4], u32> {
-    let mut state = WINS_STATE.lock();
+    let state = WINS_STATE.lock();
 
     if !state.running {
         return Err(0x80070426);

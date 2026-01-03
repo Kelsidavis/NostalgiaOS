@@ -511,7 +511,7 @@ pub fn get_space_required() -> i64 {
     let components = COMPONENTS.lock();
     let count = COMPONENT_COUNT.load(Ordering::Acquire) as usize;
 
-    let mut delta: i64 = 0;
+    let delta: i64 = 0;
     for i in 0..count {
         // Would compare current vs pending state
         let _ = components[i].size_kb;

@@ -4,7 +4,6 @@
 
 use super::{
     DriveLayout, DriveLayoutGpt, FstubError, GptPartitionInfo, PartitionInfo, PartitionStyle,
-    PartitionType,
 };
 use crate::etw::Guid;
 use alloc::string::String;

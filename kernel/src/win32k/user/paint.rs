@@ -9,8 +9,8 @@
 //! - `windows/core/ntuser/kernel/paint.c`
 //! - `windows/core/ntuser/kernel/drawfrm.c`
 
-use super::super::{GdiHandle, HDC, HWND, Rect, Point, ColorRef};
-use super::super::gdi::{dc, surface, brush};
+use super::super::{HDC, HWND, Rect, Point, ColorRef};
+use super::super::gdi::{dc, surface};
 use super::window::{self, FrameMetrics};
 use super::message;
 
@@ -88,7 +88,7 @@ pub fn begin_paint(hwnd: HWND) -> Option<(dc::DeviceContext, PaintStruct)> {
 }
 
 /// End painting a window
-pub fn end_paint(hwnd: HWND, ps: &PaintStruct) {
+pub fn end_paint(_hwnd: HWND, ps: &PaintStruct) {
     // Delete the DC
     dc::delete_dc(ps.hdc);
 }

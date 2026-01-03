@@ -4,7 +4,6 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 
 /// Maximum orderings per list
 pub const MAX_ORDERINGS: usize = 64;

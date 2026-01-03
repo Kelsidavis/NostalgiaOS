@@ -877,7 +877,7 @@ pub fn set_log_max_size(size_kb: u32) {
 pub fn check_connection(
     protocol: Protocol,
     local_port: u16,
-    remote_port: u16,
+    _remote_port: u16,
     _remote_addr: [u8; 4],
     is_inbound: bool,
 ) -> bool {

@@ -10,7 +10,7 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
-use super::super::{UserHandle, HWND, Rect, ColorRef};
+use super::super::HWND;
 
 // ============================================================================
 // Progress Bar Class

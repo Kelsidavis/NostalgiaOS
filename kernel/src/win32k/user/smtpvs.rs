@@ -4,7 +4,7 @@
 //! outbound email services. Provides virtual server configuration, domain
 //! management, relay restrictions, and message queue handling.
 
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
 use crate::win32k::user::UserHandle;
 

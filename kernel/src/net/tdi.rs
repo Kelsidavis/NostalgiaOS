@@ -36,7 +36,6 @@
 
 extern crate alloc;
 
-use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, AtomicU64, AtomicBool, Ordering};
 use spin::Mutex;
@@ -897,7 +896,7 @@ pub fn tdi_disassociate_address(connection_id: u32) -> TdiStatus {
 pub fn tdi_connect(
     connection_id: u32,
     remote_address: TdiAddress,
-    timeout_ms: Option<u32>,
+    _timeout_ms: Option<u32>,
 ) -> TdiStatus {
     let mut state = TDI_STATE.lock();
 
@@ -990,9 +989,9 @@ pub fn tdi_listen(connection_id: u32, backlog: u32) -> TdiStatus {
 pub fn tdi_send(
     connection_id: u32,
     data: &[u8],
-    flags: u32,
+    _flags: u32,
 ) -> Result<usize, TdiStatus> {
-    let mut state = TDI_STATE.lock();
+    let state = TDI_STATE.lock();
 
     for idx in 0..MAX_TDI_CONNECTIONS {
         if state.connections[idx].active && state.connections[idx].connection_id == connection_id {
@@ -1059,10 +1058,10 @@ pub fn tdi_receive(
 /// Send datagram (UDP)
 pub fn tdi_send_datagram(
     address_id: u32,
-    remote_address: &TdiAddress,
+    _remote_address: &TdiAddress,
     data: &[u8],
 ) -> Result<usize, TdiStatus> {
-    let mut state = TDI_STATE.lock();
+    let state = TDI_STATE.lock();
 
     for idx in 0..MAX_TDI_ADDRESSES {
         if state.addresses[idx].active && state.addresses[idx].address_id == address_id {
@@ -1085,8 +1084,8 @@ pub fn tdi_send_datagram(
 /// Receive datagram (UDP)
 pub fn tdi_receive_datagram(
     address_id: u32,
-    buffer: &mut [u8],
-    remote_address: &mut TdiAddress,
+    _buffer: &mut [u8],
+    _remote_address: &mut TdiAddress,
 ) -> Result<usize, TdiStatus> {
     let state = TDI_STATE.lock();
 

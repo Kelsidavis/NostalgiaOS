@@ -7,12 +7,10 @@
 //!
 //! Based on Windows Server 2003 base/ntos/verifier/vfpnp.c
 
-use super::{vf_increment_stat, vf_is_option_enabled, vf_report_violation, VerifierBugcheck, VerifierOptions, VerifierStat};
+use super::{vf_is_option_enabled, vf_report_violation, VerifierBugcheck, VerifierOptions};
 use crate::ke::SpinLock;
 use alloc::collections::BTreeMap;
-use alloc::string::String;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 extern crate alloc;
 
@@ -227,7 +225,7 @@ pub fn vf_pnp_verify_completion(
     device_object: usize,
     minor_function: u8,
     final_status: i32,
-    driver_name: &str,
+    _driver_name: &str,
 ) {
     if !vf_is_option_enabled(VerifierOptions::MONITOR_MAJORS) {
         return;
@@ -303,7 +301,7 @@ pub fn vf_pnp_get_stats() -> (u64, u64, usize) {
 pub fn vf_pnp_validate_irp_for_state(
     device_object: usize,
     minor_function: u8,
-    driver_name: &str,
+    _driver_name: &str,
 ) -> bool {
     let state = get_pnp_state();
     let guard = state.lock();

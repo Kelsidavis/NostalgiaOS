@@ -13,9 +13,8 @@
 //! - `windows/core/ntuser/client/statctl.c`
 //! - `windows/core/ntuser/client/editctl.c`
 
-use super::super::{ColorRef, Rect, Point, GdiHandle, HWND};
-use super::super::gdi::{dc, surface, brush};
-use super::{message, window};
+use super::super::{ColorRef, Rect, Point, GdiHandle};
+use super::super::gdi::{dc, surface};
 
 // ============================================================================
 // Button Styles
@@ -103,7 +102,7 @@ pub fn draw_button(
     rect: &Rect,
     text: &str,
     state: ButtonState,
-    style: ButtonStyle,
+    _style: ButtonStyle,
 ) {
     let surface_handle = dc::get_dc_surface(hdc);
     let surf = match surface::get_surface(surface_handle) {

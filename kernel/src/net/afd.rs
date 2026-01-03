@@ -13,7 +13,6 @@
 extern crate alloc;
 
 use alloc::collections::VecDeque;
-use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use crate::ke::SpinLock;
@@ -984,7 +983,7 @@ pub fn afd_connect(socket_id: u64, addr: &SockAddr) -> Result<(), WsaError> {
 }
 
 /// Send data on a socket
-pub fn afd_send(socket_id: u64, data: &[u8], flags: u32) -> Result<usize, WsaError> {
+pub fn afd_send(socket_id: u64, data: &[u8], _flags: u32) -> Result<usize, WsaError> {
     let mut state = AFD_STATE.lock();
 
     let mut found_idx = None;
@@ -1090,10 +1089,10 @@ pub fn afd_recv(socket_id: u64, buffer: &mut [u8], flags: u32) -> Result<usize, 
 pub fn afd_sendto(
     socket_id: u64,
     data: &[u8],
-    flags: u32,
-    dest_addr: &SockAddr,
+    _flags: u32,
+    _dest_addr: &SockAddr,
 ) -> Result<usize, WsaError> {
-    let mut state = AFD_STATE.lock();
+    let state = AFD_STATE.lock();
 
     let mut found_idx = None;
     for idx in 0..MAX_SOCKETS {
@@ -1122,7 +1121,7 @@ pub fn afd_sendto(
 pub fn afd_recvfrom(
     socket_id: u64,
     buffer: &mut [u8],
-    flags: u32,
+    _flags: u32,
     src_addr: &mut SockAddr,
 ) -> Result<usize, WsaError> {
     let mut state = AFD_STATE.lock();
@@ -1412,7 +1411,7 @@ pub fn afd_select(
     read_sockets: &[u64],
     write_sockets: &[u64],
     except_sockets: &[u64],
-    timeout_ms: Option<u32>,
+    _timeout_ms: Option<u32>,
 ) -> Result<(Vec<u64>, Vec<u64>, Vec<u64>), WsaError> {
     let state = AFD_STATE.lock();
 

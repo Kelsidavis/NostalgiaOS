@@ -15,9 +15,9 @@
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
 use crate::hal::{keyboard, mouse};
-use super::super::{HWND, HDC, Rect, Point, ColorRef, GdiHandle, UserHandle};
+use super::super::{HWND, HDC, Rect, Point, ColorRef};
 use super::super::gdi::{dc, brush, pen};
-use super::{message, window, input, desktop, controls, cursor, winlogon, WindowStyle, WindowStyleEx, ShowCommand};
+use super::{message, window, input, controls, cursor, winlogon, WindowStyle, WindowStyleEx, ShowCommand};
 
 // ============================================================================
 // Constants
@@ -1198,7 +1198,7 @@ fn paint_desktop_icons(hdc: HDC) {
     };
 
     let selected = *SELECTED_ICON.lock();
-    let mut x = ICON_MARGIN;
+    let x = ICON_MARGIN;
     let mut y = ICON_MARGIN;
 
     for (idx, icon) in DESKTOP_ICONS.iter().enumerate() {
@@ -1381,7 +1381,7 @@ fn get_icon_at_position(x: i32, y: i32) -> Option<usize> {
     }
 
     // Calculate icon positions and check each one
-    let mut icon_x = ICON_MARGIN;
+    let icon_x = ICON_MARGIN;
     let mut icon_y = ICON_MARGIN;
 
     // Each icon has a clickable area including the icon and label

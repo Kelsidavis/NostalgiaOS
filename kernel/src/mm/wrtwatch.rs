@@ -28,9 +28,8 @@
 //! - NtGetWriteWatch: Get list of written pages
 //! - NtResetWriteWatch: Reset write watch bits for a range
 
-use core::ptr;
 use crate::ke::SpinLock;
-use crate::mm::{PAGE_SIZE, vad_flags, allocation_type};
+use crate::mm::PAGE_SIZE;
 
 /// Write watch flag for NtGetWriteWatch - reset bits after query
 pub const WRITE_WATCH_FLAG_RESET: u32 = 0x01;

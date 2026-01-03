@@ -1172,7 +1172,7 @@ pub fn disable_firewall() -> bool {
 // ============================================================================
 
 /// Show RRAS Manager dialog
-pub fn show_dialog(parent: HWND) -> HWND {
+pub fn show_dialog(_parent: HWND) -> HWND {
     let mut state = RRAS_MANAGER.lock();
 
     let handle = UserHandle::from_raw(0xAA01);

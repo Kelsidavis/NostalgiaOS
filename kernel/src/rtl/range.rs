@@ -358,7 +358,7 @@ unsafe fn add_range_internal(
     entry: *mut RangeListEntry,
     flags: u32,
 ) -> i32 {
-    let start = (*entry).start;
+    let _start = (*entry).start;
     let end = (*entry).end;
 
     // Clear conflict flag
@@ -913,7 +913,7 @@ unsafe fn container_of_merged(merged_head: *mut ListEntry) -> *mut RangeListEntr
 }
 
 // Simple allocation functions (would use pool in real kernel)
-use core::alloc::{GlobalAlloc, Layout};
+use core::alloc::Layout;
 
 extern "Rust" {
     fn __rust_alloc(size: usize, align: usize) -> *mut u8;

@@ -10,7 +10,7 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
-use super::super::{HWND, Rect, Point, ColorRef};
+use super::super::{HWND, Rect, Point};
 
 // ============================================================================
 // ListView Class

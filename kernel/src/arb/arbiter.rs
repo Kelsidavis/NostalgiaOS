@@ -5,10 +5,9 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use alloc::string::String;
-use core::sync::atomic::{AtomicU32, AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use crate::ke::SpinLock;
-use super::{ResourceType, ArbiterAction, ArbiterRequestSource, ARBITER_SIGNATURE};
+use super::{ResourceType, ARBITER_SIGNATURE};
 use super::range::{RangeList, RangeEntry};
 use super::ordering::OrderingList;
 

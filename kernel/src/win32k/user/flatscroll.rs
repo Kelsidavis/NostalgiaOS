@@ -15,7 +15,7 @@
 //! - `public/sdk/inc/commctrl.h` - FlatSB_* functions
 
 use crate::ke::spinlock::SpinLock;
-use super::super::{UserHandle, HWND, Rect, ColorRef};
+use super::super::{UserHandle, HWND, ColorRef};
 
 // ============================================================================
 // Flat ScrollBar Styles (WSB_PROP_*)

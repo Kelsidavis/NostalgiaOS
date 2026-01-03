@@ -9,8 +9,8 @@
 //!
 //! Based on Windows NT LPC extensions and Vista+ ALPC.
 
-use super::port::{LpcPort, PortFlags, MAX_PORTS};
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use super::port::{PortFlags, MAX_PORTS};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 /// Maximum number of views per port
 pub const MAX_VIEWS_PER_PORT: usize = 4;

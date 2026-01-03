@@ -1090,7 +1090,7 @@ fn format_hex(value: u64) -> [u8; 18] {
 }
 
 /// Format helper that returns string
-fn format_hex_str(value: u64) -> &'static str {
+fn format_hex_str(_value: u64) -> &'static str {
     // This is a simplified version - in real implementation would use proper formatting
     "0x00000000"
 }

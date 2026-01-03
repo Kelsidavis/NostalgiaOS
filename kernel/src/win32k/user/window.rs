@@ -18,7 +18,7 @@
 
 use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
-use super::super::{UserHandle, UserObjectType, HWND, Rect, Point};
+use super::super::{UserObjectType, HWND, Rect, Point};
 use super::{WindowStyle, WindowStyleEx, ShowCommand, MAX_WINDOWS};
 
 // ============================================================================
@@ -320,7 +320,7 @@ pub fn get_desktop_window() -> HWND {
 
 /// Allocate a window slot
 fn allocate_window_slot() -> Option<u16> {
-    let mut table = WINDOW_TABLE.lock();
+    let table = WINDOW_TABLE.lock();
 
     for i in 1..MAX_WINDOWS {
         if table.entries[i].window.is_none() {

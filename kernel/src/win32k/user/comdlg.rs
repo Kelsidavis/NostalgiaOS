@@ -16,7 +16,7 @@
 //! - `public/sdk/inc/commdlg.h` - Common dialog structures
 
 use crate::ke::spinlock::SpinLock;
-use super::super::{UserHandle, HWND, ColorRef, Rect};
+use super::super::{UserHandle, HWND, ColorRef};
 
 // ============================================================================
 // Open/Save File Dialog Flags (OFN_*)

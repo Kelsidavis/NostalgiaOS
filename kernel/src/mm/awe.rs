@@ -29,9 +29,8 @@
 //! - NtFreeUserPhysicalPages: Free physical pages
 //! - NtMapUserPhysicalPages: Map pages into virtual window
 
-use core::ptr;
 use crate::ke::SpinLock;
-use crate::mm::{PAGE_SIZE, PAGE_SHIFT, pfn_flags, vad_flags};
+use crate::mm::PAGE_SHIFT;
 
 /// Maximum number of AWE regions per process
 pub const MAX_AWE_REGIONS: usize = 16;

@@ -18,7 +18,7 @@
 
 extern crate alloc;
 
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use crate::ke::SpinLock;
@@ -923,8 +923,8 @@ pub fn clfs_reserve_record(log_id: u32, size: usize) -> Result<Lsn, ClfsError> {
 pub fn clfs_write_record(
     log_id: u32,
     data: &[u8],
-    record_type: RecordType,
-    previous_lsn: Option<Lsn>,
+    _record_type: RecordType,
+    _previous_lsn: Option<Lsn>,
 ) -> Result<Lsn, ClfsError> {
     let mut state = CLFS_STATE.lock();
 
@@ -995,7 +995,7 @@ pub fn clfs_flush_log(log_id: u32, target_lsn: Option<Lsn>) -> Result<Lsn, ClfsE
 
 /// Read a record from the log
 pub fn clfs_read_record(log_id: u32, lsn: Lsn) -> Result<LogRecord, ClfsError> {
-    let mut state = CLFS_STATE.lock();
+    let state = CLFS_STATE.lock();
 
     if !state.initialized {
         return Err(ClfsError::NotInitialized);

@@ -14,7 +14,6 @@
 extern crate alloc;
 
 use alloc::collections::VecDeque;
-use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use crate::ke::SpinLock;
 
@@ -843,10 +842,10 @@ pub fn wsk_receive(socket_id: u64, buffer: &mut [u8], _flags: u32) -> Result<usi
 pub fn wsk_send_to(
     socket_id: u64,
     data: &[u8],
-    dest_addr: &WskSockAddr,
+    _dest_addr: &WskSockAddr,
     _flags: u32,
 ) -> Result<usize, WskError> {
-    let mut state = WSK_STATE.lock();
+    let state = WSK_STATE.lock();
 
     let mut found_idx = None;
     for idx in 0..MAX_WSK_SOCKETS {

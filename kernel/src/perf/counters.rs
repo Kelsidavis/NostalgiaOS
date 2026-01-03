@@ -6,7 +6,6 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use alloc::string::String;
 use core::sync::atomic::{AtomicU64, AtomicU32, Ordering};
 use crate::ke::SpinLock;
 
@@ -444,7 +443,7 @@ fn query_memory_counter(counter_id: u32) -> Option<u64> {
     }
 }
 
-fn query_processor_counter(counter_id: u32, instance: u32) -> Option<u64> {
+fn query_processor_counter(counter_id: u32, _instance: u32) -> Option<u64> {
     let perf_stats = super::get_stats();
 
     match counter_id {
@@ -465,7 +464,7 @@ fn query_process_counter(counter_id: u32, pid: u32) -> Option<u64> {
     }
 }
 
-fn query_network_counter(counter_id: u32, instance: u32) -> Option<u64> {
+fn query_network_counter(counter_id: u32, _instance: u32) -> Option<u64> {
     let net_stats = crate::net::get_stats();
 
     match counter_id {

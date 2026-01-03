@@ -308,7 +308,7 @@ fn format_signed(dst: &mut [u8], spec: &FormatSpec, value: isize) -> usize {
 
     // Format number without sign
     let mut temp = [0u8; 32];
-    let mut len = format_unsigned(&mut temp, spec, abs_val, 10, false);
+    let len = format_unsigned(&mut temp, spec, abs_val, 10, false);
 
     // Calculate padding
     let sign_len = if negative || (spec.flags & (FLAG_PLUS | FLAG_SPACE)) != 0 { 1 } else { 0 };

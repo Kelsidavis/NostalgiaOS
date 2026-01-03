@@ -433,7 +433,7 @@ pub fn leave_domain() -> Result<(), u32> {
 
 /// Discover domain controllers
 pub fn discover_dcs(domain: &[u8]) -> Result<usize, u32> {
-    let mut state = NETLOGON_STATE.lock();
+    let state = NETLOGON_STATE.lock();
 
     if !state.running {
         return Err(0x80070426);

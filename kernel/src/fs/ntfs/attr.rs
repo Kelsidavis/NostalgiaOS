@@ -47,7 +47,6 @@
 //! └─────────────────────┘              └─────────────────────┘
 //! ```
 
-use core::mem;
 
 /// Attribute type codes
 pub mod attr_types {

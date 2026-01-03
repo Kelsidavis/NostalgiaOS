@@ -53,7 +53,6 @@ pub mod server;
 use crate::ke::spinlock::SpinLock;
 use crate::ob::handle::Handle;
 use alloc::vec::Vec;
-use alloc::vec;
 use alloc::string::String;
 use alloc::collections::BTreeMap;
 

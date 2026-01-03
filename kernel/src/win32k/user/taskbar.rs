@@ -8,7 +8,7 @@
 //! - Windows Server 2003 shell32 taskbar APIs
 //! - ITaskbarList, ITaskbarList2, ITaskbarList3 interfaces
 
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use crate::ke::spinlock::SpinLock;
 use super::super::{HWND, UserHandle};
 

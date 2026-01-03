@@ -858,8 +858,8 @@ pub fn ndis_deregister_miniport(adapter_id: u32) -> NdisStatus {
 /// Indicate receive to protocols
 pub fn ndis_indicate_receive(
     adapter_id: u32,
-    header: &[u8],
-    lookahead: &[u8],
+    _header: &[u8],
+    _lookahead: &[u8],
     packet_size: u32,
 ) -> NdisStatus {
     let state = NDIS_STATE.lock();
@@ -888,7 +888,7 @@ pub fn ndis_indicate_receive(
 /// Indicate send complete
 pub fn ndis_send_complete(
     adapter_id: u32,
-    packet_id: u32,
+    _packet_id: u32,
     status: NdisStatus,
 ) {
     let state = NDIS_STATE.lock();

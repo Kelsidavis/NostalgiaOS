@@ -2,7 +2,7 @@
 //!
 //! Manages buffers for collecting trace events before flushing to consumers.
 
-use super::{Guid, WnodeHeader};
+use super::WnodeHeader;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};

@@ -51,7 +51,6 @@
 //! ```
 
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use core::ptr;
 use crate::ke::spinlock::SpinLock;
 
 /// Maximum number of DMA adapters

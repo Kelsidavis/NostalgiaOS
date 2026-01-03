@@ -252,7 +252,7 @@ pub enum PnpIrpResult {
 }
 
 /// Default PnP IRP handler
-pub fn default_pnp_handler(device: &DeviceObject, minor: PnpMinorFunction) -> PnpIrpResult {
+pub fn default_pnp_handler(_device: &DeviceObject, minor: PnpMinorFunction) -> PnpIrpResult {
     match minor {
         PnpMinorFunction::StartDevice => {
             // Default: succeed

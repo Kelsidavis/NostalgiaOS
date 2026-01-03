@@ -16,7 +16,7 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use crate::ke::spinlock::SpinLock;
-use super::super::{GdiHandle, GdiObjectType, ColorRef, Rect};
+use super::super::{GdiHandle, ColorRef, Rect};
 
 // ============================================================================
 // Constants
@@ -432,7 +432,7 @@ where
 }
 
 /// Create a compatible bitmap
-pub fn create_compatible_bitmap(width: u32, height: u32) -> Result<GdiHandle, super::super::W32Status> {
+pub fn create_compatible_bitmap(_width: u32, _height: u32) -> Result<GdiHandle, super::super::W32Status> {
     // For now, just return NULL (bitmap memory allocation not implemented)
     // TODO: implement bitmap memory allocation
     Err(super::super::W32Status::NotImplemented)

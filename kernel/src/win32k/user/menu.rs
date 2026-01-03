@@ -15,9 +15,9 @@
 //! - `windows/core/ntuser/kernel/menu.c`
 //! - `windows/core/ntuser/kernel/menudd.c`
 
-use super::super::{HWND, HMENU, UserHandle, UserObjectType, ColorRef, Rect, Point};
+use super::super::{HWND, HMENU, UserHandle, UserObjectType, ColorRef, Rect};
 use super::super::gdi::{dc, surface, brush};
-use super::message::{self, WM_COMMAND, WM_INITMENU, WM_INITMENUPOPUP, WM_MENUSELECT};
+use super::message::{self, WM_INITMENU, WM_INITMENUPOPUP};
 use crate::ke::spinlock::SpinLock;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
@@ -789,7 +789,7 @@ pub fn close_popup_menu() {
 // ============================================================================
 
 /// Draw a menu bar for a window
-pub fn draw_menu_bar(hwnd: HWND, hmenu: HMENU, rect: &Rect) {
+pub fn draw_menu_bar(_hwnd: HWND, hmenu: HMENU, rect: &Rect) {
     if let Ok(hdc) = super::super::gdi::dc::create_display_dc() {
         // Fill menu bar background
         let bg_brush = brush::create_solid_brush(ColorRef::BUTTON_FACE);

@@ -353,7 +353,7 @@ pub fn gdi_text_out(hdc: GdiHandle, x: i32, y: i32, text: &str) -> bool {
     // Get font cell size
     let cell_size = font::get_font_cell_size(dc_data.font);
     let char_width = cell_size.cx;
-    let char_height = cell_size.cy;
+    let _char_height = cell_size.cy;
 
     // Transform starting position
     let start = dc::lp_to_dp(hdc, Point::new(x, y));
@@ -1018,7 +1018,7 @@ fn atan2_approx(y: i32, x: i32) -> i32 {
 
     // Base angle in first octant (0-128 for 0-45 degrees)
     let angle = if ax >= ay {
-        if ax == 0 { 0 } else { (ay * 128 / ax) }
+        if ax == 0 { 0 } else { ay * 128 / ax }
     } else {
         256 - (ax * 128 / ay)
     };

@@ -27,9 +27,8 @@
 //! - NtLockVirtualMemory: Lock a region of pages
 //! - NtUnlockVirtualMemory: Unlock a previously locked region
 
-use core::ptr;
 use crate::ke::SpinLock;
-use crate::mm::{PAGE_SIZE, PAGE_SHIFT, vad_flags};
+use crate::mm::{PAGE_SIZE, PAGE_SHIFT};
 
 /// Lock type: Lock in process working set
 pub const MAP_PROCESS: u32 = 1;

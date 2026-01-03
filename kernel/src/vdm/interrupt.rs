@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use super::{VdmFlags, V86Context, VDM_TABLE};
+use super::{V86Context, VDM_TABLE};
 use crate::ke::spinlock::SpinLock;
 
 // ============================================================================
@@ -355,7 +355,7 @@ fn handle_dos_interrupt(vdm_id: u32, context: &mut V86Context) -> InterruptResul
             // Allocate memory
             // BX = paragraphs requested
             // Returns: AX = segment, or error with BX = largest available
-            let paragraphs = (context.ebx & 0xFFFF) as u16;
+            let _paragraphs = (context.ebx & 0xFFFF) as u16;
             // Simplified: pretend we have memory
             context.eax = (context.eax & 0xFFFF0000) | 0x1000; // Return segment 0x1000
             // Clear carry flag to indicate success
@@ -428,7 +428,7 @@ fn handle_video_interrupt(context: &mut V86Context) -> InterruptResult {
             // Get video mode
             // Returns: AH = columns, AL = mode, BH = page
             context.eax = (context.eax & 0xFFFF0000) | 0x5003; // 80 cols, mode 3
-            context.ebx = (context.ebx & 0xFFFF00FF); // Page 0
+            context.ebx = context.ebx & 0xFFFF00FF; // Page 0
             InterruptResult::Handled
         }
 
@@ -458,7 +458,7 @@ fn handle_keyboard_interrupt(context: &mut V86Context) -> InterruptResult {
 
         0x02 | 0x12 => {
             // Get shift key status
-            context.eax = (context.eax & 0xFFFFFF00); // No shift keys
+            context.eax = context.eax & 0xFFFFFF00; // No shift keys
             InterruptResult::Handled
         }
 
@@ -473,7 +473,7 @@ fn handle_disk_interrupt(context: &mut V86Context) -> InterruptResult {
     match function {
         0x00 => {
             // Reset disk
-            context.eax = (context.eax & 0xFFFFFF00); // Success
+            context.eax = context.eax & 0xFFFFFF00; // Success
             context.eflags &= !0x01; // Clear carry
             InterruptResult::Handled
         }
@@ -511,7 +511,7 @@ fn handle_time_interrupt(context: &mut V86Context) -> InterruptResult {
             // Returns: CX:DX = tick count, AL = midnight flag
             context.ecx = 0;
             context.edx = 0;
-            context.eax = (context.eax & 0xFFFFFF00); // No midnight
+            context.eax = context.eax & 0xFFFFFF00; // No midnight
             InterruptResult::Handled
         }
 

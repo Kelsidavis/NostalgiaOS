@@ -626,7 +626,7 @@ pub fn close_display_dialog() {
 
 /// Apply pending display changes
 pub fn apply_display_changes() -> bool {
-    let mut state = DIALOG_STATE.lock();
+    let state = DIALOG_STATE.lock();
 
     if !state.pending_changes {
         return true;

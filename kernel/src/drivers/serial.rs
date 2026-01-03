@@ -6,8 +6,7 @@
 extern crate alloc;
 
 use alloc::collections::VecDeque;
-use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use crate::ke::SpinLock;
 
 /// COM1 base port (IRQ 4)

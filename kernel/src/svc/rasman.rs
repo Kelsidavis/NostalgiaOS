@@ -692,7 +692,7 @@ pub fn is_auto_dial_enabled() -> bool {
 }
 
 /// Get entry for auto-dial to address
-pub fn get_auto_dial_entry(address: &[u8]) -> Option<u64> {
+pub fn get_auto_dial_entry(_address: &[u8]) -> Option<u64> {
     let state = RASMAN_STATE.lock();
 
     if !state.auto_dial_enabled {

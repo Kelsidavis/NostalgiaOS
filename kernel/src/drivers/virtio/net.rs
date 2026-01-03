@@ -11,7 +11,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use super::{VirtioTransport, device_status};
+use super::VirtioTransport;
 use super::virtqueue::{Virtqueue, virtqueue_size_legacy, PAGE_SIZE};
 use crate::hal::pci::PciLocation;
 use crate::net::{NetworkDevice, NetworkDeviceInfo, NetworkDeviceState, DeviceCapabilities};
@@ -140,7 +140,7 @@ impl VirtioNetDevice {
 
         // Allocate RX queue memory
         let rx_mem_size = virtqueue_size_legacy(rx_size);
-        let mut rx_mem = vec![0u8; rx_mem_size + PAGE_SIZE];
+        let rx_mem = vec![0u8; rx_mem_size + PAGE_SIZE];
         let rx_aligned = ((rx_mem.as_ptr() as usize + PAGE_SIZE - 1) & !(PAGE_SIZE - 1)) as *mut u8;
         let rx_phys = rx_aligned as u64; // In real system, this would be virt_to_phys
 
@@ -159,7 +159,7 @@ impl VirtioNetDevice {
 
         // Allocate TX queue memory
         let tx_mem_size = virtqueue_size_legacy(tx_size);
-        let mut tx_mem = vec![0u8; tx_mem_size + PAGE_SIZE];
+        let tx_mem = vec![0u8; tx_mem_size + PAGE_SIZE];
         let tx_aligned = ((tx_mem.as_ptr() as usize + PAGE_SIZE - 1) & !(PAGE_SIZE - 1)) as *mut u8;
         let tx_phys = tx_aligned as u64;
 
@@ -174,7 +174,7 @@ impl VirtioNetDevice {
         self._tx_queue_mem = Some(tx_mem);
 
         // Allocate RX buffers and add to queue
-        for i in 0..RX_QUEUE_SIZE.min(rx_size as usize / 2) {
+        for _i in 0..RX_QUEUE_SIZE.min(rx_size as usize / 2) {
             let buf = Box::new(RxBuffer {
                 header: VirtioNetHdr::default(),
                 data: [0u8; MAX_PACKET_SIZE],

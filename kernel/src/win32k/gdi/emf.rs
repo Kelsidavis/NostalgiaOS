@@ -29,7 +29,6 @@ use super::super::{GdiHandle, GdiObjectType, ColorRef, Point, Rect};
 use super::dc;
 use crate::ke::spinlock::SpinLock;
 use alloc::vec::Vec;
-use alloc::vec;
 use alloc::string::String;
 use alloc::collections::BTreeMap;
 

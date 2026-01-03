@@ -47,7 +47,6 @@ pub mod interrupt;
 use crate::ke::spinlock::SpinLock;
 use crate::ob::handle::Handle;
 use alloc::vec::Vec;
-use alloc::vec;
 use alloc::collections::BTreeMap;
 
 // ============================================================================

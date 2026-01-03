@@ -980,7 +980,7 @@ pub fn set_notify_cmdline(job_id: u64, cmdline: &str) -> Result<(), BitsError> {
 
 /// Process pending transfers (called periodically)
 pub fn process_transfers() {
-    let mut state = BITS_STATE.lock();
+    let state = BITS_STATE.lock();
 
     if !state.running {
         return;

@@ -16,7 +16,7 @@
 //! - `public/sdk/inc/richedit.h` - Rich Edit structures and messages
 
 use crate::ke::spinlock::SpinLock;
-use super::super::{UserHandle, HWND, Point, Rect, ColorRef};
+use super::super::{UserHandle, HWND, Point, ColorRef};
 
 // ============================================================================
 // Rich Edit Styles (ES_*)

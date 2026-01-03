@@ -12,11 +12,11 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use crate::fs::vfs::{FsStatus, FsType, FileType, FileInfo, DirEntry, FsOps, FsInfo};
 use crate::ke::SpinLock;
 use super::boot::{NtfsBootSector, NtfsVolumeInfo};
-use super::mft::{FileRecord, well_known_mft};
+use super::mft::FileRecord;
 use super::attr::{
     AttributeHeader, ResidentHeader, NonResidentHeader,
-    StandardInformation, FileName,
-    attr_types, file_name_types,
+    StandardInformation,
+    attr_types,
 };
 
 /// Maximum number of NTFS mounts

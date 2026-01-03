@@ -15,7 +15,7 @@
 //! Based on Windows Server 2003:
 //! - `shell/comctl32/v6/listbox.c`
 
-use super::super::{HWND, UserHandle, Rect, Point, ColorRef};
+use super::super::{HWND, UserHandle, Rect};
 use crate::ke::spinlock::SpinLock;
 use core::sync::atomic::{AtomicBool, Ordering};
 

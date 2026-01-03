@@ -16,14 +16,13 @@
 //! - `windows/core/ntuser/kernel/dlgmgr.c`
 //! - `windows/core/ntuser/kernel/msgbox.c`
 
-use super::super::{HWND, UserHandle, UserObjectType, ColorRef, Rect, Point};
+use super::super::{HWND, UserHandle, ColorRef, Rect};
 use super::super::gdi::{dc, surface, brush};
-use super::message::{self, WM_COMMAND, WM_CLOSE};
+use super::message::{self};
 use super::window;
 use super::{WindowStyle, WindowStyleEx, ShowCommand};
-use super::controls::{self, ButtonStyle, ButtonState};
 use crate::ke::spinlock::SpinLock;
-use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 
 // ============================================================================
 // Constants

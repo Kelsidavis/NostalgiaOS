@@ -16,9 +16,8 @@
 
 extern crate alloc;
 
-use alloc::string::String;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, AtomicBool, Ordering};
+use core::sync::atomic::{AtomicU64, Ordering};
 use crate::ke::SpinLock;
 use crate::hal::apic::get_tick_count;
 

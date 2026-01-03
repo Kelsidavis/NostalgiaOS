@@ -38,7 +38,7 @@
 //! - `NtSetHighWaitLowEventPair` - Signal high, wait low (atomic)
 //! - `NtSetLowWaitHighEventPair` - Signal low, wait high (atomic)
 
-use core::sync::atomic::{AtomicU32, AtomicBool, Ordering};
+use core::sync::atomic::{AtomicU32, Ordering};
 use crate::ke::event::{KEvent, EventType};
 use crate::ke::spinlock::SpinLock;
 

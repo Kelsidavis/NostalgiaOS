@@ -12,9 +12,7 @@ pub mod counters;
 pub mod hooks;
 pub mod profile;
 
-use alloc::vec::Vec;
-use alloc::string::String;
-use core::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
+use core::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use crate::ke::SpinLock;
 
 /// Performance group mask flags
@@ -335,7 +333,7 @@ pub fn log_hard_fault() {
 
 /// Log a disk read event
 #[inline]
-pub fn log_disk_read(bytes: u64) {
+pub fn log_disk_read(_bytes: u64) {
     if is_group_on(PerfGroup::DiskIo) {
         DISK_READS.fetch_add(1, Ordering::Relaxed);
         TOTAL_EVENTS.fetch_add(1, Ordering::Relaxed);
@@ -344,7 +342,7 @@ pub fn log_disk_read(bytes: u64) {
 
 /// Log a disk write event
 #[inline]
-pub fn log_disk_write(bytes: u64) {
+pub fn log_disk_write(_bytes: u64) {
     if is_group_on(PerfGroup::DiskIo) {
         DISK_WRITES.fetch_add(1, Ordering::Relaxed);
         TOTAL_EVENTS.fetch_add(1, Ordering::Relaxed);
@@ -353,7 +351,7 @@ pub fn log_disk_write(bytes: u64) {
 
 /// Log a network send event
 #[inline]
-pub fn log_network_send(bytes: u64) {
+pub fn log_network_send(_bytes: u64) {
     if is_group_on(PerfGroup::NetworkIo) {
         NETWORK_SENDS.fetch_add(1, Ordering::Relaxed);
         TOTAL_EVENTS.fetch_add(1, Ordering::Relaxed);
@@ -362,7 +360,7 @@ pub fn log_network_send(bytes: u64) {
 
 /// Log a network receive event
 #[inline]
-pub fn log_network_receive(bytes: u64) {
+pub fn log_network_receive(_bytes: u64) {
     if is_group_on(PerfGroup::NetworkIo) {
         NETWORK_RECEIVES.fetch_add(1, Ordering::Relaxed);
         TOTAL_EVENTS.fetch_add(1, Ordering::Relaxed);
@@ -389,7 +387,7 @@ pub fn log_registry_write() {
 
 /// Log a pool allocation event
 #[inline]
-pub fn log_pool_alloc(size: usize) {
+pub fn log_pool_alloc(_size: usize) {
     if is_group_on(PerfGroup::Pool) {
         POOL_ALLOCS.fetch_add(1, Ordering::Relaxed);
         TOTAL_EVENTS.fetch_add(1, Ordering::Relaxed);
@@ -407,7 +405,7 @@ pub fn log_pool_free() {
 
 /// Log a profile sample
 #[inline]
-pub fn log_profile_sample(ip: u64) {
+pub fn log_profile_sample(_ip: u64) {
     if is_group_on(PerfGroup::Profile) {
         PROFILE_SAMPLES.fetch_add(1, Ordering::Relaxed);
         TOTAL_EVENTS.fetch_add(1, Ordering::Relaxed);
@@ -425,7 +423,7 @@ pub fn log_dpc() {
 
 /// Log an interrupt event
 #[inline]
-pub fn log_interrupt(vector: u8) {
+pub fn log_interrupt(_vector: u8) {
     if is_group_on(PerfGroup::Interrupt) {
         INTERRUPT_COUNT.fetch_add(1, Ordering::Relaxed);
         TOTAL_EVENTS.fetch_add(1, Ordering::Relaxed);
@@ -434,7 +432,7 @@ pub fn log_interrupt(vector: u8) {
 
 /// Log a system call event
 #[inline]
-pub fn log_syscall(syscall_num: u32) {
+pub fn log_syscall(_syscall_num: u32) {
     if is_group_on(PerfGroup::Syscall) {
         SYSCALL_COUNT.fetch_add(1, Ordering::Relaxed);
         TOTAL_EVENTS.fetch_add(1, Ordering::Relaxed);

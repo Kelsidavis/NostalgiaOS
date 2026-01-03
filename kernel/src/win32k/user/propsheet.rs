@@ -15,7 +15,7 @@
 //! - `public/sdk/inc/prsht.h` - PropertySheet structures and messages
 
 use crate::ke::spinlock::SpinLock;
-use super::super::{UserHandle, HWND, Rect, Point};
+use super::super::{UserHandle, HWND};
 
 // ============================================================================
 // PropertySheet Header Flags (PSH_*)

@@ -538,7 +538,7 @@ pub struct QuotaLimitsEx {
 }
 
 /// Query quota limits for a process
-pub fn ps_query_quota_limits(process: usize) -> QuotaLimits {
+pub fn ps_query_quota_limits(_process: usize) -> QuotaLimits {
     if let Some(block) = get_quota_block(0) {
         QuotaLimits {
             paged_pool_limit: block.paged_pool.get_limit(),

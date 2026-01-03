@@ -450,7 +450,7 @@ pub fn set_sharing(enabled: bool, share_name: &[u8]) -> bool {
 pub fn format_file_size(size: u64, buffer: &mut [u8]) -> usize {
     if size < 1024 {
         // Bytes
-        let mut pos = format_number(size, buffer);
+        let pos = format_number(size, buffer);
         let suffix = b" bytes";
         let copy_len = suffix.len().min(buffer.len() - pos);
         buffer[pos..pos + copy_len].copy_from_slice(&suffix[..copy_len]);
@@ -458,7 +458,7 @@ pub fn format_file_size(size: u64, buffer: &mut [u8]) -> usize {
     } else if size < 1024 * 1024 {
         // KB
         let kb = size / 1024;
-        let mut pos = format_number(kb, buffer);
+        let pos = format_number(kb, buffer);
         let suffix = b" KB";
         let copy_len = suffix.len().min(buffer.len() - pos);
         buffer[pos..pos + copy_len].copy_from_slice(&suffix[..copy_len]);
@@ -466,7 +466,7 @@ pub fn format_file_size(size: u64, buffer: &mut [u8]) -> usize {
     } else if size < 1024 * 1024 * 1024 {
         // MB
         let mb = size / (1024 * 1024);
-        let mut pos = format_number(mb, buffer);
+        let pos = format_number(mb, buffer);
         let suffix = b" MB";
         let copy_len = suffix.len().min(buffer.len() - pos);
         buffer[pos..pos + copy_len].copy_from_slice(&suffix[..copy_len]);
@@ -474,7 +474,7 @@ pub fn format_file_size(size: u64, buffer: &mut [u8]) -> usize {
     } else {
         // GB
         let gb = size / (1024 * 1024 * 1024);
-        let mut pos = format_number(gb, buffer);
+        let pos = format_number(gb, buffer);
         let suffix = b" GB";
         let copy_len = suffix.len().min(buffer.len() - pos);
         buffer[pos..pos + copy_len].copy_from_slice(&suffix[..copy_len]);
@@ -512,7 +512,7 @@ fn format_number(mut n: u64, buffer: &mut [u8]) -> usize {
 
 /// Format multi-file count
 fn format_multi_count(count: usize, buffer: &mut [u8]) -> usize {
-    let mut pos = format_number(count as u64, buffer);
+    let pos = format_number(count as u64, buffer);
     let suffix = b" items selected";
     let copy_len = suffix.len().min(buffer.len() - pos);
     buffer[pos..pos + copy_len].copy_from_slice(&suffix[..copy_len]);

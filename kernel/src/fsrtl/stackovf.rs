@@ -24,7 +24,6 @@
 //! - `FsRtlIsNtstatusExpected` - Check if status is expected stack overflow
 
 use core::sync::atomic::{AtomicU32, AtomicBool, Ordering};
-use crate::ke::queue::KQueue;
 use crate::ke::event::KEvent;
 use crate::ke::spinlock::SpinLock;
 

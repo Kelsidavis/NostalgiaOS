@@ -8,7 +8,7 @@
 //! - Windows Server 2003 shell32 progress dialog
 //! - IProgressDialog COM interface
 
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
 use super::super::{HWND, UserHandle};
 

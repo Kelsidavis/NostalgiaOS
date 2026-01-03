@@ -12,7 +12,6 @@
 //!
 //! Based on Windows Server 2003 base/ntos/ex/nbqueue.c
 
-use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 extern crate alloc;

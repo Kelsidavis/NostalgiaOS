@@ -790,7 +790,7 @@ pub fn dfs_set_target_state(
 
 /// Resolve a DFS path to a target
 pub fn dfs_resolve_path(path: &str) -> Result<String, DfsError> {
-    let mut state = DFS_STATE.lock();
+    let state = DFS_STATE.lock();
 
     if !state.initialized {
         return Err(DfsError::NotInitialized);
@@ -873,7 +873,7 @@ pub fn dfs_resolve_path(path: &str) -> Result<String, DfsError> {
 
 /// Get DFS referral for a path
 pub fn dfs_get_referral(path: &str) -> Result<DfsReferral, DfsError> {
-    let mut state = DFS_STATE.lock();
+    let state = DFS_STATE.lock();
 
     if !state.initialized {
         return Err(DfsError::NotInitialized);

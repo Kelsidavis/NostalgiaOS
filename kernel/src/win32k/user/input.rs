@@ -388,7 +388,7 @@ pub fn set_cursor_pos(x: i32, y: i32) {
 }
 
 /// Find window at point
-fn window_from_point(x: i32, y: i32) -> HWND {
+fn window_from_point(_x: i32, _y: i32) -> HWND {
     // TODO: proper hit testing through window z-order
     // For now, return desktop window
     super::window::get_desktop_window()

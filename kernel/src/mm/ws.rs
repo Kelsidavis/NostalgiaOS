@@ -9,7 +9,6 @@
 //!
 //! Based on Windows Server 2003 base/ntos/mm/wslist.c
 
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use spin::Mutex;
 use crate::ke::list::ListEntry;
 

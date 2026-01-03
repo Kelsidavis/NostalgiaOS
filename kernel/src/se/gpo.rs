@@ -24,7 +24,7 @@
 
 extern crate alloc;
 
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU64, Ordering};
 use crate::ke::SpinLock;
 use alloc::vec::Vec;
 

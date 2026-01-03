@@ -27,7 +27,7 @@
 extern crate alloc;
 
 use crate::ke::SpinLock;
-use core::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
+use core::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 
 // ============================================================================
 // Constants

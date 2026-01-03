@@ -6,7 +6,6 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 use super::ethernet::{MacAddress, EtherType, create_ethernet_frame};
 use super::ip::Ipv4Address;
 use super::udp;

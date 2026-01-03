@@ -16,7 +16,7 @@
 //! - `windows/core/ntuser/kernel/cursor.c`
 //! - `windows/core/ntuser/kernel/icon.c`
 
-use super::super::{HWND, UserHandle, UserObjectType, ColorRef, Rect, Point};
+use super::super::{UserHandle, UserObjectType, ColorRef};
 use super::super::gdi::surface;
 use crate::ke::spinlock::SpinLock;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -533,7 +533,7 @@ fn create_system_icon(id: i32, size: i32, pixels: &[u32]) -> HICON {
     UserHandle::NULL
 }
 
-fn create_system_cursor(id: u32, size: i32, hx: i32, hy: i32, pixels: &[u32]) -> HCURSOR {
+fn create_system_cursor(id: u32, size: i32, _hx: i32, hy: i32, pixels: &[u32]) -> HCURSOR {
     let mut table = ICON_TABLE.lock();
 
     for icon in table.icons.iter_mut() {

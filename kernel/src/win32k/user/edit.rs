@@ -18,7 +18,7 @@
 //! Based on Windows Server 2003:
 //! - `windows/core/ntuser/client/editctl.c`
 
-use super::super::{HWND, UserHandle, Rect, Point};
+use super::super::{HWND, UserHandle};
 use crate::ke::spinlock::SpinLock;
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -582,7 +582,7 @@ pub fn pos_from_char(hwnd: HWND, index: usize) -> (i32, i32) {
 }
 
 /// Get character index from position
-pub fn char_from_pos(hwnd: HWND, x: i32, y: i32) -> usize {
+pub fn char_from_pos(hwnd: HWND, x: i32, _y: i32) -> usize {
     let edits = EDIT_CONTROLS.lock();
 
     for edit in edits.iter() {

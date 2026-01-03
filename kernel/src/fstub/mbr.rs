@@ -259,7 +259,7 @@ pub fn read_mbr_layout(
     let mut partitions = Vec::new();
     let mut partition_number = 1u32;
 
-    for (i, entry) in mbr.partitions.iter().enumerate() {
+    for (_i, entry) in mbr.partitions.iter().enumerate() {
         if entry.is_empty() {
             continue;
         }

@@ -11,8 +11,6 @@ pub mod arbiter;
 pub mod range;
 pub mod ordering;
 
-use alloc::vec::Vec;
-use alloc::string::String;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering as AtomicOrdering};
 use crate::ke::SpinLock;
 

@@ -1045,7 +1045,7 @@ pub unsafe fn get_delay_load_descriptors(image_base: *const u8) -> Option<&'stat
 ///
 /// # Safety
 /// Caller must ensure valid image base.
-pub unsafe fn snapshot_delay_load_iat(image_base: *mut u8, is_64bit: bool) -> bool {
+pub unsafe fn snapshot_delay_load_iat(image_base: *mut u8, _is_64bit: bool) -> bool {
     let descriptors = match get_delay_load_descriptors(image_base as *const u8) {
         Some(d) => d,
         None => return true, // No delay loads is OK
@@ -1487,7 +1487,7 @@ unsafe fn zero_user_pages(
     dest_virt: u64,
     len: usize,
 ) -> Result<(), PeError> {
-    use crate::mm::{PAGE_SIZE, pte::mm_virtual_to_physical};
+    use crate::mm::pte::mm_virtual_to_physical;
 
     let pml4 = (*aspace).pml4_physical;
     let mut remaining = len;
@@ -1579,13 +1579,13 @@ unsafe fn process_relocations_in_place(
             };
 
             match reloc_type {
-                IMAGE_REL_BASED_HIGHLOW => {
+                _IMAGE_REL_BASED_HIGHLOW => {
                     // 32-bit relocation
                     let ptr = target_phys as *mut u32;
                     let old_val = *ptr;
                     *ptr = old_val.wrapping_add(delta as u32);
                 }
-                IMAGE_REL_BASED_DIR64 => {
+                _IMAGE_REL_BASED_DIR64 => {
                     // 64-bit relocation
                     let ptr = target_phys as *mut u64;
                     let old_val = *ptr;
@@ -1876,66 +1876,66 @@ fn resolve_ntoskrnl_export(func_name: &str) -> Option<u64> {
     // Use match for efficient lookup (case-insensitive comparison)
     let addr: Option<unsafe extern "C" fn() -> ()> = match func_name {
         // Memory Manager
-        "MmGetPhysicalAddress" => Some(unsafe { core::mem::transmute(mm_get_physical_address as usize) }),
-        "MmMapIoSpace" => Some(unsafe { core::mem::transmute(mm_map_io_space as usize) }),
-        "MmUnmapIoSpace" => Some(unsafe { core::mem::transmute(mm_unmap_io_space as usize) }),
-        "MmAllocateContiguousMemory" => Some(unsafe { core::mem::transmute(mm_allocate_contiguous as usize) }),
-        "MmFreeContiguousMemory" => Some(unsafe { core::mem::transmute(mm_free_contiguous as usize) }),
+        "MmGetPhysicalAddress" => Some(unsafe { core::mem::transmute(mm_get_physical_address as *const () as usize) }),
+        "MmMapIoSpace" => Some(unsafe { core::mem::transmute(mm_map_io_space as *const () as usize) }),
+        "MmUnmapIoSpace" => Some(unsafe { core::mem::transmute(mm_unmap_io_space as *const () as usize) }),
+        "MmAllocateContiguousMemory" => Some(unsafe { core::mem::transmute(mm_allocate_contiguous as *const () as usize) }),
+        "MmFreeContiguousMemory" => Some(unsafe { core::mem::transmute(mm_free_contiguous as *const () as usize) }),
 
         // Executive Pool
-        "ExAllocatePool" => Some(unsafe { core::mem::transmute(ex_allocate_pool as usize) }),
-        "ExAllocatePoolWithTag" => Some(unsafe { core::mem::transmute(ex_allocate_pool_with_tag as usize) }),
-        "ExFreePool" => Some(unsafe { core::mem::transmute(ex_free_pool as usize) }),
-        "ExFreePoolWithTag" => Some(unsafe { core::mem::transmute(ex_free_pool_with_tag as usize) }),
+        "ExAllocatePool" => Some(unsafe { core::mem::transmute(ex_allocate_pool as *const () as usize) }),
+        "ExAllocatePoolWithTag" => Some(unsafe { core::mem::transmute(ex_allocate_pool_with_tag as *const () as usize) }),
+        "ExFreePool" => Some(unsafe { core::mem::transmute(ex_free_pool as *const () as usize) }),
+        "ExFreePoolWithTag" => Some(unsafe { core::mem::transmute(ex_free_pool_with_tag as *const () as usize) }),
 
         // Kernel Services
-        "KeInitializeSpinLock" => Some(unsafe { core::mem::transmute(ke_initialize_spinlock as usize) }),
-        "KeAcquireSpinLockAtDpcLevel" => Some(unsafe { core::mem::transmute(ke_acquire_spinlock_dpc as usize) }),
-        "KeReleaseSpinLockFromDpcLevel" => Some(unsafe { core::mem::transmute(ke_release_spinlock_dpc as usize) }),
-        "KeInitializeEvent" => Some(unsafe { core::mem::transmute(ke_initialize_event as usize) }),
-        "KeSetEvent" => Some(unsafe { core::mem::transmute(ke_set_event as usize) }),
-        "KeResetEvent" => Some(unsafe { core::mem::transmute(ke_reset_event as usize) }),
-        "KeWaitForSingleObject" => Some(unsafe { core::mem::transmute(ke_wait_for_single_object as usize) }),
-        "KeGetCurrentIrql" => Some(unsafe { core::mem::transmute(ke_get_current_irql as usize) }),
-        "KeRaiseIrql" => Some(unsafe { core::mem::transmute(ke_raise_irql as usize) }),
-        "KeLowerIrql" => Some(unsafe { core::mem::transmute(ke_lower_irql as usize) }),
-        "KeQuerySystemTime" => Some(unsafe { core::mem::transmute(ke_query_system_time as usize) }),
-        "KeDelayExecutionThread" => Some(unsafe { core::mem::transmute(ke_delay_execution as usize) }),
+        "KeInitializeSpinLock" => Some(unsafe { core::mem::transmute(ke_initialize_spinlock as *const () as usize) }),
+        "KeAcquireSpinLockAtDpcLevel" => Some(unsafe { core::mem::transmute(ke_acquire_spinlock_dpc as *const () as usize) }),
+        "KeReleaseSpinLockFromDpcLevel" => Some(unsafe { core::mem::transmute(ke_release_spinlock_dpc as *const () as usize) }),
+        "KeInitializeEvent" => Some(unsafe { core::mem::transmute(ke_initialize_event as *const () as usize) }),
+        "KeSetEvent" => Some(unsafe { core::mem::transmute(ke_set_event as *const () as usize) }),
+        "KeResetEvent" => Some(unsafe { core::mem::transmute(ke_reset_event as *const () as usize) }),
+        "KeWaitForSingleObject" => Some(unsafe { core::mem::transmute(ke_wait_for_single_object as *const () as usize) }),
+        "KeGetCurrentIrql" => Some(unsafe { core::mem::transmute(ke_get_current_irql as *const () as usize) }),
+        "KeRaiseIrql" => Some(unsafe { core::mem::transmute(ke_raise_irql as *const () as usize) }),
+        "KeLowerIrql" => Some(unsafe { core::mem::transmute(ke_lower_irql as *const () as usize) }),
+        "KeQuerySystemTime" => Some(unsafe { core::mem::transmute(ke_query_system_time as *const () as usize) }),
+        "KeDelayExecutionThread" => Some(unsafe { core::mem::transmute(ke_delay_execution as *const () as usize) }),
 
         // I/O Manager
-        "IoCreateDevice" => Some(unsafe { core::mem::transmute(io_create_device as usize) }),
-        "IoDeleteDevice" => Some(unsafe { core::mem::transmute(io_delete_device as usize) }),
-        "IoAttachDevice" => Some(unsafe { core::mem::transmute(io_attach_device as usize) }),
-        "IoDetachDevice" => Some(unsafe { core::mem::transmute(io_detach_device as usize) }),
-        "IoGetCurrentIrpStackLocation" => Some(unsafe { core::mem::transmute(io_get_current_irp_stack as usize) }),
-        "IoCompleteRequest" => Some(unsafe { core::mem::transmute(io_complete_request as usize) }),
-        "IoCallDriver" => Some(unsafe { core::mem::transmute(io_call_driver as usize) }),
-        "IofCompleteRequest" => Some(unsafe { core::mem::transmute(iof_complete_request as usize) }),
-        "IofCallDriver" => Some(unsafe { core::mem::transmute(iof_call_driver as usize) }),
+        "IoCreateDevice" => Some(unsafe { core::mem::transmute(io_create_device as *const () as usize) }),
+        "IoDeleteDevice" => Some(unsafe { core::mem::transmute(io_delete_device as *const () as usize) }),
+        "IoAttachDevice" => Some(unsafe { core::mem::transmute(io_attach_device as *const () as usize) }),
+        "IoDetachDevice" => Some(unsafe { core::mem::transmute(io_detach_device as *const () as usize) }),
+        "IoGetCurrentIrpStackLocation" => Some(unsafe { core::mem::transmute(io_get_current_irp_stack as *const () as usize) }),
+        "IoCompleteRequest" => Some(unsafe { core::mem::transmute(io_complete_request as *const () as usize) }),
+        "IoCallDriver" => Some(unsafe { core::mem::transmute(io_call_driver as *const () as usize) }),
+        "IofCompleteRequest" => Some(unsafe { core::mem::transmute(iof_complete_request as *const () as usize) }),
+        "IofCallDriver" => Some(unsafe { core::mem::transmute(iof_call_driver as *const () as usize) }),
 
         // Runtime Library
-        "RtlCopyMemory" => Some(unsafe { core::mem::transmute(rtl_copy_memory as usize) }),
-        "RtlZeroMemory" => Some(unsafe { core::mem::transmute(rtl_zero_memory as usize) }),
-        "RtlFillMemory" => Some(unsafe { core::mem::transmute(rtl_fill_memory as usize) }),
-        "RtlCompareMemory" => Some(unsafe { core::mem::transmute(rtl_compare_memory as usize) }),
-        "RtlInitUnicodeString" => Some(unsafe { core::mem::transmute(rtl_init_unicode_string as usize) }),
-        "RtlCopyUnicodeString" => Some(unsafe { core::mem::transmute(rtl_copy_unicode_string as usize) }),
-        "RtlCompareUnicodeString" => Some(unsafe { core::mem::transmute(rtl_compare_unicode_string as usize) }),
+        "RtlCopyMemory" => Some(unsafe { core::mem::transmute(rtl_copy_memory as *const () as usize) }),
+        "RtlZeroMemory" => Some(unsafe { core::mem::transmute(rtl_zero_memory as *const () as usize) }),
+        "RtlFillMemory" => Some(unsafe { core::mem::transmute(rtl_fill_memory as *const () as usize) }),
+        "RtlCompareMemory" => Some(unsafe { core::mem::transmute(rtl_compare_memory as *const () as usize) }),
+        "RtlInitUnicodeString" => Some(unsafe { core::mem::transmute(rtl_init_unicode_string as *const () as usize) }),
+        "RtlCopyUnicodeString" => Some(unsafe { core::mem::transmute(rtl_copy_unicode_string as *const () as usize) }),
+        "RtlCompareUnicodeString" => Some(unsafe { core::mem::transmute(rtl_compare_unicode_string as *const () as usize) }),
 
         // Debug Services
-        "DbgPrint" => Some(unsafe { core::mem::transmute(dbg_print as usize) }),
-        "DbgBreakPoint" => Some(unsafe { core::mem::transmute(dbg_break_point as usize) }),
+        "DbgPrint" => Some(unsafe { core::mem::transmute(dbg_print as *const () as usize) }),
+        "DbgBreakPoint" => Some(unsafe { core::mem::transmute(dbg_break_point as *const () as usize) }),
 
         // Object Manager
-        "ObReferenceObject" => Some(unsafe { core::mem::transmute(ob_reference_object as usize) }),
-        "ObDereferenceObject" => Some(unsafe { core::mem::transmute(ob_dereference_object as usize) }),
-        "ObReferenceObjectByHandle" => Some(unsafe { core::mem::transmute(ob_reference_by_handle as usize) }),
+        "ObReferenceObject" => Some(unsafe { core::mem::transmute(ob_reference_object as *const () as usize) }),
+        "ObDereferenceObject" => Some(unsafe { core::mem::transmute(ob_dereference_object as *const () as usize) }),
+        "ObReferenceObjectByHandle" => Some(unsafe { core::mem::transmute(ob_reference_by_handle as *const () as usize) }),
 
         // Process/Thread
-        "PsGetCurrentProcess" => Some(unsafe { core::mem::transmute(ps_get_current_process as usize) }),
-        "PsGetCurrentThread" => Some(unsafe { core::mem::transmute(ps_get_current_thread as usize) }),
-        "PsGetCurrentProcessId" => Some(unsafe { core::mem::transmute(ps_get_current_process_id as usize) }),
-        "PsGetCurrentThreadId" => Some(unsafe { core::mem::transmute(ps_get_current_thread_id as usize) }),
+        "PsGetCurrentProcess" => Some(unsafe { core::mem::transmute(ps_get_current_process as *const () as usize) }),
+        "PsGetCurrentThread" => Some(unsafe { core::mem::transmute(ps_get_current_thread as *const () as usize) }),
+        "PsGetCurrentProcessId" => Some(unsafe { core::mem::transmute(ps_get_current_process_id as *const () as usize) }),
+        "PsGetCurrentThreadId" => Some(unsafe { core::mem::transmute(ps_get_current_thread_id as *const () as usize) }),
 
         _ => None,
     };
@@ -1951,14 +1951,14 @@ fn resolve_ntoskrnl_export(func_name: &str) -> Option<u64> {
 /// Resolve hal.dll exports
 fn resolve_hal_export(func_name: &str) -> Option<u64> {
     let addr: Option<unsafe extern "C" fn() -> ()> = match func_name {
-        "HalGetInterruptVector" => Some(unsafe { core::mem::transmute(hal_get_interrupt_vector as usize) }),
-        "HalTranslateBusAddress" => Some(unsafe { core::mem::transmute(hal_translate_bus_address as usize) }),
-        "READ_PORT_UCHAR" => Some(unsafe { core::mem::transmute(hal_read_port_uchar as usize) }),
-        "READ_PORT_USHORT" => Some(unsafe { core::mem::transmute(hal_read_port_ushort as usize) }),
-        "READ_PORT_ULONG" => Some(unsafe { core::mem::transmute(hal_read_port_ulong as usize) }),
-        "WRITE_PORT_UCHAR" => Some(unsafe { core::mem::transmute(hal_write_port_uchar as usize) }),
-        "WRITE_PORT_USHORT" => Some(unsafe { core::mem::transmute(hal_write_port_ushort as usize) }),
-        "WRITE_PORT_ULONG" => Some(unsafe { core::mem::transmute(hal_write_port_ulong as usize) }),
+        "HalGetInterruptVector" => Some(unsafe { core::mem::transmute(hal_get_interrupt_vector as *const () as usize) }),
+        "HalTranslateBusAddress" => Some(unsafe { core::mem::transmute(hal_translate_bus_address as *const () as usize) }),
+        "READ_PORT_UCHAR" => Some(unsafe { core::mem::transmute(hal_read_port_uchar as *const () as usize) }),
+        "READ_PORT_USHORT" => Some(unsafe { core::mem::transmute(hal_read_port_ushort as *const () as usize) }),
+        "READ_PORT_ULONG" => Some(unsafe { core::mem::transmute(hal_read_port_ulong as *const () as usize) }),
+        "WRITE_PORT_UCHAR" => Some(unsafe { core::mem::transmute(hal_write_port_uchar as *const () as usize) }),
+        "WRITE_PORT_USHORT" => Some(unsafe { core::mem::transmute(hal_write_port_ushort as *const () as usize) }),
+        "WRITE_PORT_ULONG" => Some(unsafe { core::mem::transmute(hal_write_port_ulong as *const () as usize) }),
         _ => None,
     };
 

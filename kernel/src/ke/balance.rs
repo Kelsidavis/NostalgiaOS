@@ -8,7 +8,7 @@
 //!
 //! Based on Windows Server 2003 base/ntos/ke/balmgr.c
 
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use spin::Mutex;
 
 /// Balance set wait object types
@@ -131,7 +131,7 @@ pub fn ke_balance_set_manager() {
     crate::serial_println!("[KE] Balance set manager started");
 
     let mut stack_scan_period = 0u32;
-    let mut stack_scan_time = 0u32;
+    let _stack_scan_time = 0u32;
 
     loop {
         // Wait for timer or working set event

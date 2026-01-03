@@ -10,7 +10,6 @@
 //! - `shell/osshell/security/aclui/` - ACL editor implementation
 //! - `ds/security/azroles/azui/` - Authorization UI
 
-use crate::ke::spinlock::SpinLock;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use super::HWND;
 

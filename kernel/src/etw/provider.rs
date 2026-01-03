@@ -2,7 +2,7 @@
 //!
 //! Manages trace providers that generate events.
 
-use super::{Guid, NtStatus};
+use super::Guid;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 /// Provider handle (opaque)

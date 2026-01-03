@@ -420,7 +420,7 @@ pub fn register_device(
 
 /// Unregister a device
 pub fn unregister_device(device_id: u32) -> Result<(), u32> {
-    let mut state = SHELLHW_STATE.lock();
+    let state = SHELLHW_STATE.lock();
 
     if !state.running {
         return Err(0x80070426);

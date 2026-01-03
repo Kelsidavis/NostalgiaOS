@@ -70,7 +70,7 @@ impl PoolTagEntry {
         }
     }
 
-    pub fn init(&self, tag: u32) {
+    pub fn init(&self, _tag: u32) {
         // Note: We can't modify tag directly as it's not atomic
         // This is called under lock protection
         self.alloc_count.store(0, Ordering::Relaxed);

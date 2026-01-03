@@ -3,7 +3,7 @@
 //! Windows Server 2003 implementation of IAS snap-in (ias.msc).
 //! Provides RADIUS server configuration for network access authentication.
 
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use spin::Mutex as SpinLock;
 use bitflags::bitflags;
 use crate::win32k::user::UserHandle;

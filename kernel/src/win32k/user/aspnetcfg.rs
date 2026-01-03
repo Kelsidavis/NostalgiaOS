@@ -4,7 +4,7 @@
 //! version registration, application configuration, compilation settings,
 //! and session state management.
 
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
 use crate::win32k::user::UserHandle;
 

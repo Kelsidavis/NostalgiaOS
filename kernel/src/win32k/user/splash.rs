@@ -10,7 +10,7 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
-use super::super::{HWND, UserHandle, Rect, ColorRef};
+use super::super::{HWND, UserHandle, ColorRef};
 
 // ============================================================================
 // Constants

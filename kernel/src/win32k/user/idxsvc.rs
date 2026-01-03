@@ -4,7 +4,7 @@
 //! of documents and files. Provides catalog management, scope configuration,
 //! property caching, and query processing.
 
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
 use crate::win32k::user::UserHandle;
 

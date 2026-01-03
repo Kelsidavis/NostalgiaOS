@@ -8,7 +8,7 @@ extern crate alloc;
 pub mod virtqueue;
 pub mod net;
 
-use crate::hal::pci::{PciLocation, pci_read_config_u16, pci_read_config_u32, pci_write_config_u32, config};
+use crate::hal::pci::{PciLocation, pci_read_config_u32, config};
 
 /// VirtIO device status bits
 pub mod device_status {

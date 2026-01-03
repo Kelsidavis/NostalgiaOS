@@ -4,9 +4,8 @@
 
 extern crate alloc;
 
-use super::{VdmServiceClass, VdmState, VdmFlags, V86Context, VDM_TABLE};
+use super::{VdmServiceClass, V86Context};
 use crate::ob::handle::Handle;
-use alloc::vec::Vec;
 
 // ============================================================================
 // VDM Control Structures

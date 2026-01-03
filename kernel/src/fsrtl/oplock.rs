@@ -20,7 +20,6 @@
 //! 5. Waiting IRPs are completed and operations can proceed
 
 use crate::ex::fast_mutex::FastMutex;
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 /// Oplock types
 #[repr(u32)]

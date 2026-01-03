@@ -15,7 +15,6 @@ extern crate alloc;
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use alloc::format;
 use core::sync::atomic::{AtomicU32, Ordering};
 use spin::RwLock;
 
@@ -176,7 +175,7 @@ pub fn ob_create_symbolic_link_ex(name: &str, target: &str, flags: u32) -> i32 {
     }
 
     // Create the new link
-    let mut link = ObjectSymbolicLink::new(target);
+    let link = ObjectSymbolicLink::new(target);
     link.flags.store(flags, Ordering::Relaxed);
 
     // Add to table

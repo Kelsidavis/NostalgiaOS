@@ -325,12 +325,12 @@ pub fn discover(device_index: usize) -> Result<DhcpLease, &'static str> {
     let xid = XID_COUNTER.fetch_add(1, Ordering::SeqCst);
 
     // Build and send DISCOVER
-    let discover_packet = build_discover(mac, xid);
+    let _discover_packet = build_discover(mac, xid);
 
     // Send to broadcast address
     // Note: For broadcast, we need to use the raw ethernet frame
     // For now, we'll send to 255.255.255.255
-    let broadcast = Ipv4Address::new([255, 255, 255, 255]);
+    let _broadcast = Ipv4Address::new([255, 255, 255, 255]);
 
     // We need a special send that doesn't require ARP for broadcast
     // For now, log that we would send

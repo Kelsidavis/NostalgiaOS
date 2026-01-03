@@ -27,7 +27,6 @@
 //! - `NtSetUuidSeed` - Set the UUID node ID
 
 use core::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
-use crate::ex::fast_mutex::FastMutex;
 
 /// UUID structure (128-bit)
 #[repr(C)]

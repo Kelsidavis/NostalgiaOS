@@ -4,8 +4,6 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU32, Ordering};
 
 /// Maximum ranges per list
 pub const MAX_RANGES: usize = 128;
@@ -228,7 +226,7 @@ pub fn rtl_add_range(
     start: u64,
     end: u64,
     attributes: u8,
-    flags: u32,
+    _flags: u32,
     owner: u32,
 ) -> i32 {
     if list.add_range(start, end, attributes, owner) {
@@ -259,7 +257,7 @@ pub fn rtl_find_range(
     maximum: u64,
     length: u32,
     alignment: u32,
-    flags: u32,
+    _flags: u32,
     available_attributes: u8,
 ) -> Option<u64> {
     list.find_available_range(minimum, maximum, length as u64, alignment as u64, available_attributes)
@@ -270,7 +268,7 @@ pub fn rtl_is_range_available(
     list: &RangeList,
     start: u64,
     end: u64,
-    flags: u32,
+    _flags: u32,
     available_attributes: u8,
 ) -> bool {
     list.is_range_available(start, end, available_attributes)
@@ -288,7 +286,7 @@ pub fn rtl_merge_range_lists(
     dest: &mut RangeList,
     src1: &RangeList,
     src2: &RangeList,
-    flags: u32,
+    _flags: u32,
 ) {
     dest.clear();
 

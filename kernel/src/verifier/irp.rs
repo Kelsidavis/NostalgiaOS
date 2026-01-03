@@ -3,11 +3,9 @@
 //! Tracks and validates IRP handling by drivers.
 
 use super::{vf_increment_stat, vf_is_option_enabled, vf_report_violation, VerifierBugcheck, VerifierOptions, VerifierStat};
-use crate::etw::Guid;
 use crate::ke::SpinLock;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU64, Ordering};
 
 extern crate alloc;
 
@@ -373,8 +371,8 @@ pub fn vf_irp_get_stats() -> (u64, u64, usize) {
 /// Validate IRP before dispatch
 pub fn vf_irp_validate_before_call(
     irp_address: usize,
-    device_object: usize,
-    major: u8,
+    _device_object: usize,
+    _major: u8,
 ) -> Result<(), IrpValidationError> {
     if !vf_is_option_enabled(VerifierOptions::POLICE_IRPS) {
         return Ok(());

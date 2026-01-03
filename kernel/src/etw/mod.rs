@@ -388,7 +388,7 @@ pub fn etw_unregister_provider(handle: ProviderHandle) -> Result<(), NtStatus> {
 /// Write a trace event from a provider
 pub fn etw_write_event(
     handle: ProviderHandle,
-    descriptor: &EventDescriptor,
+    _descriptor: &EventDescriptor,
     data: &[u8],
 ) -> Result<(), NtStatus> {
     let state = get_etw_state();

@@ -9,7 +9,6 @@ use super::device::{NetworkDevice, NetworkDeviceInfo, NetworkDeviceState, Device
 use super::ethernet::MacAddress;
 use super::ip::Ipv4Address;
 use alloc::string::String;
-use alloc::vec::Vec;
 use crate::ke::SpinLock;
 
 /// Loopback MAC address (locally administered)

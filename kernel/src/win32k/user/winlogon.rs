@@ -21,7 +21,6 @@ use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
 use super::super::{HWND, Rect, ColorRef};
 use super::super::gdi::{dc, brush};
-use super::{window, message, desktop, WindowStyle, WindowStyleEx};
 
 // ============================================================================
 // Constants
@@ -456,7 +455,7 @@ fn show_locked_dialog() {
     crate::serial_println!("[WINLOGON] Showing locked workstation screen");
 
     let session = SESSION.lock();
-    let username = session.get_username();
+    let _username = session.get_username();
 
     // Paint locked screen
     if let Ok(hdc) = dc::create_display_dc() {

@@ -290,7 +290,7 @@ fn accept_connection(session_idx: usize, socket: TcpSocket) {
         let session = &mut TELNET_SESSIONS[session_idx];
 
         // Get connection info from socket
-        if let Some((_, local_port, remote_port, remote_ip, _, _)) = tcp::get_socket_info(socket) {
+        if let Some((_, _local_port, remote_port, remote_ip, _, _)) = tcp::get_socket_info(socket) {
             session.socket = Some(socket);
             session.remote_ip = remote_ip;
             session.remote_port = remote_port;

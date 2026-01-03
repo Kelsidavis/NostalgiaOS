@@ -30,7 +30,6 @@ pub use resource::*;
 use crate::io::{DeviceObject, DriverObject};
 use crate::ke::SpinLock;
 use alloc::collections::BTreeMap;
-use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -277,10 +276,10 @@ pub struct DeviceRelations {
 
 /// Report a detected (legacy) device
 pub fn io_report_detected_device(
-    driver: &DriverObject,
+    _driver: &DriverObject,
     bus_type: InterfaceType,
     bus_number: u32,
-    slot_number: u32,
+    _slot_number: u32,
     resources: Option<&CmResourceList>,
 ) -> Result<Arc<DeviceNode>, PnpError> {
     let state = get_pnp_state();
@@ -326,7 +325,7 @@ pub fn io_report_detected_device(
 }
 
 /// Invalidate device relations (trigger re-enumeration)
-pub fn io_invalidate_device_relations(device: &DeviceObject, relation_type: DeviceRelationType) {
+pub fn io_invalidate_device_relations(device: &DeviceObject, _relation_type: DeviceRelationType) {
     let state = get_pnp_state();
 
     // Find device node for this device object

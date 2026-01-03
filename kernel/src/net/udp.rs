@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use super::ethernet::{MacAddress, EtherType, create_ethernet_frame};
+use super::ethernet::{EtherType, create_ethernet_frame};
 use super::ip::{Ipv4Header, Ipv4Address, IpProtocol, internet_checksum};
 use alloc::vec::Vec;
 use crate::ke::SpinLock;

@@ -4,7 +4,7 @@
 //! implementation for Usenet news hosting. Provides newsgroup management,
 //! feed configuration, moderation, and article expiration.
 
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
 use crate::win32k::user::UserHandle;
 

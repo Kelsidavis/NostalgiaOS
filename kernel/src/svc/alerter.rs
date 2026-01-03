@@ -380,7 +380,7 @@ pub fn raise_alert(
 
     let mut notified = 0u32;
 
-    for (i, (name, _)) in recipients_to_notify.iter().enumerate() {
+    for (i, (_name, _)) in recipients_to_notify.iter().enumerate() {
         if recipients_valid[i] {
             // Would send via Messenger service
             // For now just count

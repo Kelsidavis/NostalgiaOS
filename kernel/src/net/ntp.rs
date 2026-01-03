@@ -5,7 +5,6 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU64, AtomicBool, Ordering};
 use super::udp;
 use super::ip::Ipv4Address;

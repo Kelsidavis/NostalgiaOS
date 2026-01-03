@@ -657,7 +657,7 @@ pub fn nbt_release_name(name: &str, suffix: u8) -> Result<(), NetbtError> {
 
 /// Resolve a NetBIOS name to IP address
 pub fn nbt_resolve_name(name: &str, suffix: u8) -> Result<[u8; 4], NetbtError> {
-    let mut state = NETBT_STATE.lock();
+    let state = NETBT_STATE.lock();
 
     if !state.initialized {
         return Err(NetbtError::NotInitialized);
@@ -780,8 +780,8 @@ pub fn nbt_send(session_id: u64, data: &[u8]) -> Result<usize, NetbtError> {
 }
 
 /// Receive data on a NetBIOS session
-pub fn nbt_receive(session_id: u64, buffer: &mut [u8]) -> Result<usize, NetbtError> {
-    let mut state = NETBT_STATE.lock();
+pub fn nbt_receive(session_id: u64, _buffer: &mut [u8]) -> Result<usize, NetbtError> {
+    let state = NETBT_STATE.lock();
 
     if !state.initialized {
         return Err(NetbtError::NotInitialized);
@@ -833,13 +833,13 @@ pub fn nbt_disconnect(session_id: u64) -> Result<(), NetbtError> {
 /// Send a NetBIOS datagram
 pub fn nbt_send_datagram(
     source_name: &str,
-    source_suffix: u8,
+    _source_suffix: u8,
     dest_name: &str,
-    dest_suffix: u8,
+    _dest_suffix: u8,
     data: &[u8],
     broadcast: bool,
 ) -> Result<(), NetbtError> {
-    let mut state = NETBT_STATE.lock();
+    let state = NETBT_STATE.lock();
 
     if !state.initialized {
         return Err(NetbtError::NotInitialized);

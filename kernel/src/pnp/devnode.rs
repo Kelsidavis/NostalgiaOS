@@ -214,7 +214,7 @@ impl DeviceNode {
 
     /// Create root device node
     pub fn new_root() -> Self {
-        let mut node = Self::new(DeviceInstancePath::root(), DeviceNodeType::RootEnumerator);
+        let node = Self::new(DeviceInstancePath::root(), DeviceNodeType::RootEnumerator);
         node.flags
             .store(DeviceNodeFlags::ROOT.bits(), Ordering::SeqCst);
         node.state

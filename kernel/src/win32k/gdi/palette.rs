@@ -333,7 +333,7 @@ pub fn create_palette(log_palette: &LogPalette, entries: &[PaletteEntry]) -> HPA
     let mut palettes = PALETTES.lock();
 
     // Find free slot
-    for (i, pal) in palettes.iter_mut().enumerate() {
+    for (_i, pal) in palettes.iter_mut().enumerate() {
         if !pal.in_use {
             let handle_value = NEXT_PALETTE_HANDLE.fetch_add(1, Ordering::Relaxed);
             let handle = GdiHandle(handle_value);

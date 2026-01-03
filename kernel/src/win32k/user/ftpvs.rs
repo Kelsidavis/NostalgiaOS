@@ -4,7 +4,7 @@
 //! Provides virtual server management, directory configuration, user isolation,
 //! and connection management.
 
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
 use crate::win32k::user::UserHandle;
 

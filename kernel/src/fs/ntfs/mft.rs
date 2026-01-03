@@ -47,7 +47,6 @@
 //! | 10    | $UpCase    | Uppercase table                  |
 //! | 11    | $Extend    | Extended metadata directory      |
 
-use core::mem;
 
 /// File record magic signature "FILE"
 pub const FILE_RECORD_MAGIC: u32 = 0x454C4946; // "FILE" in little-endian

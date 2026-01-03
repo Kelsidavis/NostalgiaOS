@@ -37,7 +37,6 @@
 
 extern crate alloc;
 
-use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, AtomicU64, AtomicBool, Ordering};
 use spin::Mutex;
@@ -721,7 +720,7 @@ pub fn rpc_server_unregister_if(if_id: &RpcIfId) -> RpcStatus {
 /// Use protocol sequence endpoint
 pub fn rpc_server_use_protseq_ep(
     protocol_seq: RpcProtocolSequence,
-    max_calls: u32,
+    _max_calls: u32,
     endpoint: &str,
 ) -> Result<u32, RpcStatus> {
     let mut state = RPC_STATE.lock();

@@ -30,9 +30,7 @@ pub use data::*;
 pub use print::*;
 
 use crate::ke::SpinLock;
-use alloc::string::String;
-use alloc::vec::Vec;
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 extern crate alloc;
 

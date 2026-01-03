@@ -1076,7 +1076,7 @@ pub fn remove_scope_option(scope_index: usize, option_code: u8) -> bool {
 // ============================================================================
 
 /// Show DHCP Manager dialog
-pub fn show_dialog(parent: HWND) -> HWND {
+pub fn show_dialog(_parent: HWND) -> HWND {
     let mut state = DHCP_MANAGER.lock();
 
     let handle = UserHandle::from_raw(0xDC01);

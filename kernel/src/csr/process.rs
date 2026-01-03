@@ -7,7 +7,6 @@ extern crate alloc;
 
 use super::{CSR_STATE, CsrApiMessage, CsrProcess, CsrProcessFlags, ShutdownLevel};
 use crate::ob::handle::Handle;
-use alloc::string::String;
 use alloc::vec::Vec;
 
 // ============================================================================
@@ -152,7 +151,7 @@ pub fn handle_exit_process(msg: &mut CsrApiMessage) -> i32 {
 }
 
 /// Handle DOS device definition
-pub fn handle_define_dos_device(msg: &mut CsrApiMessage) -> i32 {
+pub fn handle_define_dos_device(_msg: &mut CsrApiMessage) -> i32 {
     // DOS device management
     crate::serial_println!("[CSR] Define DOS device");
     0

@@ -26,7 +26,7 @@
 //! - Accessing volumes with damaged/unknown file systems
 //! - Direct sector read/write operations
 
-use core::sync::atomic::{AtomicU32, AtomicU64, AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use crate::ke::spinlock::SpinLock;
 
 pub mod vcb;

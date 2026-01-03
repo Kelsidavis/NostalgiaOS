@@ -579,7 +579,7 @@ pub fn ksec_hash_update(handle_id: u64, data: &[u8]) -> Result<(), KsecddError> 
 
 /// Finalize hash and get result
 pub fn ksec_hash_finalize(handle_id: u64, output: &mut [u8]) -> Result<usize, KsecddError> {
-    let mut state = KSECDD_STATE.lock();
+    let state = KSECDD_STATE.lock();
 
     if !state.initialized {
         return Err(KsecddError::NotInitialized);

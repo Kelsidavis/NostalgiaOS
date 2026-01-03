@@ -320,10 +320,10 @@ pub fn unhook_windows_hook_ex(hhook: HHOOK) -> bool {
 /// # Returns
 /// Result from hook procedure
 pub fn call_next_hook_ex(
-    hhook: HHOOK,
-    code: i32,
-    wparam: usize,
-    lparam: isize,
+    _hhook: HHOOK,
+    _code: i32,
+    _wparam: usize,
+    _lparam: isize,
 ) -> isize {
     // In a real implementation, this would:
     // 1. Find the current hook in the chain
@@ -346,7 +346,7 @@ pub fn call_next_hook_ex(
 ///
 /// # Returns
 /// Result from hook chain (0 to allow, non-zero to block)
-pub fn call_hooks(hook_type: i32, code: i32, wparam: usize, lparam: isize) -> isize {
+pub fn call_hooks(hook_type: i32, _code: i32, _wparam: usize, _lparam: isize) -> isize {
     let chain_index = match hook_type_to_index(hook_type) {
         Some(idx) => idx,
         None => return 0,
@@ -409,7 +409,7 @@ pub struct KbdLLHookStruct {
 }
 
 /// Call keyboard hooks
-pub fn call_keyboard_hook(vk_code: u32, scan_code: u32, flags: u32) -> bool {
+pub fn call_keyboard_hook(_vk_code: u32, _scan_code: u32, _flags: u32) -> bool {
     if !hooks_installed(WH_KEYBOARD) && !hooks_installed(WH_KEYBOARD_LL) {
         return false; // Allow key
     }
@@ -456,7 +456,7 @@ pub struct MouseHookStruct {
 }
 
 /// Call mouse hooks
-pub fn call_mouse_hook(msg: u32, x: i32, y: i32, hwnd: HWND) -> bool {
+pub fn call_mouse_hook(_msg: u32, _x: i32, _y: i32, _hwnd: HWND) -> bool {
     if !hooks_installed(WH_MOUSE) && !hooks_installed(WH_MOUSE_LL) {
         return false; // Allow mouse
     }
@@ -481,7 +481,7 @@ pub struct CbtCreateWnd {
 }
 
 /// Call CBT hook
-pub fn call_cbt_hook(code: i32, wparam: usize, lparam: isize) -> bool {
+pub fn call_cbt_hook(_code: i32, _wparam: usize, _lparam: isize) -> bool {
     if !hooks_installed(WH_CBT) {
         return false;
     }
@@ -515,7 +515,7 @@ pub fn call_cbt_setfocus_hook(hwnd: HWND, hwnd_old: HWND) -> bool {
 // ============================================================================
 
 /// Call shell hook
-pub fn call_shell_hook(code: i32, wparam: usize, lparam: isize) -> bool {
+pub fn call_shell_hook(_code: i32, _wparam: usize, _lparam: isize) -> bool {
     if !hooks_installed(WH_SHELL) {
         return false;
     }
@@ -565,7 +565,7 @@ pub struct CwpRetStruct {
 }
 
 /// Call CallWndProc hook (before window procedure)
-pub fn call_wndproc_hook(hwnd: HWND, msg: u32, wparam: usize, lparam: isize) {
+pub fn call_wndproc_hook(_hwnd: HWND, _msg: u32, _wparam: usize, _lparam: isize) {
     if !hooks_installed(WH_CALLWNDPROC) {
         return;
     }
@@ -574,7 +574,7 @@ pub fn call_wndproc_hook(hwnd: HWND, msg: u32, wparam: usize, lparam: isize) {
 }
 
 /// Call CallWndProcRet hook (after window procedure)
-pub fn call_wndproc_ret_hook(hwnd: HWND, msg: u32, wparam: usize, lparam: isize, result: isize) {
+pub fn call_wndproc_ret_hook(_hwnd: HWND, _msg: u32, _wparam: usize, _lparam: isize, _result: isize) {
     if !hooks_installed(WH_CALLWNDPROCRET) {
         return;
     }

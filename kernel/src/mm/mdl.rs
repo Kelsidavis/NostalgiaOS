@@ -45,9 +45,6 @@
 extern crate alloc;
 
 use core::ptr;
-use core::sync::atomic::{AtomicU32, Ordering};
-use alloc::boxed::Box;
-use alloc::vec::Vec;
 use spin::Mutex;
 
 use crate::mm::{PAGE_SIZE, PAGE_SHIFT};

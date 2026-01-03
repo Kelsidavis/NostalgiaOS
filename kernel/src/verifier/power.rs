@@ -7,7 +7,7 @@
 //!
 //! Based on Windows Server 2003 base/ntos/verifier/vfpower.c
 
-use super::{vf_increment_stat, vf_is_option_enabled, vf_report_violation, VerifierBugcheck, VerifierOptions, VerifierStat};
+use super::{vf_is_option_enabled, vf_report_violation, VerifierBugcheck, VerifierOptions};
 use crate::ke::SpinLock;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -354,7 +354,7 @@ pub fn vf_power_get_stats() -> (u64, u64, u64) {
 
 /// Validate power state transition
 pub fn vf_power_validate_transition(
-    device_object: usize,
+    _device_object: usize,
     is_system: bool,
     current_state: u32,
     new_state: u32,

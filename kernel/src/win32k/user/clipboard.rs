@@ -15,7 +15,7 @@
 //! - `windows/core/ntuser/kernel/clip.c`
 //! - `windows/core/ntuser/kernel/clipdata.c`
 
-use super::super::{HWND, UserHandle, ColorRef};
+use super::super::{HWND, UserHandle};
 use crate::ke::spinlock::SpinLock;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 

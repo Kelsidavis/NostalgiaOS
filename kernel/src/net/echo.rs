@@ -7,7 +7,6 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use super::udp;
-use super::tcp;
 use super::ip::Ipv4Address;
 
 /// Echo port (RFC 862)

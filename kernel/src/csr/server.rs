@@ -6,7 +6,6 @@
 extern crate alloc;
 
 use super::{CsrServerDll, CsrApiMessage, CSR_STATE};
-use crate::ob::handle::Handle;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -169,7 +168,7 @@ pub fn dispatch_api(msg: &mut CsrApiMessage) -> i32 {
 }
 
 /// Call server connect routines for new process
-pub fn call_connect_routines(process_id: u32, connection_info: &[u8]) -> i32 {
+pub fn call_connect_routines(process_id: u32, _connection_info: &[u8]) -> i32 {
     let state = CSR_STATE.lock();
 
     for dll in state.server_dlls.iter() {

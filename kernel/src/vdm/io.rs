@@ -7,7 +7,6 @@ extern crate alloc;
 
 use super::VDM_TABLE;
 use crate::ke::spinlock::SpinLock;
-use alloc::collections::BTreeMap;
 
 // ============================================================================
 // I/O Port Constants

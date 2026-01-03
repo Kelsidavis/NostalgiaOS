@@ -9,9 +9,9 @@
 //! - BROWSEINFO structure
 //! - SHBrowseForFolder API
 
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use crate::ke::spinlock::SpinLock;
-use super::super::{HWND, UserHandle, Rect};
+use super::super::{HWND, UserHandle};
 
 // ============================================================================
 // Constants

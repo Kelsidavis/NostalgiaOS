@@ -127,7 +127,7 @@ pub fn rtl_splay(links: *mut SplayLinks) -> *mut SplayLinks {
         return links;
     }
 
-    let mut l = links;
+    let l = links;
 
     unsafe {
         // Keep rotating until L is the root

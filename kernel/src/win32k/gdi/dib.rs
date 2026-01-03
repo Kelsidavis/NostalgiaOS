@@ -515,7 +515,7 @@ pub fn stretch_blt(
     };
 
     // Simple nearest-neighbor scaling
-    let stretch_mode = get_stretch_blt_mode(hdc_dest);
+    let _stretch_mode = get_stretch_blt_mode(hdc_dest);
 
     for dy in 0..h_d {
         let y_d = y_d_start + dy * y_d_step;
@@ -575,7 +575,7 @@ pub fn stretch_blt(
 /// Set DIB bits to a device
 pub fn set_di_bits(
     hdc: GdiHandle,
-    hbitmap: GdiHandle,
+    _hbitmap: GdiHandle,
     start_scan: u32,
     num_scans: u32,
     bits: &[u8],
@@ -648,7 +648,7 @@ pub fn set_di_bits(
 /// Get DIB bits from a device
 pub fn get_di_bits(
     hdc: GdiHandle,
-    hbitmap: GdiHandle,
+    _hbitmap: GdiHandle,
     start_scan: u32,
     num_scans: u32,
     bits: &mut [u8],

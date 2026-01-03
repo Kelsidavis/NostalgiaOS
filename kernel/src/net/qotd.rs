@@ -9,7 +9,6 @@ extern crate alloc;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use super::udp;
-use super::tcp;
 use super::ip::Ipv4Address;
 
 /// QOTD port (RFC 865)

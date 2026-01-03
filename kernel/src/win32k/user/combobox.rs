@@ -14,7 +14,7 @@
 //! Based on Windows Server 2003:
 //! - `shell/comctl32/v6/combo.c`
 
-use super::super::{HWND, UserHandle, Rect, Point};
+use super::super::{HWND, UserHandle, Rect};
 use crate::ke::spinlock::SpinLock;
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -890,7 +890,7 @@ pub fn set_top_index(hwnd: HWND, index: i32) -> i32 {
 // ============================================================================
 
 /// Limit edit text length
-pub fn limit_text(hwnd: HWND, limit: u32) -> bool {
+pub fn limit_text(hwnd: HWND, _limit: u32) -> bool {
     let comboboxes = COMBOBOXES.lock();
 
     for cb in comboboxes.iter() {

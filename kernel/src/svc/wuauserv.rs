@@ -798,7 +798,7 @@ pub fn install_all() -> Result<u32, WuError> {
 
 /// Hide an update (don't show again)
 pub fn hide_update(kb_number: &str) -> Result<(), WuError> {
-    let mut state = WU_STATE.lock();
+    let state = WU_STATE.lock();
 
     for i in 0..state.update_count {
         if state.updates[i].valid && state.updates[i].kb_number_str() == kb_number {
@@ -916,7 +916,7 @@ pub fn process_auto_update() {
     // Auto-install if scheduled
     if auto_mode == AutoUpdateNotify::ScheduledInstall {
         let state = WU_STATE.lock();
-        let scheduled_hour = state.config.scheduled_time;
+        let _scheduled_hour = state.config.scheduled_time;
         // In real implementation, check current time vs scheduled time
         // For now, just indicate capability
         drop(state);

@@ -243,7 +243,7 @@ pub fn vf_pool_free(address: usize, freer: usize) {
 }
 
 /// Check for pool corruptions (called periodically or on demand)
-pub fn vf_pool_check_corruption(address: usize, expected_size: usize) -> bool {
+pub fn vf_pool_check_corruption(_address: usize, _expected_size: usize) -> bool {
     if !vf_is_option_enabled(VerifierOptions::DETECT_POOL_CORRUPTION) {
         return false;
     }

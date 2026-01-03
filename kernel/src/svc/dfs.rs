@@ -657,7 +657,7 @@ pub fn remove_target(
 
 /// Get referral for a DFS path
 pub fn get_referral(
-    dfs_path: &[u8],
+    _dfs_path: &[u8],
 ) -> Result<([DfsReferral; MAX_TARGETS], usize), u32> {
     let state = DFS_STATE.lock();
 

@@ -799,7 +799,7 @@ pub fn set_scavenging(enabled: bool, interval_hours: u32) {
 // ============================================================================
 
 /// Show DNS Manager dialog
-pub fn show_dialog(parent: HWND) -> HWND {
+pub fn show_dialog(_parent: HWND) -> HWND {
     let mut state = DNS_MANAGER.lock();
 
     let handle = UserHandle::from_raw(0xDD01);
@@ -870,7 +870,7 @@ pub fn inc_query_count() {
 // ============================================================================
 
 /// Request zone transfer (AXFR)
-pub fn request_zone_transfer(zone_index: usize, master_ip: [u8; 4]) -> bool {
+pub fn request_zone_transfer(zone_index: usize, _master_ip: [u8; 4]) -> bool {
     let mut state = DNS_MANAGER.lock();
 
     if zone_index < MAX_ZONES && state.zones[zone_index].in_use {

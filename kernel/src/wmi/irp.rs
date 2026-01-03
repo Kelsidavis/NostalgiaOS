@@ -2,7 +2,7 @@
 //!
 //! Implements IRP_MJ_SYSTEM_CONTROL minor functions for WMI.
 
-use super::{WmiError, WnodeFlags};
+use super::WmiError;
 use crate::etw::Guid;
 
 /// WMI IRP minor function codes

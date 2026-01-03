@@ -6,7 +6,6 @@
 extern crate alloc;
 
 use crate::ke::spinlock::SpinLock;
-use crate::ob::handle::Handle;
 use alloc::vec::Vec;
 use alloc::vec;
 use alloc::string::String;
