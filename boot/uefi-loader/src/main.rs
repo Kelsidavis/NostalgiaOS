@@ -152,13 +152,13 @@ fn main() -> Status {
     serial_println!("  Identity mapped first 4GB");
 
     // Map kernel to higher half
-    // Note: BSS section is ~10MB (uninitialized static data for pools/tables)
+    // Note: BSS section can be ~20MB+ (uninitialized static data for pools/tables)
     // We need to map: text + data + bss + stack/heap headroom
-    // Add 16MB extra to cover BSS and leave room for early heap
+    // Add 32MB extra to cover BSS and leave room for early heap
     if let Err(e) = page_tables.map_kernel(
         loaded_kernel.phys_addr,
         loaded_kernel.virt_addr,
-        loaded_kernel.size + 0x100_0000, // Add extra 16MB for BSS/stack/heap
+        loaded_kernel.size + 0x200_0000, // Add extra 32MB for BSS/stack/heap
     ) {
         info!("FATAL: {}", e);
         serial_println!("FATAL: {}", e);

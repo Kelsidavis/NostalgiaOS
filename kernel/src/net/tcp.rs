@@ -298,8 +298,8 @@ impl TcpControlBlock {
             rcv_wnd: TCP_WINDOW_SIZE,
             iss: 0,
             irs: 0,
-            rx_buffer: VecDeque::with_capacity(8192),
-            tx_buffer: VecDeque::with_capacity(8192),
+            rx_buffer: VecDeque::with_capacity(2048),
+            tx_buffer: VecDeque::with_capacity(2048),
             pending: VecDeque::with_capacity(TCP_BACKLOG_SIZE),
             last_activity: 0,
             is_open: false,
@@ -916,7 +916,7 @@ fn handle_tcp_for_socket(
             if !payload.is_empty() && tcp_header.seq_num == tcb.rcv_nxt {
                 // In-order data
                 for &byte in payload {
-                    if tcb.rx_buffer.len() < 8192 {
+                    if tcb.rx_buffer.len() < 2048 {
                         tcb.rx_buffer.push_back(byte);
                     }
                 }

@@ -376,7 +376,8 @@ fn create_admin_shares(state: &mut ServerState) {
     let ipc_slot = 0;
     state.shares[ipc_slot].name[..4].copy_from_slice(b"IPC$");
     state.shares[ipc_slot].share_type = ShareType::Ipc;
-    state.shares[ipc_slot].remark[..16].copy_from_slice(b"Remote IPC     ");
+    let ipc_remark = b"Remote IPC";
+    state.shares[ipc_slot].remark[..ipc_remark.len()].copy_from_slice(ipc_remark);
     state.shares[ipc_slot].hidden = true;
     state.shares[ipc_slot].valid = true;
     state.share_count = 1;

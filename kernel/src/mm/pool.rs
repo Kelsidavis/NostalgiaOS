@@ -108,8 +108,8 @@ mod pool_flags {
 // Simple Block Allocator
 // ============================================================================
 
-/// Size classes for small allocations
-const SIZE_CLASSES: [usize; 8] = [32, 64, 128, 256, 512, 1024, 2048, 4096];
+/// Size classes for small allocations (up to 16KB)
+const SIZE_CLASSES: [usize; 10] = [32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384];
 
 /// Get size class index for a given size
 fn get_size_class(size: usize) -> Option<usize> {
@@ -121,8 +121,8 @@ fn get_size_class(size: usize) -> Option<usize> {
     None
 }
 
-/// Blocks per size class
-const BLOCKS_PER_CLASS: usize = 64;
+/// Blocks per size class (256 blocks = 4x u64 bitmap)
+const BLOCKS_PER_CLASS: usize = 256;
 
 /// Pool arena for a size class
 struct PoolArena {
@@ -132,8 +132,8 @@ struct PoolArena {
     free_head: usize,
     /// Number of free blocks
     free_count: usize,
-    /// Allocation bitmap
-    bitmap: u64,
+    /// Allocation bitmap (4 x u64 = 256 bits)
+    bitmap: [u64; 4],
 }
 
 impl PoolArena {
@@ -142,27 +142,21 @@ impl PoolArena {
             block_size,
             free_head: 0,
             free_count: BLOCKS_PER_CLASS,
-            bitmap: 0, // All zeros = all free
+            bitmap: [0; 4], // All zeros = all free
         }
     }
 
     /// Allocate a block from this arena
     fn allocate(&mut self) -> Option<usize> {
-        if self.bitmap == u64::MAX {
-            return None;
+        for (word_idx, word) in self.bitmap.iter_mut().enumerate() {
+            if *word != u64::MAX {
+                let bit_idx = (!*word).trailing_zeros() as usize;
+                *word |= 1u64 << bit_idx;
+                self.free_count -= 1;
+                return Some(word_idx * 64 + bit_idx);
+            }
         }
-
-        // Find first zero bit
-        let bit_idx = (!self.bitmap).trailing_zeros() as usize;
-        if bit_idx >= BLOCKS_PER_CLASS {
-            return None;
-        }
-
-        // Mark as allocated
-        self.bitmap |= 1u64 << bit_idx;
-        self.free_count -= 1;
-
-        Some(bit_idx)
+        None
     }
 
     /// Free a block back to this arena
@@ -171,12 +165,15 @@ impl PoolArena {
             return false;
         }
 
-        let mask = 1u64 << block_idx;
-        if (self.bitmap & mask) == 0 {
+        let word = block_idx / 64;
+        let bit = block_idx % 64;
+        let mask = 1u64 << bit;
+
+        if (self.bitmap[word] & mask) == 0 {
             return false; // Already free (double-free)
         }
 
-        self.bitmap &= !mask;
+        self.bitmap[word] &= !mask;
         self.free_count += 1;
         true
     }
@@ -186,7 +183,9 @@ impl PoolArena {
         if block_idx >= BLOCKS_PER_CLASS {
             return false;
         }
-        (self.bitmap & (1u64 << block_idx)) != 0
+        let word = block_idx / 64;
+        let bit = block_idx % 64;
+        (self.bitmap[word] & (1u64 << bit)) != 0
     }
 }
 
@@ -194,14 +193,15 @@ impl PoolArena {
 // Pool Storage
 // ============================================================================
 
-/// Pool heap size (256KB for now)
-const POOL_HEAP_SIZE: usize = 256 * 1024;
+/// Pool heap size (10MB to fit all size classes with 256 blocks each)
+/// Required: (32+64+128+256+512+1024+2048+4096+8192+16384) * 256 = 8.2MB
+const POOL_HEAP_SIZE: usize = 10 * 1024 * 1024;
 
 /// Pool heap storage
 static mut POOL_HEAP: [u8; POOL_HEAP_SIZE] = [0; POOL_HEAP_SIZE];
 
 /// Pool arenas for each size class
-static mut POOL_ARENAS: [PoolArena; 8] = [
+static mut POOL_ARENAS: [PoolArena; 10] = [
     PoolArena::new(32),
     PoolArena::new(64),
     PoolArena::new(128),
@@ -210,6 +210,8 @@ static mut POOL_ARENAS: [PoolArena; 8] = [
     PoolArena::new(1024),
     PoolArena::new(2048),
     PoolArena::new(4096),
+    PoolArena::new(8192),
+    PoolArena::new(16384),
 ];
 
 /// Pool lock
