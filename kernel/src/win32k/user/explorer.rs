@@ -278,7 +278,14 @@ pub fn run_message_pump() {
     // Draw initial cursor
     cursor::draw_cursor();
 
+    // Track time for periodic updates
+    let mut tick_count: u64 = 0;
+    let mut last_clock_update: u64 = 0;
+    const CLOCK_UPDATE_INTERVAL: u64 = 5000; // Update clock every ~5000 iterations
+
     while SHELL_RUNNING.load(Ordering::SeqCst) {
+        tick_count = tick_count.wrapping_add(1);
+
         // Check for keyboard input
         if let Some(scancode) = keyboard::try_read_scancode() {
             process_keyboard_input(scancode);
@@ -294,6 +301,12 @@ pub fn run_message_pump() {
 
         // Check for windows that need painting
         process_paint_requests();
+
+        // Periodic clock update
+        if tick_count - last_clock_update >= CLOCK_UPDATE_INTERVAL {
+            last_clock_update = tick_count;
+            update_clock();
+        }
 
         // Small yield to prevent hogging CPU
         for _ in 0..100 {
@@ -684,8 +697,11 @@ fn paint_clock(hdc: HDC, taskbar_y: i32) {
     let mut clock_rect = state.clock_rect;
     clock_rect.top += taskbar_y;
     clock_rect.bottom += taskbar_y;
+    drop(state);
 
-    // Draw sunken area for clock
+    // Draw sunken area for clock (also clears previous text)
+    let bg_brush = brush::create_solid_brush(ColorRef::BUTTON_FACE);
+    super::super::gdi::fill_rect(hdc, &clock_rect, bg_brush);
     super::super::gdi::draw_edge_sunken(hdc, &clock_rect);
 
     // Get current time from RTC
@@ -693,23 +709,45 @@ fn paint_clock(hdc: HDC, taskbar_y: i32) {
     let hour = datetime.hour;
     let minute = datetime.minute;
 
-    // Format time string
-    let time_str = format_time(hour, minute);
+    // Format time (12-hour format)
+    let h12 = if hour == 0 { 12 } else if hour > 12 { hour - 12 } else { hour };
 
-    // Draw time text centered
+    // Build time string characters
+    let c0 = if h12 >= 10 { b'1' } else { b' ' };
+    let c1 = b'0' + (h12 % 10);
+    let c2 = b':';
+    let c3 = b'0' + (minute / 10);
+    let c4 = b'0' + (minute % 10);
+
+    // Draw each character
     dc::set_text_color(hdc, ColorRef::BLACK);
     dc::set_bk_mode(hdc, dc::BkMode::Transparent);
-    let text_x = clock_rect.left + 5;
+
+    let text_x = clock_rect.left + 8;
     let text_y = clock_rect.top + 5;
-    super::super::gdi::text_out(hdc, text_x, text_y, &time_str);
+    let char_width = 8; // Approximate character width
+
+    // Draw time characters individually
+    let chars = [c0, c1, c2, c3, c4];
+    for (i, &ch) in chars.iter().enumerate() {
+        let s = [ch];
+        if let Ok(text) = core::str::from_utf8(&s) {
+            super::super::gdi::text_out(hdc, text_x + (i as i32 * char_width), text_y, text);
+        }
+    }
 }
 
-/// Format time string
-fn format_time(hour: u8, minute: u8) -> &'static str {
-    // Use a static buffer approach
-    // For simplicity, just return placeholder
-    // In a full implementation, we'd use a proper formatting approach
-    "12:00"
+/// Update the clock display
+fn update_clock() {
+    // Get screen dimensions
+    let (_, height) = super::super::gdi::surface::get_primary_dimensions();
+    let taskbar_y = height as i32 - TASKBAR_HEIGHT;
+
+    // Create DC and repaint clock area
+    if let Ok(hdc) = dc::create_display_dc() {
+        paint_clock(hdc, taskbar_y);
+        dc::delete_dc(hdc);
+    }
 }
 
 /// Paint taskbar buttons for open windows
