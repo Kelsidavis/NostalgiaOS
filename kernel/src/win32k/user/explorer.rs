@@ -2195,9 +2195,10 @@ pub fn handle_start_menu_click(x: i32, y: i32) -> bool {
 
         match item {
             5 => {
-                // Run... - for now, create a test window
+                // Run... - disabled for now
                 hide_start_menu();
-                create_test_window();
+                // Commented out: create_test_window();
+                crate::serial_println!("[EXPLORER] Run... menu item clicked (not implemented)");
             }
             6 => {
                 // Shut Down...
