@@ -432,9 +432,12 @@ fn process_mouse_input(event: mouse::MouseEvent) {
                     // Click outside start menu - hide it
                     handle_start_menu_click(x, y);
                 } else if is_double_click {
-                    // Check for double-click on desktop icon
+                    // Check for double-click on desktop icon first
                     if let Some(icon_idx) = get_icon_at_position(x, y) {
                         handle_desktop_icon_double_click(icon_idx);
+                    } else {
+                        // Check for double-click on window caption (maximize/restore)
+                        try_caption_double_click(x, y);
                     }
                 } else {
                     // Check if we clicked on a window caption
@@ -466,6 +469,32 @@ fn process_mouse_input(event: mouse::MouseEvent) {
         if event.buttons.middle != LAST_MIDDLE {
             LAST_MIDDLE = event.buttons.middle;
             input::process_mouse_button(2, event.buttons.middle, x, y);
+        }
+    }
+}
+
+/// Handle double-click on window caption (maximize/restore)
+fn try_caption_double_click(x: i32, y: i32) {
+    // Find window at this position
+    let hwnd = window::window_from_point(Point::new(x, y));
+    if !hwnd.is_valid() {
+        return;
+    }
+
+    // Perform hit test
+    let lparam = ((y as isize) << 16) | ((x as isize) & 0xFFFF);
+    let hit = message::send_message(hwnd, message::WM_NCHITTEST, 0, lparam);
+
+    if hit == message::hittest::HTCAPTION {
+        // Double-click on caption - toggle maximize/restore
+        crate::serial_println!("[EXPLORER] Double-click on caption, toggling maximize");
+
+        if let Some(wnd) = window::get_window(hwnd) {
+            if wnd.maximized {
+                message::send_message(hwnd, message::WM_SYSCOMMAND, message::syscmd::SC_RESTORE, 0);
+            } else {
+                message::send_message(hwnd, message::WM_SYSCOMMAND, message::syscmd::SC_MAXIMIZE, 0);
+            }
         }
     }
 }
@@ -946,13 +975,30 @@ fn handle_taskbar_click(x: i32, y: i32) {
         }
 
         if x >= button.rect.left && x < button.rect.right {
-            // Activate this window
+            // Get window handle and current state
             let hwnd = button.hwnd;
             drop(state);
 
-            input::set_active_window(hwnd);
-            window::show_window(hwnd, ShowCommand::Show);
-            window::set_foreground_window(hwnd);
+            // Check if this window is already active and visible (not minimized)
+            let is_active = input::get_active_window() == hwnd;
+            let is_minimized = window::get_window(hwnd)
+                .map(|w| w.minimized)
+                .unwrap_or(false);
+
+            if is_active && !is_minimized {
+                // Already active and visible - minimize it
+                message::send_message(hwnd, message::WM_SYSCOMMAND, message::syscmd::SC_MINIMIZE, 0);
+            } else {
+                // Activate and restore/show the window
+                if is_minimized {
+                    message::send_message(hwnd, message::WM_SYSCOMMAND, message::syscmd::SC_RESTORE, 0);
+                } else {
+                    window::show_window(hwnd, ShowCommand::Show);
+                }
+                input::set_active_window(hwnd);
+                window::set_foreground_window(hwnd);
+                super::paint::repaint_all();
+            }
 
             // Repaint taskbar to show active state
             paint_taskbar();
