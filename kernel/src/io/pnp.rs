@@ -359,7 +359,7 @@ impl DeviceNode {
 // ============================================================================
 
 /// Maximum device nodes
-pub const MAX_DEVICE_NODES: usize = 256;
+pub const MAX_DEVICE_NODES: usize = 32;
 
 /// Device nodes
 static mut DEVICE_NODES: Option<Vec<DeviceNode>> = None;
@@ -384,7 +384,8 @@ pub fn init() {
     crate::serial_println!("[PNP] Initializing Plug and Play manager...");
 
     unsafe {
-        DEVICE_NODES = Some(Vec::with_capacity(MAX_DEVICE_NODES));
+        // Start with small capacity, will grow as needed
+        DEVICE_NODES = Some(Vec::with_capacity(8));
     }
 
     // Create root device node

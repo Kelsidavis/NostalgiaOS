@@ -231,14 +231,36 @@ impl Write for FramebufferWriter {
 /// Global framebuffer writer
 static WRITER: Mutex<FramebufferWriter> = Mutex::new(FramebufferWriter::new());
 
+/// Flag to disable text output (when graphical desktop is active)
+static DISABLED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 /// Initialize the framebuffer
 pub fn init(boot_info: &BootInfo) {
     WRITER.lock().init(boot_info);
 }
 
+/// Disable framebuffer text output (for graphical desktop)
+pub fn disable() {
+    DISABLED.store(true, core::sync::atomic::Ordering::Release);
+}
+
+/// Re-enable framebuffer text output
+pub fn enable() {
+    DISABLED.store(false, core::sync::atomic::Ordering::Release);
+}
+
+/// Check if framebuffer text is disabled
+pub fn is_disabled() -> bool {
+    DISABLED.load(core::sync::atomic::Ordering::Acquire)
+}
+
 /// Print to the framebuffer
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
+    // Skip if disabled for graphical mode
+    if DISABLED.load(core::sync::atomic::Ordering::Acquire) {
+        return;
+    }
     use core::fmt::Write;
     WRITER.lock().write_fmt(args).unwrap();
 }

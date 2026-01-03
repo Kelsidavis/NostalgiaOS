@@ -550,8 +550,8 @@ fn phase1_init(boot_info: &BootInfo) {
     win32k::init();
     kprintln!("  Win32k graphical subsystem initialized");
 
-    // Test graphical subsystem
-    test_graphics();
+    // Skip graphics demo - desktop will be shown by shell thread
+    // test_graphics();
 
     // Test file system by reading C:\TEST.TXT
     test_file_read();
@@ -604,19 +604,34 @@ fn phase1_init(boot_info: &BootInfo) {
 
 /// Shell thread entry point
 fn shell_thread_entry() {
+    serial_println!("[SHELL] Shell thread entry starting...");
+
     // Wait a moment for other threads to start and print their messages
     for _ in 0..500 {
         unsafe { core::arch::asm!("pause"); }
     }
 
+    serial_println!("[SHELL] Checking Win32k status...");
+
     // Check if graphical shell is enabled (Win32k initialized)
     let stats = win32k::get_stats();
+    serial_println!("[SHELL] Win32k initialized: {}", stats.initialized);
     if stats.initialized {
         serial_println!("[SHELL] Starting graphical desktop shell...");
+
+        // Disable text framebuffer output - graphical desktop takes over
+        framebuffer::disable();
+
+        // Clear and repaint the desktop properly
+        win32k::user::paint::paint_desktop();
+        win32k::user::explorer::paint_desktop();
+        win32k::user::explorer::paint_taskbar();
 
         // Run the Explorer graphical shell message pump
         win32k::user::explorer::run_message_pump();
 
+        // Re-enable text output on exit
+        framebuffer::enable();
         serial_println!("[SHELL] Graphical shell exited, falling back to text shell");
     }
 

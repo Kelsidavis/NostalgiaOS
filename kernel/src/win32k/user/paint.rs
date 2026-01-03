@@ -416,21 +416,34 @@ fn draw_caption_button(surf: &surface::Surface, rect: &Rect, button: CaptionButt
 
 /// Paint the desktop background
 pub fn paint_desktop() {
+    crate::serial_println!("[PAINT] paint_desktop called");
+
     // Get display surface
     let surface_handle = super::super::gdi::surface::get_display_surface();
+    crate::serial_println!("[PAINT] Surface handle: {:?}", surface_handle.is_valid());
+
     let surf = match surface::get_surface(surface_handle) {
         Some(s) => s,
-        None => return,
+        None => {
+            crate::serial_println!("[PAINT] ERROR: No surface found!");
+            return;
+        }
     };
+
+    crate::serial_println!("[PAINT] Surface: {}x{} @ {:#x}", surf.width, surf.height, surf.bits);
 
     // Get desktop color
     let color = super::desktop::get_desktop_color();
+    crate::serial_println!("[PAINT] Desktop color: {:#x}", color.0);
 
     // Get desktop dimensions
     let rect = super::desktop::get_desktop_rect();
+    crate::serial_println!("[PAINT] Desktop rect: ({},{}) - ({},{})",
+        rect.left, rect.top, rect.right, rect.bottom);
 
     // Fill with desktop color
     surf.fill_rect(&rect, color);
+    crate::serial_println!("[PAINT] Desktop painted");
 }
 
 /// Repaint all visible windows

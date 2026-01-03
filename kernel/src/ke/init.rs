@@ -16,9 +16,16 @@ use super::timer;
 /// Timer frequency in Hz (1000 = 1ms tick)
 const TIMER_FREQUENCY_HZ: u32 = 1000;
 
-/// Thread stack pool
-static mut THREAD_STACK_POOL: [[u8; constants::THREAD_STACK_SIZE]; constants::MAX_THREADS] =
-    [[0; constants::THREAD_STACK_SIZE]; constants::MAX_THREADS];
+/// Wrapper type for aligned thread stack
+#[repr(C, align(16))]
+#[derive(Copy, Clone)]
+struct AlignedStack {
+    data: [u8; constants::THREAD_STACK_SIZE],
+}
+
+/// Thread stack pool - properly aligned for x86_64 stack operations
+static mut THREAD_STACK_POOL: [AlignedStack; constants::MAX_THREADS] =
+    [AlignedStack { data: [0; constants::THREAD_STACK_SIZE] }; constants::MAX_THREADS];
 
 /// Next available stack index
 static NEXT_STACK: AtomicU32 = AtomicU32::new(1); // 0 is reserved for idle
@@ -45,8 +52,10 @@ pub unsafe fn init() {
     // Initialize the system process (process 0)
     process::init_system_process();
 
+    crate::serial_println!("[KE] About to call init_idle_thread(0)...");
     // Initialize the idle thread for CPU 0 (BSP)
     idle::init_idle_thread(0);
+    crate::serial_println!("[KE] init_idle_thread(0) returned");
 
     // Initialize and start the APIC timer
     apic::init();
@@ -89,7 +98,7 @@ pub unsafe fn create_thread(
         return None;
     }
 
-    let stack_base = THREAD_STACK_POOL[stack_index].as_mut_ptr()
+    let stack_base = THREAD_STACK_POOL[stack_index].data.as_mut_ptr()
         .add(constants::THREAD_STACK_SIZE);
 
     // Initialize thread structure
@@ -98,7 +107,7 @@ pub unsafe fn create_thread(
     (*thread).base_priority = priority;
     (*thread).quantum = constants::THREAD_QUANTUM;
     (*thread).stack_base = stack_base;
-    (*thread).stack_limit = THREAD_STACK_POOL[stack_index].as_mut_ptr();
+    (*thread).stack_limit = THREAD_STACK_POOL[stack_index].data.as_mut_ptr();
     (*thread).process = process::get_system_process_mut();
     (*thread).state = super::thread::ThreadState::Initialized;
     (*thread).wait_list_entry.init_head();
@@ -133,8 +142,13 @@ pub unsafe fn start_scheduler() {
     crate::kprintln!("[KE] Starting scheduler...");
     crate::serial_println!("[KE] Starting scheduler...");
 
+    // Debug: print GS base
+    let gs_base = crate::arch::x86_64::percpu::get_gs_base();
+    crate::serial_println!("[KE] GS base: {:#x}", gs_base);
+
     // Debug: print ready summary before enabling interrupts
     let prcb = prcb::get_current_prcb();
+    crate::serial_println!("[KE] get_current_prcb() returned: {:?}", prcb as *const _);
     crate::serial_println!("[KE] Ready summary: {:#x}", prcb.ready_summary);
     crate::serial_println!("[KE] Current thread: {:?}", prcb.current_thread);
     crate::serial_println!("[KE] Idle thread: {:?}", prcb.idle_thread);

@@ -147,7 +147,16 @@ pub type KipiBroadcastWorker = unsafe fn(argument: usize) -> usize;
 #[repr(C, align(64))]  // Cache-line aligned
 pub struct KPrcb {
     // ========================================================================
-    // Processor Identification (offset 0x00)
+    // Syscall Support (offset 0x00) - MUST BE FIRST for gs:[0] access
+    // ========================================================================
+
+    /// Kernel stack pointer for syscall handling (accessed via gs:[0])
+    /// After SWAPGS in syscall entry, GS base points to PRCB, and gs:[0]
+    /// gives us the kernel stack to switch to.
+    pub syscall_kernel_stack: u64,
+
+    // ========================================================================
+    // Processor Identification (offset 0x08)
     // ========================================================================
 
     /// Unique bitmask identifying this processor (1 << processor_number)
@@ -279,6 +288,9 @@ impl KPrcb {
         const EMPTY_QUEUE: KSpinLockQueue = KSpinLockQueue::new();
 
         Self {
+            // Syscall support
+            syscall_kernel_stack: 0,
+
             // Identification
             set_member: 0,
             number: 0,

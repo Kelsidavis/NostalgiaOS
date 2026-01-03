@@ -2038,9 +2038,14 @@ pub unsafe fn enter_user_mode(entry_point: u64, user_stack: u64) {
     let rflags: u64 = 0x202;
 
     // Set up kernel GS base for SWAPGS
-    // After SWAPGS, gs:[0] should contain the kernel syscall stack pointer
+    // Get the current PRCB and store the syscall stack pointer in it
     let kernel_syscall_stack = SYSCALL_STACK.data.as_mut_ptr().add(SYSCALL_STACK_SIZE) as u64;
-    wrmsr(0xC000_0102, kernel_syscall_stack); // MSR_KERNEL_GS_BASE
+    let prcb = crate::ke::prcb::get_current_prcb_mut();
+    prcb.syscall_kernel_stack = kernel_syscall_stack;
+
+    // Set KERNEL_GS_BASE to point to PRCB
+    let prcb_addr = prcb as *const _ as u64;
+    wrmsr(0xC000_0102, prcb_addr); // MSR_KERNEL_GS_BASE
 
     // Use IRETQ to switch to ring 3
     // Stack layout for IRETQ: SS, RSP, RFLAGS, CS, RIP
@@ -2122,15 +2127,18 @@ pub unsafe extern "C" fn user_mode_test_stub() {
 pub unsafe fn run_user_code(entry_virt: u64, stack_virt: u64) -> isize {
     // Set up kernel GS base for SWAPGS
     // When user code executes SYSCALL, SWAPGS will swap GS base to this value
-    // Then gs:[0] will read the kernel stack pointer from SYSCALL_PERCPU.kernel_stack
+    // After SWAPGS, gs:[0] will read PRCB.syscall_kernel_stack
     let kernel_syscall_stack = SYSCALL_STACK.data.as_mut_ptr().add(SYSCALL_STACK_SIZE) as u64;
 
-    // Store the stack pointer in the per-CPU structure
-    SYSCALL_PERCPU.kernel_stack = kernel_syscall_stack;
+    // Get the current PRCB and store the syscall stack pointer in it
+    let prcb = crate::ke::prcb::get_current_prcb_mut();
+    prcb.syscall_kernel_stack = kernel_syscall_stack;
 
-    // Set GS base to point to the per-CPU structure
-    let percpu_addr = &SYSCALL_PERCPU as *const _ as u64;
-    wrmsr(0xC000_0102, percpu_addr); // MSR_KERNEL_GS_BASE
+    // Set KERNEL_GS_BASE to point to PRCB
+    // After SWAPGS in syscall entry, GS_BASE will point to PRCB
+    // This allows get_current_prcb() to work correctly during syscall handling
+    let prcb_addr = prcb as *const _ as u64;
+    wrmsr(0xC000_0102, prcb_addr); // MSR_KERNEL_GS_BASE
 
     let user_cr3 = crate::mm::get_user_cr3();
 
@@ -2180,7 +2188,11 @@ pub unsafe fn run_user_code(entry_virt: u64, stack_virt: u64) -> isize {
         "iretq",
 
         // Return point - NtTerminateThread will restore context and return here
+        // At this point, GS_BASE = SYSCALL_PERCPU (from SWAPGS in syscall entry)
+        // KERNEL_GS_BASE = PRCB (from SWAPGS in syscall entry)
+        // We need to swap them back so GS_BASE points to PRCB
         "2:",
+        "swapgs",
 
         ctx = in(reg) &KERNEL_CONTEXT as *const _ as u64,
         user_cr3 = in(reg) user_cr3,

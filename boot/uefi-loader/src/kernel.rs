@@ -18,7 +18,7 @@ pub const KERNEL_PHYSICAL_BASE: u64 = 0x100_0000;
 pub const KERNEL_VIRTUAL_BASE: u64 = 0xFFFF_FFFF_8000_0000;
 
 /// Maximum kernel size (64 MB)
-pub const MAX_KERNEL_SIZE: usize = 64 * 1024 * 1024;
+pub const MAX_KERNEL_SIZE: usize = 128 * 1024 * 1024;
 
 /// Loaded kernel information
 pub struct LoadedKernel {
@@ -110,21 +110,114 @@ pub fn load_kernel() -> Result<LoadedKernel, &'static str> {
     let _ = kernel_phys; // Keep allocation alive
     info!("Kernel loaded at physical address: {:#x}", kernel_phys_addr);
 
-    // Copy kernel to allocated memory
-    unsafe {
-        let dest = kernel_phys_addr as *mut u8;
-        core::ptr::copy_nonoverlapping(kernel_data.as_ptr(), dest, kernel_size);
+    // Parse ELF header to get entry point and load segments properly
+    let elf_magic = &kernel_data[0..4];
+    if elf_magic != [0x7f, b'E', b'L', b'F'] {
+        return Err("Not a valid ELF file");
     }
 
-    // For a flat binary, entry point is at the start
-    // For ELF, we would parse the header here
-    let entry_offset = 0;
+    // Check it's ELF64
+    if kernel_data[4] != 2 {
+        return Err("Not a 64-bit ELF file");
+    }
+
+    // Get entry point (e_entry at offset 24, 8 bytes, little-endian)
+    let e_entry = u64::from_le_bytes(kernel_data[24..32].try_into().unwrap());
+    info!("ELF entry point: {:#x}", e_entry);
+
+    // Get program header info
+    let e_phoff = u64::from_le_bytes(kernel_data[32..40].try_into().unwrap()) as usize;
+    let e_phentsize = u16::from_le_bytes(kernel_data[54..56].try_into().unwrap()) as usize;
+    let e_phnum = u16::from_le_bytes(kernel_data[56..58].try_into().unwrap()) as usize;
+
+    // Find the lowest physical address from LOAD segments
+    let mut load_base_virt: u64 = u64::MAX;
+    let mut load_base_phys: u64 = u64::MAX;
+
+    for i in 0..e_phnum {
+        let ph_start = e_phoff + i * e_phentsize;
+        let p_type = u32::from_le_bytes(kernel_data[ph_start..ph_start+4].try_into().unwrap());
+
+        // PT_LOAD = 1
+        if p_type == 1 {
+            let p_offset = u64::from_le_bytes(kernel_data[ph_start+8..ph_start+16].try_into().unwrap());
+            let p_vaddr = u64::from_le_bytes(kernel_data[ph_start+16..ph_start+24].try_into().unwrap());
+            let p_paddr = u64::from_le_bytes(kernel_data[ph_start+24..ph_start+32].try_into().unwrap());
+            let p_filesz = u64::from_le_bytes(kernel_data[ph_start+32..ph_start+40].try_into().unwrap());
+            let p_memsz = u64::from_le_bytes(kernel_data[ph_start+40..ph_start+48].try_into().unwrap());
+
+            info!("LOAD segment: virt={:#x} phys={:#x} offset={:#x} filesz={:#x} memsz={:#x}",
+                p_vaddr, p_paddr, p_offset, p_filesz, p_memsz);
+
+            if p_vaddr < load_base_virt {
+                load_base_virt = p_vaddr;
+            }
+            if p_paddr < load_base_phys && p_paddr > 0 {
+                load_base_phys = p_paddr;
+            }
+        }
+    }
+
+    // Load each ELF segment to its proper physical address
+    let mut max_phys_end: u64 = 0;
+    let mut min_phys_start: u64 = u64::MAX;
+
+    for i in 0..e_phnum {
+        let ph_start = e_phoff + i * e_phentsize;
+        let p_type = u32::from_le_bytes(kernel_data[ph_start..ph_start+4].try_into().unwrap());
+
+        // PT_LOAD = 1
+        if p_type == 1 {
+            let p_offset = u64::from_le_bytes(kernel_data[ph_start+8..ph_start+16].try_into().unwrap()) as usize;
+            let _p_vaddr = u64::from_le_bytes(kernel_data[ph_start+16..ph_start+24].try_into().unwrap());
+            let p_paddr = u64::from_le_bytes(kernel_data[ph_start+24..ph_start+32].try_into().unwrap());
+            let p_filesz = u64::from_le_bytes(kernel_data[ph_start+32..ph_start+40].try_into().unwrap()) as usize;
+            let p_memsz = u64::from_le_bytes(kernel_data[ph_start+40..ph_start+48].try_into().unwrap());
+
+            // Track physical memory range
+            if p_paddr < min_phys_start && p_paddr > 0 {
+                min_phys_start = p_paddr;
+            }
+            let phys_end = p_paddr + p_memsz;
+            if phys_end > max_phys_end {
+                max_phys_end = phys_end;
+            }
+
+            // Copy segment data from file to physical memory
+            if p_filesz > 0 {
+                info!("Loading segment to phys {:#x}, {} bytes from offset {:#x}",
+                    p_paddr, p_filesz, p_offset);
+                unsafe {
+                    let dest = p_paddr as *mut u8;
+                    let src = &kernel_data[p_offset..p_offset + p_filesz];
+                    core::ptr::copy_nonoverlapping(src.as_ptr(), dest, p_filesz);
+                }
+            }
+
+            // Zero out any extra memory (BSS)
+            if p_memsz as usize > p_filesz {
+                let bss_start = p_paddr + p_filesz as u64;
+                let bss_size = p_memsz as usize - p_filesz;
+                info!("Zeroing BSS at phys {:#x}, {} bytes", bss_start, bss_size);
+                unsafe {
+                    let dest = bss_start as *mut u8;
+                    core::ptr::write_bytes(dest, 0, bss_size);
+                }
+            }
+        }
+    }
+
+    // The entry point is the virtual address from the ELF
+    // We need to calculate the physical entry point
+    let entry_phys = e_entry - KERNEL_VIRTUAL_BASE + min_phys_start;
+    info!("Kernel loaded from phys {:#x} to {:#x}", min_phys_start, max_phys_end);
+    info!("Entry point: virt={:#x} phys={:#x}", e_entry, entry_phys);
 
     Ok(LoadedKernel {
-        phys_addr: kernel_phys_addr,
+        phys_addr: min_phys_start,
         virt_addr: KERNEL_VIRTUAL_BASE,
-        size: kernel_size as u64,
-        entry_offset,
+        size: max_phys_end - min_phys_start,
+        entry_offset: entry_phys - min_phys_start,
     })
 }
 

@@ -31,12 +31,16 @@ static mut IDLE_STACKS: [IdleStack; MAX_CPUS] = [IdleStack {
 /// # Safety
 /// Must be called once per CPU during initialization
 pub unsafe fn init_idle_thread(cpu_id: usize) {
+    crate::serial_println!("[IDLE] Initializing idle thread for CPU {}", cpu_id);
+
     if cpu_id >= MAX_CPUS {
+        crate::serial_println!("[IDLE] ERROR: cpu_id {} >= MAX_CPUS", cpu_id);
         return;
     }
 
     // Get stack base (top of stack - stacks grow downward)
     let stack_base = IDLE_STACKS[cpu_id].data.as_mut_ptr().add(constants::THREAD_STACK_SIZE);
+    crate::serial_println!("[IDLE] Stack base: {:?}", stack_base);
 
     // Initialize idle thread structure
     IDLE_THREADS[cpu_id].thread_id = cpu_id as u32; // Each CPU's idle thread has unique ID
@@ -65,9 +69,15 @@ pub unsafe fn init_idle_thread(cpu_id: usize) {
     );
 
     // Set as idle thread and current thread in this CPU's PRCB
+    let idle_ptr = &mut IDLE_THREADS[cpu_id] as *mut KThread;
+    crate::serial_println!("[IDLE] Setting PRCB idle/current thread to {:?}", idle_ptr);
+
     if let Some(prcb) = prcb::get_prcb_mut(cpu_id) {
-        prcb.idle_thread = &mut IDLE_THREADS[cpu_id] as *mut KThread;
-        prcb.current_thread = &mut IDLE_THREADS[cpu_id] as *mut KThread;
+        prcb.idle_thread = idle_ptr;
+        prcb.current_thread = idle_ptr;
+        crate::serial_println!("[IDLE] PRCB[{}] idle_thread set to {:?}", cpu_id, prcb.idle_thread);
+    } else {
+        crate::serial_println!("[IDLE] ERROR: get_prcb_mut({}) returned None!", cpu_id);
     }
 }
 

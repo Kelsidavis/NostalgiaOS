@@ -297,8 +297,8 @@ impl UserContext {
 /// This must match the actual offset in the KThread struct!
 /// Layout: state(1) + priority(1) + base_priority(1) + quantum(1) +
 ///         priority_decrement(1) + saturation(1) + padding(2) +
-///         wait_list_entry(16) + thread_list_entry(16) = 40
-const KTHREAD_KERNEL_STACK_OFFSET: usize = 40;
+///         affinity(8) + wait_list_entry(16) + thread_list_entry(16) = 48
+const KTHREAD_KERNEL_STACK_OFFSET: usize = 48;
 
 /// Swap context from old thread to new thread
 ///
