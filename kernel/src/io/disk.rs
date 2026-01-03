@@ -262,13 +262,29 @@ static mut MBR_BUFFER: [u8; SECTOR_SIZE] = [0; SECTOR_SIZE];
 fn read_mbr(disk_index: u8) -> Option<Mbr> {
     unsafe {
         if read_sectors(disk_index, 0, 1, &mut MBR_BUFFER) != BlockStatus::Success {
+            crate::serial_println!("[DISK] Disk {}: Failed to read MBR", disk_index);
             return None;
         }
 
         let mbr = core::ptr::read(MBR_BUFFER.as_ptr() as *const Mbr);
+
+        // Debug: print signature
+        let sig = core::ptr::read_unaligned(core::ptr::addr_of!(mbr.signature));
+
         if mbr.is_valid() {
+            // Debug: print partition info
+            for (i, entry) in mbr.partitions.iter().enumerate() {
+                let ptype = entry.partition_type;
+                let start = entry.get_start_lba();
+                let size = entry.get_total_sectors();
+                if ptype != 0 || start != 0 || size != 0 {
+                    crate::serial_println!("[DISK] Disk {}: MBR part {} type={:#x} start={} size={}",
+                        disk_index, i, ptype, start, size);
+                }
+            }
             Some(mbr)
         } else {
+            crate::serial_println!("[DISK] Disk {}: Invalid MBR (sig={:#x})", disk_index, sig);
             None
         }
     }
