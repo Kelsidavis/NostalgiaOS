@@ -292,29 +292,89 @@ fn draw_caption(hdc: HDC, wnd: &window::Window, metrics: &FrameMetrics) {
 }
 
 /// Draw caption buttons (minimize, maximize, close)
-fn draw_caption_buttons(_hdc: HDC, caption_rect: &Rect, metrics: &FrameMetrics) {
+fn draw_caption_buttons(hdc: HDC, caption_rect: &Rect, metrics: &FrameMetrics) {
     let button_width = 16;
     let button_height = 14;
     let button_y = caption_rect.top + (caption_rect.height() - button_height) / 2;
     let mut button_x = caption_rect.right - button_width - 2;
 
+    // Get surface for drawing
+    let surface_handle = dc::get_dc_surface(hdc);
+    let surf = match surface::get_surface(surface_handle) {
+        Some(s) => s,
+        None => return,
+    };
+
     // Close button (always present with system menu)
     if metrics.has_sys_menu {
-        // Draw close button
-        // TODO: draw X glyph
+        let btn_rect = Rect::new(button_x, button_y, button_x + button_width, button_y + button_height);
+        draw_caption_button(&surf, &btn_rect, CaptionButton::Close);
         button_x -= button_width + 2;
     }
 
     // Maximize button
     if metrics.has_max_box {
-        // TODO: draw maximize glyph
+        let btn_rect = Rect::new(button_x, button_y, button_x + button_width, button_y + button_height);
+        draw_caption_button(&surf, &btn_rect, CaptionButton::Maximize);
         button_x -= button_width;
     }
 
     // Minimize button
     if metrics.has_min_box {
-        // TODO: draw minimize glyph
-        let _ = button_x; // suppress warning
+        let btn_rect = Rect::new(button_x, button_y, button_x + button_width, button_y + button_height);
+        draw_caption_button(&surf, &btn_rect, CaptionButton::Minimize);
+    }
+}
+
+/// Caption button type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptionButton {
+    Close,
+    Maximize,
+    Minimize,
+}
+
+/// Draw a caption button with 3D effect and glyph
+fn draw_caption_button(surf: &surface::Surface, rect: &Rect, button: CaptionButton) {
+    // Draw button face (raised 3D)
+    surf.fill_rect(rect, ColorRef::BUTTON_FACE);
+
+    // Top and left highlight (light)
+    surf.hline(rect.left, rect.right - 1, rect.top, ColorRef::BUTTON_HIGHLIGHT);
+    surf.vline(rect.left, rect.top, rect.bottom - 1, ColorRef::BUTTON_HIGHLIGHT);
+
+    // Bottom and right shadow (dark)
+    surf.hline(rect.left, rect.right, rect.bottom - 1, ColorRef::BUTTON_SHADOW);
+    surf.vline(rect.right - 1, rect.top, rect.bottom, ColorRef::BUTTON_SHADOW);
+
+    // Draw glyph in center
+    let cx = rect.left + rect.width() / 2;
+    let cy = rect.top + rect.height() / 2;
+    let glyph_color = ColorRef::BLACK;
+
+    match button {
+        CaptionButton::Close => {
+            // Draw X glyph (5x5)
+            for i in 0..5 {
+                surf.set_pixel(cx - 2 + i, cy - 2 + i, glyph_color);
+                surf.set_pixel(cx + 2 - i, cy - 2 + i, glyph_color);
+            }
+        }
+        CaptionButton::Maximize => {
+            // Draw maximize box (6x6 outline)
+            let bx = cx - 3;
+            let by = cy - 3;
+            surf.hline(bx, bx + 6, by, glyph_color);
+            surf.hline(bx, bx + 6, by + 1, glyph_color); // Thick top
+            surf.hline(bx, bx + 6, by + 5, glyph_color);
+            surf.vline(bx, by, by + 6, glyph_color);
+            surf.vline(bx + 5, by, by + 6, glyph_color);
+        }
+        CaptionButton::Minimize => {
+            // Draw minimize line (underscore)
+            surf.hline(cx - 3, cx + 3, cy + 2, glyph_color);
+            surf.hline(cx - 3, cx + 3, cy + 3, glyph_color);
+        }
     }
 }
 

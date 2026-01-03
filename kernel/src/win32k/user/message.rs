@@ -105,6 +105,60 @@ pub const WM_USER: u32 = 0x0400;
 pub const WM_APP: u32 = 0x8000;
 
 // ============================================================================
+// Hit Test Results
+// ============================================================================
+
+/// Hit test result values for WM_NCHITTEST
+pub mod hittest {
+    pub const HTERROR: isize = -2;
+    pub const HTTRANSPARENT: isize = -1;
+    pub const HTNOWHERE: isize = 0;
+    pub const HTCLIENT: isize = 1;
+    pub const HTCAPTION: isize = 2;
+    pub const HTSYSMENU: isize = 3;
+    pub const HTGROWBOX: isize = 4;
+    pub const HTSIZE: isize = 4;
+    pub const HTMENU: isize = 5;
+    pub const HTHSCROLL: isize = 6;
+    pub const HTVSCROLL: isize = 7;
+    pub const HTMINBUTTON: isize = 8;
+    pub const HTMAXBUTTON: isize = 9;
+    pub const HTLEFT: isize = 10;
+    pub const HTRIGHT: isize = 11;
+    pub const HTTOP: isize = 12;
+    pub const HTTOPLEFT: isize = 13;
+    pub const HTTOPRIGHT: isize = 14;
+    pub const HTBOTTOM: isize = 15;
+    pub const HTBOTTOMLEFT: isize = 16;
+    pub const HTBOTTOMRIGHT: isize = 17;
+    pub const HTBORDER: isize = 18;
+    pub const HTCLOSE: isize = 20;
+    pub const HTHELP: isize = 21;
+}
+
+// ============================================================================
+// System Commands
+// ============================================================================
+
+/// System command values for WM_SYSCOMMAND
+pub mod syscmd {
+    pub const SC_SIZE: usize = 0xF000;
+    pub const SC_MOVE: usize = 0xF010;
+    pub const SC_MINIMIZE: usize = 0xF020;
+    pub const SC_MAXIMIZE: usize = 0xF030;
+    pub const SC_NEXTWINDOW: usize = 0xF040;
+    pub const SC_PREVWINDOW: usize = 0xF050;
+    pub const SC_CLOSE: usize = 0xF060;
+    pub const SC_VSCROLL: usize = 0xF070;
+    pub const SC_HSCROLL: usize = 0xF080;
+    pub const SC_MOUSEMENU: usize = 0xF090;
+    pub const SC_KEYMENU: usize = 0xF100;
+    pub const SC_RESTORE: usize = 0xF120;
+    pub const SC_TASKLIST: usize = 0xF130;
+    pub const SC_SCREENSAVE: usize = 0xF140;
+}
+
+// ============================================================================
 // Message Structure
 // ============================================================================
 
@@ -400,7 +454,9 @@ fn call_window_proc(hwnd: HWND, msg: &Message) -> isize {
         }
         WM_NCHITTEST => {
             // Non-client hit test
-            1 // HTCLIENT
+            let x = (msg.lparam & 0xFFFF) as i16 as i32;
+            let y = ((msg.lparam >> 16) & 0xFFFF) as i16 as i32;
+            nc_hit_test(hwnd, x, y)
         }
         WM_SETTEXT => {
             // Set window text
@@ -430,4 +486,119 @@ pub fn post_quit_message(exit_code: i32) {
 pub fn has_messages(hwnd: HWND) -> bool {
     let queue = MESSAGE_QUEUE.lock();
     queue.peek_for_window(hwnd).is_some()
+}
+
+// ============================================================================
+// Non-Client Hit Testing
+// ============================================================================
+
+/// Perform non-client hit test
+fn nc_hit_test(hwnd: HWND, x: i32, y: i32) -> isize {
+    let wnd = match super::window::get_window(hwnd) {
+        Some(w) => w,
+        None => return hittest::HTNOWHERE,
+    };
+
+    // Check if point is in window at all
+    if x < wnd.rect.left || x >= wnd.rect.right ||
+       y < wnd.rect.top || y >= wnd.rect.bottom {
+        return hittest::HTNOWHERE;
+    }
+
+    let metrics = wnd.get_frame_metrics();
+    let border = metrics.border_width;
+    let caption_height = metrics.caption_height;
+
+    // Relative coordinates within window
+    let rel_x = x - wnd.rect.left;
+    let rel_y = y - wnd.rect.top;
+    let width = wnd.rect.width();
+    let height = wnd.rect.height();
+
+    // Check resize borders for resizable windows
+    if wnd.style.contains(super::WindowStyle::THICKFRAME) {
+        // Corner detection (larger hit area)
+        let corner_size = border + 4;
+
+        // Bottom-right corner
+        if rel_x >= width - corner_size && rel_y >= height - corner_size {
+            return hittest::HTBOTTOMRIGHT;
+        }
+        // Bottom-left corner
+        if rel_x < corner_size && rel_y >= height - corner_size {
+            return hittest::HTBOTTOMLEFT;
+        }
+        // Top-right corner
+        if rel_x >= width - corner_size && rel_y < corner_size {
+            return hittest::HTTOPRIGHT;
+        }
+        // Top-left corner
+        if rel_x < corner_size && rel_y < corner_size {
+            return hittest::HTTOPLEFT;
+        }
+
+        // Edges
+        if rel_y < border {
+            return hittest::HTTOP;
+        }
+        if rel_y >= height - border {
+            return hittest::HTBOTTOM;
+        }
+        if rel_x < border {
+            return hittest::HTLEFT;
+        }
+        if rel_x >= width - border {
+            return hittest::HTRIGHT;
+        }
+    }
+
+    // Check caption area
+    if wnd.has_caption() && rel_y >= border && rel_y < border + caption_height {
+        // Caption buttons are on the right side
+        let button_width = 16;
+        let button_margin = 2;
+        let mut button_right = width - border - button_margin;
+
+        // Close button (rightmost)
+        if metrics.has_sys_menu {
+            if rel_x >= button_right - button_width && rel_x < button_right {
+                return hittest::HTCLOSE;
+            }
+            button_right -= button_width + 2;
+        }
+
+        // Maximize button
+        if metrics.has_max_box {
+            if rel_x >= button_right - button_width && rel_x < button_right {
+                return hittest::HTMAXBUTTON;
+            }
+            button_right -= button_width;
+        }
+
+        // Minimize button
+        if metrics.has_min_box {
+            if rel_x >= button_right - button_width && rel_x < button_right {
+                return hittest::HTMINBUTTON;
+            }
+        }
+
+        // System menu icon area (leftmost)
+        if metrics.has_sys_menu && rel_x >= border && rel_x < border + 16 {
+            return hittest::HTSYSMENU;
+        }
+
+        // Rest of caption is for moving
+        return hittest::HTCAPTION;
+    }
+
+    // Check border area
+    if wnd.has_border() {
+        if rel_y < border || rel_y >= height - border ||
+           rel_x < border || rel_x >= width - border {
+            return hittest::HTBORDER;
+        }
+    }
+
+    // Must be client area
+    hittest::HTCLIENT
 }
