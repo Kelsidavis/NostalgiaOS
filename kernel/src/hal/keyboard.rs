@@ -70,8 +70,11 @@ impl KeyboardBuffer {
     }
 }
 
-/// Global keyboard buffer
+/// Global keyboard buffer (for ASCII characters)
 static KEYBOARD_BUFFER: SpinLock<KeyboardBuffer> = SpinLock::new(KeyboardBuffer::new());
+
+/// Scancode buffer (for raw scancodes including key up/down)
+static SCANCODE_BUFFER: SpinLock<KeyboardBuffer> = SpinLock::new(KeyboardBuffer::new());
 
 /// Keyboard state
 static mut SHIFT_PRESSED: bool = false;
@@ -191,6 +194,13 @@ pub fn handle_interrupt() {
 
 /// Process a scancode
 fn process_scancode(scancode: u8) {
+    // Add raw scancode to scancode buffer for graphical shell use
+    // This includes key up events (high bit set)
+    {
+        let mut buf = SCANCODE_BUFFER.lock();
+        buf.push(scancode);
+    }
+
     unsafe {
         // Check for extended scancode prefix
         if scancode == 0xE0 {
@@ -341,6 +351,13 @@ pub fn read_char() -> u8 {
 /// Try to read a character from the keyboard buffer (non-blocking)
 pub fn try_read_char() -> Option<u8> {
     let mut buf = KEYBOARD_BUFFER.lock();
+    buf.pop()
+}
+
+/// Try to read a raw scancode (non-blocking)
+/// Returns the scancode including key up bit (0x80 for release)
+pub fn try_read_scancode() -> Option<u8> {
+    let mut buf = SCANCODE_BUFFER.lock();
     buf.pop()
 }
 

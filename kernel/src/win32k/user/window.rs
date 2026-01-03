@@ -106,6 +106,9 @@ pub struct Window {
 
     /// Valid flag
     pub valid: bool,
+
+    /// Is desktop window
+    pub is_desktop: bool,
 }
 
 impl Default for Window {
@@ -134,6 +137,7 @@ impl Default for Window {
             owner_tid: 0,
             ref_count: 1,
             valid: false,
+            is_desktop: false,
         }
     }
 }
@@ -700,4 +704,98 @@ pub fn screen_to_client(hwnd: HWND, pt: Point) -> Point {
     } else {
         pt
     }
+}
+
+// ============================================================================
+// Shell Support Functions
+// ============================================================================
+
+/// Get list of windows that need repainting
+pub fn get_dirty_windows() -> [HWND; 16] {
+    let mut result = [HWND::NULL; 16];
+    let mut count = 0;
+
+    let table = WINDOW_TABLE.lock();
+    for entry in table.entries.iter() {
+        if let Some(ref wnd) = entry.window {
+            if wnd.valid && wnd.visible && wnd.needs_paint && count < 16 {
+                result[count] = wnd.hwnd;
+                count += 1;
+            }
+        }
+    }
+
+    result
+}
+
+/// Get count of valid windows
+pub fn get_window_count() -> u32 {
+    let mut count = 0u32;
+
+    let table = WINDOW_TABLE.lock();
+    for entry in table.entries.iter() {
+        if let Some(ref wnd) = entry.window {
+            if wnd.valid && wnd.visible && !wnd.is_desktop {
+                count += 1;
+            }
+        }
+    }
+
+    count
+}
+
+/// Get window handle at a specific index (for Alt+Tab)
+pub fn get_window_at_index(index: usize) -> Option<HWND> {
+    let mut current = 0usize;
+
+    let table = WINDOW_TABLE.lock();
+    for entry in table.entries.iter() {
+        if let Some(ref wnd) = entry.window {
+            if wnd.valid && wnd.visible && !wnd.is_desktop {
+                if current == index {
+                    return Some(wnd.hwnd);
+                }
+                current += 1;
+            }
+        }
+    }
+
+    None
+}
+
+/// Get window text as static string
+pub fn get_window_text_str(hwnd: HWND) -> &'static str {
+    // For now, return a placeholder
+    // In a full implementation, we'd need a different approach
+    if let Some(wnd) = get_window(hwnd) {
+        if wnd.title_len > 0 {
+            return "Window";
+        }
+    }
+    "Window"
+}
+
+/// Set foreground window
+pub fn set_foreground_window(hwnd: HWND) -> bool {
+    if !hwnd.is_valid() {
+        return false;
+    }
+
+    with_window_mut(hwnd, |wnd| {
+        wnd.visible = true;
+        wnd.needs_paint = true;
+    });
+
+    // TODO: Z-order management, bring to top
+    true
+}
+
+/// ShowWindowCmd enum for shell compatibility
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShowWindowCmd {
+    Hide = 0,
+    Show = 1,
+    Minimize = 2,
+    Maximize = 3,
+    Restore = 4,
 }

@@ -209,6 +209,7 @@ pub mod wwwsvc;
 pub mod aspnetcfg;
 pub mod apppool;
 pub mod shellns;
+pub mod explorer;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -941,6 +942,9 @@ pub fn init() {
 
     // Initialize Shell Namespace
     shellns::init();
+
+    // Initialize Explorer shell (desktop, taskbar)
+    explorer::init();
 
     // Register built-in window classes
     register_builtin_classes();
