@@ -452,6 +452,9 @@ pub fn destroy_window(hwnd: HWND) -> bool {
         destroy_window(child);
     }
 
+    // Remove from taskbar
+    super::explorer::remove_taskbar_button(hwnd);
+
     let index = hwnd.index() as usize;
     if index >= MAX_WINDOWS {
         return false;
@@ -461,6 +464,12 @@ pub fn destroy_window(hwnd: HWND) -> bool {
     if table.entries[index].window.is_some() {
         table.entries[index].window = None;
         super::dec_window_count();
+
+        // Repaint desktop to remove window
+        drop(table); // Release lock before repainting
+        super::paint::repaint_all();
+        super::explorer::paint_taskbar();
+
         true
     } else {
         false
