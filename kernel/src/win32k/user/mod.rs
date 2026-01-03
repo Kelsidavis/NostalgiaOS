@@ -894,52 +894,52 @@ pub fn init() {
     telephony::init();
 
     // Initialize Remote Storage
-    remotestorage::init();
+    let _ = remotestorage::init();
 
     // Initialize Certificate Services
-    certsvcs::init();
+    let _ = certsvcs::init();
 
     // Initialize Software Update Services
-    sus::init();
+    let _ = sus::init();
 
     // Initialize Connection Manager Administration Kit
-    cmak::init();
+    let _ = cmak::init();
 
     // Initialize UDDI Services
-    uddi::init();
+    let _ = uddi::init();
 
     // Initialize License Logging Service
-    liclog::init();
+    let _ = liclog::init();
 
     // Initialize Network Bridge
-    netbridge::init();
+    let _ = netbridge::init();
 
     // Initialize QoS Policy Management
-    qospol::init();
+    let _ = qospol::init();
 
     // Initialize Indexing Service Extended
-    idxsvc::init();
+    let _ = idxsvc::init();
 
     // Initialize SMTP Virtual Server
-    smtpvs::init();
+    let _ = smtpvs::init();
 
     // Initialize POP3 Service
-    pop3svc::init();
+    let _ = pop3svc::init();
 
     // Initialize NNTP Virtual Server
-    nntpvs::init();
+    let _ = nntpvs::init();
 
     // Initialize FTP Virtual Server
-    ftpvs::init();
+    let _ = ftpvs::init();
 
     // Initialize WWW Service
-    wwwsvc::init();
+    let _ = wwwsvc::init();
 
     // Initialize ASP.NET Configuration
-    aspnetcfg::init();
+    let _ = aspnetcfg::init();
 
     // Initialize Application Pool
-    apppool::init();
+    let _ = apppool::init();
 
     // Initialize Shell Namespace
     shellns::init();
