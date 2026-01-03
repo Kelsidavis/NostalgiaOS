@@ -16,7 +16,7 @@
 //! - `windows/core/ntuser/kernel/createw.c`
 //! - `windows/core/ntuser/kernel/winmgr.c`
 
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
 use super::super::{UserHandle, UserObjectType, HWND, Rect, Point};
 use super::{WindowStyle, WindowStyleEx, ShowCommand, MAX_WINDOWS};
@@ -109,6 +109,9 @@ pub struct Window {
 
     /// Is desktop window
     pub is_desktop: bool,
+
+    /// Z-order value (higher = on top)
+    pub z_order: u32,
 }
 
 impl Default for Window {
@@ -138,6 +141,7 @@ impl Default for Window {
             ref_count: 1,
             valid: false,
             is_desktop: false,
+            z_order: 0,
         }
     }
 }
@@ -236,6 +240,7 @@ impl Default for WindowEntry {
 
 static WINDOW_TABLE: SpinLock<WindowTable> = SpinLock::new(WindowTable::new());
 static NEXT_WINDOW_INDEX: AtomicU16 = AtomicU16::new(1);
+static NEXT_Z_ORDER: AtomicU32 = AtomicU32::new(1);
 
 struct WindowTable {
     entries: [WindowEntry; MAX_WINDOWS],
@@ -369,6 +374,7 @@ pub fn create_window(
     window.minimized = style.contains(WindowStyle::MINIMIZE);
     window.maximized = style.contains(WindowStyle::MAXIMIZE);
     window.needs_paint = true;
+    window.z_order = NEXT_Z_ORDER.fetch_add(1, Ordering::SeqCst);
     window.valid = true;
 
     // Copy class name
@@ -775,19 +781,27 @@ pub fn get_window_text_str(hwnd: HWND) -> &'static str {
     "Window"
 }
 
-/// Set foreground window
+/// Set foreground window (bring to top of z-order)
 pub fn set_foreground_window(hwnd: HWND) -> bool {
     if !hwnd.is_valid() {
         return false;
     }
 
+    // Assign new highest z-order value
+    let new_z = NEXT_Z_ORDER.fetch_add(1, Ordering::SeqCst);
+
     with_window_mut(hwnd, |wnd| {
         wnd.visible = true;
         wnd.needs_paint = true;
+        wnd.z_order = new_z;
     });
 
-    // TODO: Z-order management, bring to top
     true
+}
+
+/// Bring window to top of z-order
+pub fn bring_window_to_top(hwnd: HWND) -> bool {
+    set_foreground_window(hwnd)
 }
 
 /// ShowWindowCmd enum for shell compatibility
@@ -808,13 +822,11 @@ pub enum ShowWindowCmd {
 pub fn window_from_point(pt: Point) -> HWND {
     let table = WINDOW_TABLE.lock();
 
-    // Find topmost visible window containing this point
-    // Iterate in reverse to find topmost (most recently created) window first
-    // In a full implementation, we'd use proper z-order
-
+    // Find topmost visible window containing this point using z-order
     let mut best = HWND::NULL;
+    let mut best_z_order: u32 = 0;
 
-    for entry in table.entries.iter().rev() {
+    for entry in table.entries.iter() {
         if let Some(ref wnd) = entry.window {
             // Skip desktop and hidden windows
             if !wnd.valid || !wnd.visible || wnd.is_desktop || wnd.minimized {
@@ -824,8 +836,11 @@ pub fn window_from_point(pt: Point) -> HWND {
             // Check if point is inside this window
             if pt.x >= wnd.rect.left && pt.x < wnd.rect.right &&
                pt.y >= wnd.rect.top && pt.y < wnd.rect.bottom {
-                best = wnd.hwnd;
-                break;  // Take the first (topmost) match
+                // Use z-order to determine topmost window
+                if wnd.z_order > best_z_order || !best.is_valid() {
+                    best = wnd.hwnd;
+                    best_z_order = wnd.z_order;
+                }
             }
         }
     }
