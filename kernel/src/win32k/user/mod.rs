@@ -210,6 +210,7 @@ pub mod aspnetcfg;
 pub mod apppool;
 pub mod shellns;
 pub mod explorer;
+pub mod desktop_icons;
 pub mod winlogon;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};

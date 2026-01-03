@@ -1269,7 +1269,7 @@ pub fn paint_desktop() {
 const ICON_SIZE: i32 = 32;
 const ICON_SPACING_X: i32 = 75;
 const ICON_SPACING_Y: i32 = 75;
-const ICON_MARGIN: i32 = 10;
+const ICON_MARGIN: i32 = 20;
 
 /// Desktop icon definition
 struct DesktopIcon {
@@ -1350,68 +1350,49 @@ fn paint_desktop_icons(hdc: HDC) {
 
 /// Draw a single desktop icon
 fn draw_desktop_icon(surf: &super::super::gdi::surface::Surface, x: i32, y: i32, icon_type: IconType) {
-    // Simple 32x32 icon representation
-    match icon_type {
-        IconType::MyComputer => {
-            // Monitor shape
-            let frame = ColorRef::rgb(64, 64, 64);
-            let screen = ColorRef::rgb(0, 128, 255);
-            let body = ColorRef::rgb(192, 192, 192);
+    // Use actual Windows XP icon bitmaps (32x32 RGBA)
+    use super::desktop_icons::*;
 
-            // Screen outline
-            surf.fill_rect(&Rect::new(x + 2, y + 2, x + 30, y + 22), frame);
-            surf.fill_rect(&Rect::new(x + 4, y + 4, x + 28, y + 20), screen);
+    let (width, height, data) = match icon_type {
+        IconType::MyComputer => (MY_COMPUTER_WIDTH, MY_COMPUTER_HEIGHT, &MY_COMPUTER_DATA[..]),
+        IconType::RecycleBin => (RECYCLE_BIN_WIDTH, RECYCLE_BIN_HEIGHT, &RECYCLE_BIN_DATA[..]),
+        IconType::MyDocuments => (MY_DOCUMENTS_WIDTH, MY_DOCUMENTS_HEIGHT, &MY_DOCUMENTS_DATA[..]),
+        IconType::NetworkPlaces => (NETWORK_PLACES_WIDTH, NETWORK_PLACES_HEIGHT, &NETWORK_PLACES_DATA[..]),
+    };
 
-            // Monitor base
-            surf.fill_rect(&Rect::new(x + 12, y + 22, x + 20, y + 25), frame);
-            surf.fill_rect(&Rect::new(x + 8, y + 25, x + 24, y + 28), body);
-        }
-        IconType::RecycleBin => {
-            // Trash can shape
-            let bin_color = ColorRef::rgb(128, 128, 128);
-            let lid_color = ColorRef::rgb(96, 96, 96);
+    // Draw icon with alpha blending
+    for row in 0..height {
+        for col in 0..width {
+            let offset = (row * width + col) * 4;
+            let r = data[offset];
+            let g = data[offset + 1];
+            let b = data[offset + 2];
+            let a = data[offset + 3];
 
-            // Lid
-            surf.fill_rect(&Rect::new(x + 6, y + 2, x + 26, y + 6), lid_color);
-            surf.fill_rect(&Rect::new(x + 12, y, x + 20, y + 4), lid_color);
+            // Skip fully transparent pixels
+            if a == 0 {
+                continue;
+            }
 
-            // Bin body
-            surf.fill_rect(&Rect::new(x + 8, y + 6, x + 24, y + 28), bin_color);
+            let px = x + col as i32;
+            let py = y + row as i32;
 
-            // Lines on bin
-            surf.vline(x + 12, y + 10, y + 24, ColorRef::DARK_GRAY);
-            surf.vline(x + 16, y + 10, y + 24, ColorRef::DARK_GRAY);
-            surf.vline(x + 20, y + 10, y + 24, ColorRef::DARK_GRAY);
-        }
-        IconType::MyDocuments => {
-            // Folder shape
-            let folder = ColorRef::rgb(255, 232, 128);
-            let folder_dark = ColorRef::rgb(192, 168, 64);
+            // Simple alpha blending with desktop background
+            if a == 255 {
+                // Fully opaque - just draw the pixel
+                surf.set_pixel(px, py, ColorRef::rgb(r, g, b));
+            } else {
+                // Blend with desktop background (teal color)
+                let bg_r = 0u8;
+                let bg_g = 128u8;
+                let bg_b = 128u8;
 
-            // Folder tab
-            surf.fill_rect(&Rect::new(x + 4, y + 4, x + 14, y + 10), folder_dark);
+                let blended_r = ((r as u16 * a as u16 + bg_r as u16 * (255 - a) as u16) / 255) as u8;
+                let blended_g = ((g as u16 * a as u16 + bg_g as u16 * (255 - a) as u16) / 255) as u8;
+                let blended_b = ((b as u16 * a as u16 + bg_b as u16 * (255 - a) as u16) / 255) as u8;
 
-            // Folder body
-            surf.fill_rect(&Rect::new(x + 4, y + 8, x + 28, y + 28), folder);
-            surf.fill_rect(&Rect::new(x + 4, y + 8, x + 28, y + 12), folder_dark);
-        }
-        IconType::NetworkPlaces => {
-            // Computer network icon
-            let pc = ColorRef::rgb(192, 192, 192);
-            let wire = ColorRef::rgb(64, 64, 64);
-
-            // Two small computers
-            surf.fill_rect(&Rect::new(x + 2, y + 8, x + 14, y + 20), pc);
-            surf.fill_rect(&Rect::new(x + 18, y + 8, x + 30, y + 20), pc);
-
-            // Screens
-            surf.fill_rect(&Rect::new(x + 4, y + 10, x + 12, y + 16), ColorRef::rgb(0, 128, 255));
-            surf.fill_rect(&Rect::new(x + 20, y + 10, x + 28, y + 16), ColorRef::rgb(0, 128, 255));
-
-            // Connection line
-            surf.hline(x + 8, x + 24, y + 24, wire);
-            surf.vline(x + 8, y + 20, y + 24, wire);
-            surf.vline(x + 24, y + 20, y + 24, wire);
+                surf.set_pixel(px, py, ColorRef::rgb(blended_r, blended_g, blended_b));
+            }
         }
     }
 }
