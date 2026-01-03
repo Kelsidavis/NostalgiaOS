@@ -1137,7 +1137,11 @@ pub fn read_pm_timer() -> u32 {
 
 /// Enable ACPI mode (switch from legacy APM)
 pub fn enable_acpi() -> bool {
-    let pm = PM_CONTROL.lock();
+    // Get PM control info, then drop lock to avoid deadlock with read_pm1_control
+    let (smi_command, acpi_enable) = {
+        let pm = PM_CONTROL.lock();
+        (pm.smi_command, pm.acpi_enable)
+    };
 
     // Check if already in ACPI mode
     if (read_pm1_control() & pm1_control::SCI_EN) != 0 {
@@ -1146,12 +1150,12 @@ pub fn enable_acpi() -> bool {
     }
 
     // Write ACPI enable to SMI command port
-    if pm.smi_command != 0 && pm.acpi_enable != 0 {
+    if smi_command != 0 && acpi_enable != 0 {
         unsafe {
             core::arch::asm!(
                 "out dx, al",
-                in("dx") pm.smi_command as u16,
-                in("al") pm.acpi_enable,
+                in("dx") smi_command as u16,
+                in("al") acpi_enable,
                 options(nomem, nostack, preserves_flags)
             );
         }
