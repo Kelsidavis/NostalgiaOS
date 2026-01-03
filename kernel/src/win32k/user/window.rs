@@ -799,3 +799,82 @@ pub enum ShowWindowCmd {
     Maximize = 3,
     Restore = 4,
 }
+
+// ============================================================================
+// Point-Based Window Lookup
+// ============================================================================
+
+/// Find the topmost window at a given screen point
+pub fn window_from_point(pt: Point) -> HWND {
+    let table = WINDOW_TABLE.lock();
+
+    // Find topmost visible window containing this point
+    // Iterate in reverse to find topmost (most recently created) window first
+    // In a full implementation, we'd use proper z-order
+
+    let mut best = HWND::NULL;
+
+    for entry in table.entries.iter().rev() {
+        if let Some(ref wnd) = entry.window {
+            // Skip desktop and hidden windows
+            if !wnd.valid || !wnd.visible || wnd.is_desktop || wnd.minimized {
+                continue;
+            }
+
+            // Check if point is inside this window
+            if pt.x >= wnd.rect.left && pt.x < wnd.rect.right &&
+               pt.y >= wnd.rect.top && pt.y < wnd.rect.bottom {
+                best = wnd.hwnd;
+                break;  // Take the first (topmost) match
+            }
+        }
+    }
+
+    // If no window found, return desktop
+    if !best.is_valid() {
+        best = get_desktop_window();
+    }
+
+    best
+}
+
+/// Find a child window at a point (relative to parent's client area)
+pub fn child_window_from_point(parent: HWND, pt: Point) -> HWND {
+    if !parent.is_valid() {
+        return HWND::NULL;
+    }
+
+    let parent_wnd = match get_window(parent) {
+        Some(w) => w,
+        None => return HWND::NULL,
+    };
+
+    // Convert to screen coordinates
+    let screen_pt = client_to_screen(parent, pt);
+
+    // Search children
+    let table = WINDOW_TABLE.lock();
+
+    let mut child = parent_wnd.child;
+    while child.is_valid() {
+        let child_index = child.index() as usize;
+        if child_index >= MAX_WINDOWS {
+            break;
+        }
+
+        if let Some(ref child_wnd) = table.entries[child_index].window {
+            if child_wnd.valid && child_wnd.visible {
+                if screen_pt.x >= child_wnd.rect.left && screen_pt.x < child_wnd.rect.right &&
+                   screen_pt.y >= child_wnd.rect.top && screen_pt.y < child_wnd.rect.bottom {
+                    return child;
+                }
+            }
+            child = child_wnd.sibling;
+        } else {
+            break;
+        }
+    }
+
+    // Point not in any child - return parent
+    parent
+}

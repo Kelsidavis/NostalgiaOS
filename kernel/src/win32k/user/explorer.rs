@@ -85,6 +85,19 @@ const START_MENU_ITEM_HEIGHT: i32 = 24;
 /// Start menu width
 const START_MENU_WIDTH: i32 = 180;
 
+// ============================================================================
+// Window Dragging State
+// ============================================================================
+
+/// Window currently being dragged (if any)
+static DRAGGING_WINDOW: SpinLock<HWND> = SpinLock::new(HWND::NULL);
+
+/// Drag start position (screen coordinates)
+static DRAG_START: SpinLock<Point> = SpinLock::new(Point::new(0, 0));
+
+/// Window position at drag start
+static DRAG_WINDOW_START: SpinLock<Point> = SpinLock::new(Point::new(0, 0));
+
 /// Taskbar button entry
 #[derive(Debug, Clone, Copy)]
 struct TaskbarButtonEntry {
@@ -300,9 +313,18 @@ fn process_mouse_input(event: mouse::MouseEvent) {
     cursor::set_cursor_pos(x, y);
     cursor::draw_cursor();
 
-    // Process mouse movement
-    if event.dx != 0 || event.dy != 0 {
-        input::process_mouse_move(x, y);
+    // Check if we're dragging a window
+    let dragging_hwnd = *DRAGGING_WINDOW.lock();
+    if dragging_hwnd.is_valid() {
+        // We're in drag mode - handle window movement
+        if event.dx != 0 || event.dy != 0 {
+            handle_window_drag(x, y);
+        }
+    } else {
+        // Normal mouse movement
+        if event.dx != 0 || event.dy != 0 {
+            input::process_mouse_move(x, y);
+        }
     }
 
     // Process button clicks
@@ -313,12 +335,31 @@ fn process_mouse_input(event: mouse::MouseEvent) {
     unsafe {
         // Left button
         if event.buttons.left != LAST_LEFT {
+            let was_down = LAST_LEFT;
             LAST_LEFT = event.buttons.left;
-            input::process_mouse_button(0, event.buttons.left, x, y);
 
-            // Handle taskbar clicks
             if event.buttons.left {
-                handle_taskbar_click(x, y);
+                // Button pressed
+                input::process_mouse_button(0, true, x, y);
+
+                // Check if we clicked on taskbar first
+                let (_, height) = super::super::gdi::surface::get_primary_dimensions();
+                let taskbar_y = height as i32 - TASKBAR_HEIGHT;
+                if y >= taskbar_y {
+                    handle_taskbar_click(x, y);
+                } else if START_MENU_VISIBLE.load(Ordering::SeqCst) {
+                    // Click outside start menu - hide it
+                    handle_start_menu_click(x, y);
+                } else {
+                    // Check if we clicked on a window caption
+                    try_start_window_drag(x, y);
+                }
+            } else if was_down {
+                // Button released
+                input::process_mouse_button(0, false, x, y);
+
+                // End any drag operation
+                end_window_drag();
             }
         }
 
@@ -333,6 +374,106 @@ fn process_mouse_input(event: mouse::MouseEvent) {
             LAST_MIDDLE = event.buttons.middle;
             input::process_mouse_button(2, event.buttons.middle, x, y);
         }
+    }
+}
+
+/// Try to start window drag if clicked on caption
+fn try_start_window_drag(x: i32, y: i32) {
+    // Find window at this position
+    let hwnd = window::window_from_point(Point::new(x, y));
+    if !hwnd.is_valid() {
+        return;
+    }
+
+    // Perform hit test
+    let lparam = ((y as isize) << 16) | ((x as isize) & 0xFFFF);
+    let hit = message::send_message(hwnd, message::WM_NCHITTEST, 0, lparam);
+
+    match hit {
+        message::hittest::HTCAPTION => {
+            // Start dragging this window
+            crate::serial_println!("[EXPLORER] Starting drag for window {:#x}", hwnd.raw());
+
+            if let Some(wnd) = window::get_window(hwnd) {
+                *DRAGGING_WINDOW.lock() = hwnd;
+                *DRAG_START.lock() = Point::new(x, y);
+                *DRAG_WINDOW_START.lock() = Point::new(wnd.rect.left, wnd.rect.top);
+            }
+
+            // Bring window to front
+            window::set_foreground_window(hwnd);
+            input::set_active_window(hwnd);
+        }
+        message::hittest::HTCLOSE | message::hittest::HTMINBUTTON | message::hittest::HTMAXBUTTON => {
+            // Caption button clicked - send NC button down message
+            message::send_message(hwnd, message::WM_NCLBUTTONDOWN, hit as usize, lparam);
+        }
+        message::hittest::HTCLIENT => {
+            // Client area clicked - activate window
+            window::set_foreground_window(hwnd);
+            input::set_active_window(hwnd);
+        }
+        _ => {}
+    }
+}
+
+/// Handle window drag movement
+fn handle_window_drag(x: i32, y: i32) {
+    let hwnd = *DRAGGING_WINDOW.lock();
+    if !hwnd.is_valid() {
+        return;
+    }
+
+    let drag_start = *DRAG_START.lock();
+    let window_start = *DRAG_WINDOW_START.lock();
+
+    // Calculate delta
+    let dx = x - drag_start.x;
+    let dy = y - drag_start.y;
+
+    // Calculate new window position
+    let new_x = window_start.x + dx;
+    let new_y = window_start.y + dy;
+
+    // Get current window size
+    if let Some(wnd) = window::get_window(hwnd) {
+        let width = wnd.rect.width();
+        let height = wnd.rect.height();
+
+        // Clamp to screen bounds (allow some off-screen but keep title bar visible)
+        let (_, screen_h) = super::super::gdi::surface::get_primary_dimensions();
+        let min_y = 0;
+        let max_y = screen_h as i32 - TASKBAR_HEIGHT - 20; // Keep caption visible
+
+        let clamped_y = new_y.max(min_y).min(max_y);
+
+        // Move window
+        window::move_window(hwnd, new_x, clamped_y, width, height, true);
+
+        // Repaint everything
+        super::paint::repaint_all();
+        paint_taskbar();
+
+        // Redraw cursor on top
+        cursor::draw_cursor();
+    }
+}
+
+/// End window drag operation
+fn end_window_drag() {
+    let hwnd = {
+        let mut dragging = DRAGGING_WINDOW.lock();
+        let h = *dragging;
+        *dragging = HWND::NULL;
+        h
+    };
+
+    if hwnd.is_valid() {
+        crate::serial_println!("[EXPLORER] Ended drag for window {:#x}", hwnd.raw());
+
+        // Final repaint
+        super::paint::repaint_all();
+        paint_taskbar();
     }
 }
 
