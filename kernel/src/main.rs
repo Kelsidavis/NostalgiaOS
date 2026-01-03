@@ -575,6 +575,15 @@ fn phase1_init(boot_info: &BootInfo) {
     hal::keyboard::init();
     kprintln!("  Keyboard initialized");
 
+    // Initialize PS/2 mouse
+    kprintln!("  Initializing mouse...");
+    if let Err(e) = hal::mouse::init() {
+        kprintln!("  Mouse initialization failed: {}", e);
+    } else {
+        hal::pic::enable_mouse_irq();
+        kprintln!("  Mouse initialized");
+    }
+
     // Create shell thread
     kprintln!("  Creating shell thread...");
     unsafe {

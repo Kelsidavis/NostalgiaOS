@@ -23,6 +23,7 @@ use crate::hal::apic;
 pub mod vector {
     pub const TIMER: u8 = 32;
     pub const KEYBOARD: u8 = 33;
+    pub const MOUSE: u8 = 44;  // IRQ12 = 32 + 12 = 44
     // SMP IPIs (high vectors)
     pub const IPI_STOP: u8 = 0xFC;
     pub const IPI_RESCHEDULE: u8 = 0xFD;
@@ -78,6 +79,9 @@ static IDT: Lazy<InterruptDescriptorTable> = Lazy::new(|| {
 
     // Keyboard interrupt (vector 33) - PS/2 keyboard
     idt[vector::KEYBOARD].set_handler_fn(keyboard_interrupt_handler);
+
+    // Mouse interrupt (vector 44) - PS/2 mouse
+    idt[vector::MOUSE].set_handler_fn(mouse_interrupt_handler);
 
     // SMP IPI handlers
     idt[vector::IPI_STOP].set_handler_fn(ipi_stop_handler);
@@ -321,6 +325,23 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     }
 }
 
+/// Mouse interrupt handler (vector 44)
+/// Called when the mouse moves or a button is pressed
+extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    // Increment statistics counter
+    INTERRUPT_STATS.mouse.fetch_add(1, Ordering::Relaxed);
+
+    // Handle the mouse interrupt
+    crate::hal::mouse::handle_interrupt();
+
+    // Send End of Interrupt to both PICs (mouse uses IRQ12 on slave PIC)
+    // Need to send EOI to both slave (port 0xA0) and master (port 0x20)
+    unsafe {
+        crate::arch::io::outb(0xA0, 0x20);  // EOI to slave PIC
+        crate::arch::io::outb(0x20, 0x20);  // EOI to master PIC
+    }
+}
+
 /// IPI STOP handler (vector 0xFC)
 /// Halts this CPU immediately (for shutdown or panic)
 extern "x86-interrupt" fn ipi_stop_handler(_stack_frame: InterruptStackFrame) {
@@ -414,6 +435,7 @@ pub struct InterruptStats {
     // Hardware Interrupts
     pub timer: AtomicU64,
     pub keyboard: AtomicU64,
+    pub mouse: AtomicU64,
 
     // IPIs
     pub ipi_stop: AtomicU64,
@@ -450,6 +472,7 @@ impl InterruptStats {
             virtualization: AtomicU64::new(0),
             timer: AtomicU64::new(0),
             keyboard: AtomicU64::new(0),
+            mouse: AtomicU64::new(0),
             ipi_stop: AtomicU64::new(0),
             ipi_reschedule: AtomicU64::new(0),
             tlb_shootdown: AtomicU64::new(0),

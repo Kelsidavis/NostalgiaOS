@@ -141,3 +141,20 @@ pub fn init() {
 
     crate::serial_println!("[PIC] 8259 PIC initialized (keyboard IRQ enabled)");
 }
+
+/// Enable mouse IRQ (IRQ12 on slave PIC)
+/// Must be called after mouse controller is initialized
+pub fn enable_mouse_irq() {
+    unsafe {
+        // Enable IRQ2 (cascade) on master PIC and IRQ1 (keyboard)
+        // 0xF9 = 11111001 - bits 1 (keyboard) and 2 (cascade) enabled
+        outb(ports::PIC1_DATA, 0xF9);
+
+        // Enable IRQ12 (mouse) on slave PIC
+        // IRQ12 is bit 4 on the slave PIC (IRQ 8-15)
+        // 0xEF = 11101111 - bit 4 (IRQ12) enabled
+        outb(ports::PIC2_DATA, 0xEF);
+    }
+
+    crate::serial_println!("[PIC] Mouse IRQ12 enabled");
+}

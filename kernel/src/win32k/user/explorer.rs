@@ -14,10 +14,10 @@
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
-use crate::hal::keyboard;
+use crate::hal::{keyboard, mouse};
 use super::super::{HWND, HDC, Rect, Point, ColorRef, GdiHandle, UserHandle};
 use super::super::gdi::{dc, brush, pen};
-use super::{message, window, input, desktop, controls, WindowStyle, WindowStyleEx, ShowCommand};
+use super::{message, window, input, desktop, controls, cursor, WindowStyle, WindowStyleEx, ShowCommand};
 
 // ============================================================================
 // Constants
@@ -238,18 +238,30 @@ fn init_taskbar_layout(screen_width: i32) {
 /// Run the shell message pump
 ///
 /// This is the main loop that processes window messages and handles
-/// input from the keyboard.
+/// input from the keyboard and mouse.
 pub fn run_message_pump() {
     crate::serial_println!("[EXPLORER] Starting message pump...");
+
+    // Set screen size for mouse position clamping
+    let (width, height) = super::super::gdi::surface::get_primary_dimensions();
+    mouse::set_screen_size(width, height);
 
     // Paint initial desktop and taskbar
     paint_desktop();
     paint_taskbar();
 
+    // Draw initial cursor
+    cursor::draw_cursor();
+
     while SHELL_RUNNING.load(Ordering::SeqCst) {
         // Check for keyboard input
         if let Some(scancode) = keyboard::try_read_scancode() {
             process_keyboard_input(scancode);
+        }
+
+        // Check for mouse input
+        if let Some(event) = mouse::poll_event() {
+            process_mouse_input(event);
         }
 
         // Process pending messages
@@ -265,6 +277,92 @@ pub fn run_message_pump() {
     }
 
     crate::serial_println!("[EXPLORER] Message pump exited");
+}
+
+/// Process mouse input event
+fn process_mouse_input(event: mouse::MouseEvent) {
+    // Get current position after the movement
+    let (x, y) = mouse::get_position();
+
+    // Update cursor position and redraw
+    cursor::set_cursor_pos(x, y);
+    cursor::draw_cursor();
+
+    // Process mouse movement
+    if event.dx != 0 || event.dy != 0 {
+        input::process_mouse_move(x, y);
+    }
+
+    // Process button clicks
+    static mut LAST_LEFT: bool = false;
+    static mut LAST_RIGHT: bool = false;
+    static mut LAST_MIDDLE: bool = false;
+
+    unsafe {
+        // Left button
+        if event.buttons.left != LAST_LEFT {
+            LAST_LEFT = event.buttons.left;
+            input::process_mouse_button(0, event.buttons.left, x, y);
+
+            // Handle taskbar clicks
+            if event.buttons.left {
+                handle_taskbar_click(x, y);
+            }
+        }
+
+        // Right button
+        if event.buttons.right != LAST_RIGHT {
+            LAST_RIGHT = event.buttons.right;
+            input::process_mouse_button(1, event.buttons.right, x, y);
+        }
+
+        // Middle button
+        if event.buttons.middle != LAST_MIDDLE {
+            LAST_MIDDLE = event.buttons.middle;
+            input::process_mouse_button(2, event.buttons.middle, x, y);
+        }
+    }
+}
+
+/// Handle click on the taskbar
+fn handle_taskbar_click(x: i32, y: i32) {
+    let (_, height) = super::super::gdi::surface::get_primary_dimensions();
+    let taskbar_y = height as i32 - TASKBAR_HEIGHT;
+
+    // Check if click is on taskbar
+    if y < taskbar_y {
+        return;
+    }
+
+    let state = TASKBAR_STATE.lock();
+
+    // Check Start button
+    if x >= state.start_rect.left && x < state.start_rect.right {
+        crate::serial_println!("[EXPLORER] Start button clicked");
+        // TODO: Show Start menu
+        return;
+    }
+
+    // Check taskbar buttons
+    for button in state.buttons.iter() {
+        if !button.valid {
+            continue;
+        }
+
+        if x >= button.rect.left && x < button.rect.right {
+            // Activate this window
+            let hwnd = button.hwnd;
+            drop(state);
+
+            input::set_active_window(hwnd);
+            window::show_window(hwnd, ShowCommand::Show);
+            window::set_foreground_window(hwnd);
+
+            // Repaint taskbar to show active state
+            paint_taskbar();
+            return;
+        }
+    }
 }
 
 /// Process keyboard input from scancode
