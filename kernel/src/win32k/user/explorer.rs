@@ -385,6 +385,12 @@ fn process_mouse_input(event: mouse::MouseEvent) {
                 // Button pressed
                 input::process_mouse_button(0, true, x, y);
 
+                // Check if context menu is visible - handle or dismiss
+                if DESKTOP_MENU_VISIBLE.load(Ordering::SeqCst) {
+                    handle_desktop_menu_click(x, y);
+                    return;
+                }
+
                 // Check if we clicked on taskbar first
                 let (_, height) = super::super::gdi::surface::get_primary_dimensions();
                 let taskbar_y = height as i32 - TASKBAR_HEIGHT;
@@ -409,8 +415,14 @@ fn process_mouse_input(event: mouse::MouseEvent) {
 
         // Right button
         if event.buttons.right != LAST_RIGHT {
+            let was_down = LAST_RIGHT;
             LAST_RIGHT = event.buttons.right;
             input::process_mouse_button(1, event.buttons.right, x, y);
+
+            // Handle right-click release for context menu
+            if !event.buttons.right && was_down {
+                handle_right_click(x, y);
+            }
         }
 
         // Middle button
@@ -698,6 +710,177 @@ fn update_cursor_for_position(x: i32, y: i32) {
     };
 
     cursor::set_cursor(new_cursor);
+}
+
+// ============================================================================
+// Right-Click Context Menu
+// ============================================================================
+
+/// Desktop context menu visible flag
+static DESKTOP_MENU_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+/// Desktop context menu position
+static DESKTOP_MENU_POS: SpinLock<Point> = SpinLock::new(Point::new(0, 0));
+
+/// Desktop context menu items
+const DESKTOP_MENU_ITEMS: [&str; 6] = [
+    "Refresh",
+    "─────────────",
+    "Paste",
+    "Paste Shortcut",
+    "─────────────",
+    "Properties",
+];
+
+/// Desktop menu item height
+const MENU_ITEM_HEIGHT: i32 = 20;
+const MENU_WIDTH: i32 = 150;
+
+/// Handle right-click
+fn handle_right_click(x: i32, y: i32) {
+    // Check if on taskbar - no context menu there for now
+    let (_, height) = super::super::gdi::surface::get_primary_dimensions();
+    let taskbar_y = height as i32 - TASKBAR_HEIGHT;
+    if y >= taskbar_y {
+        return;
+    }
+
+    // Check if we clicked on a window
+    let hwnd = window::window_from_point(Point::new(x, y));
+
+    // If clicked on desktop (no window or desktop window), show desktop context menu
+    let desktop_hwnd = *DESKTOP_HWND.lock();
+    if !hwnd.is_valid() || hwnd == desktop_hwnd {
+        show_desktop_context_menu(x, y);
+    }
+}
+
+/// Show desktop context menu
+fn show_desktop_context_menu(x: i32, y: i32) {
+    // Hide start menu if visible
+    if START_MENU_VISIBLE.load(Ordering::SeqCst) {
+        toggle_start_menu();
+    }
+
+    // Store menu position
+    *DESKTOP_MENU_POS.lock() = Point::new(x, y);
+    DESKTOP_MENU_VISIBLE.store(true, Ordering::SeqCst);
+
+    // Paint the context menu
+    paint_desktop_context_menu(x, y);
+}
+
+/// Paint the desktop context menu
+fn paint_desktop_context_menu(x: i32, y: i32) {
+    if let Ok(hdc) = dc::create_display_dc() {
+        let menu_height = (DESKTOP_MENU_ITEMS.len() as i32) * MENU_ITEM_HEIGHT + 4;
+        let menu_rect = Rect::new(x, y, x + MENU_WIDTH, y + menu_height);
+
+        // Get surface
+        let surface_handle = dc::get_dc_surface(hdc);
+        if let Some(surf) = super::super::gdi::surface::get_surface(surface_handle) {
+            // Draw menu background
+            surf.fill_rect(&menu_rect, ColorRef::WINDOW_BG);
+
+            // Draw 3D raised border
+            // Top highlight
+            surf.hline(menu_rect.left, menu_rect.right - 1, menu_rect.top, ColorRef::WHITE);
+            surf.hline(menu_rect.left + 1, menu_rect.right - 2, menu_rect.top + 1, ColorRef::WHITE);
+            // Left highlight
+            surf.vline(menu_rect.left, menu_rect.top, menu_rect.bottom - 1, ColorRef::WHITE);
+            surf.vline(menu_rect.left + 1, menu_rect.top + 1, menu_rect.bottom - 2, ColorRef::WHITE);
+            // Bottom shadow
+            surf.hline(menu_rect.left, menu_rect.right, menu_rect.bottom - 1, ColorRef::DARK_GRAY);
+            surf.hline(menu_rect.left + 1, menu_rect.right - 1, menu_rect.bottom - 2, ColorRef::GRAY);
+            // Right shadow
+            surf.vline(menu_rect.right - 1, menu_rect.top, menu_rect.bottom, ColorRef::DARK_GRAY);
+            surf.vline(menu_rect.right - 2, menu_rect.top + 1, menu_rect.bottom - 1, ColorRef::GRAY);
+
+            // Draw menu items
+            let mut item_y = y + 2;
+            for item in DESKTOP_MENU_ITEMS.iter() {
+                if item.starts_with('─') {
+                    // Separator line
+                    let sep_y = item_y + MENU_ITEM_HEIGHT / 2;
+                    surf.hline(x + 2, x + MENU_WIDTH - 2, sep_y, ColorRef::GRAY);
+                    surf.hline(x + 2, x + MENU_WIDTH - 2, sep_y + 1, ColorRef::WHITE);
+                } else {
+                    // Regular item
+                    dc::set_text_color(hdc, ColorRef::BLACK);
+                    super::super::gdi::draw::gdi_text_out(hdc, x + 20, item_y + 2, item);
+                }
+                item_y += MENU_ITEM_HEIGHT;
+            }
+        }
+
+        dc::delete_dc(hdc);
+    }
+}
+
+/// Handle click on desktop context menu
+fn handle_desktop_menu_click(x: i32, y: i32) -> bool {
+    if !DESKTOP_MENU_VISIBLE.load(Ordering::SeqCst) {
+        return false;
+    }
+
+    let menu_pos = *DESKTOP_MENU_POS.lock();
+    let menu_height = (DESKTOP_MENU_ITEMS.len() as i32) * MENU_ITEM_HEIGHT + 4;
+    let menu_rect = Rect::new(
+        menu_pos.x,
+        menu_pos.y,
+        menu_pos.x + MENU_WIDTH,
+        menu_pos.y + menu_height,
+    );
+
+    // Check if click is inside menu
+    if x >= menu_rect.left && x < menu_rect.right &&
+       y >= menu_rect.top && y < menu_rect.bottom {
+        // Determine which item was clicked
+        let relative_y = y - menu_rect.top - 2;
+        let item_index = (relative_y / MENU_ITEM_HEIGHT) as usize;
+
+        if item_index < DESKTOP_MENU_ITEMS.len() {
+            let item = DESKTOP_MENU_ITEMS[item_index];
+            if !item.starts_with('─') {
+                // Execute action
+                match item {
+                    "Refresh" => {
+                        // Repaint desktop
+                        super::paint::repaint_all();
+                        paint_taskbar();
+                    }
+                    "Properties" => {
+                        // Could show display properties
+                        crate::serial_println!("[EXPLORER] Display Properties clicked");
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Hide menu
+        hide_desktop_context_menu();
+        return true;
+    }
+
+    // Click outside menu - hide it
+    hide_desktop_context_menu();
+    false
+}
+
+/// Hide desktop context menu
+fn hide_desktop_context_menu() {
+    if DESKTOP_MENU_VISIBLE.load(Ordering::SeqCst) {
+        DESKTOP_MENU_VISIBLE.store(false, Ordering::SeqCst);
+        // Repaint to clear menu
+        super::paint::repaint_all();
+        paint_taskbar();
+    }
+}
+
+/// Check if context menu is visible
+pub fn is_context_menu_visible() -> bool {
+    DESKTOP_MENU_VISIBLE.load(Ordering::SeqCst)
 }
 
 /// Handle click on the taskbar
