@@ -1105,14 +1105,128 @@ fn process_paint_requests() {
             // Paint the window frame
             super::paint::draw_window_frame(*hwnd);
 
-            // Paint client content for test windows (disabled)
-            // paint_test_window_client(*hwnd);
+            // Paint client content based on window class
+            paint_window_client(*hwnd);
 
             // Clear the needs_paint flag
             window::with_window_mut(*hwnd, |wnd| {
                 wnd.needs_paint = false;
             });
         }
+    }
+}
+
+/// Paint window client area based on window class and type
+fn paint_window_client(hwnd: HWND) {
+    if let Some(wnd) = window::get_window(hwnd) {
+        // Get window class name as string
+        let class_name = core::str::from_utf8(&wnd.class_name)
+            .unwrap_or("")
+            .trim_end_matches('\0');
+
+        // Get window title as string
+        let title = core::str::from_utf8(&wnd.title[..wnd.title_len.min(64)])
+            .unwrap_or("");
+
+        // Paint based on window class
+        match class_name {
+            "EXPLORER_WINDOW" => paint_explorer_window_client(hwnd, title),
+            "TestWindow" => paint_test_window_client(hwnd),
+            "Desktop" => {
+                // Desktop is painted separately by paint_desktop(), skip it here
+            }
+            _ => {
+                // Unknown window class - just fill with white
+                if let Ok(hdc) = dc::create_display_dc() {
+                    let surface_handle = dc::get_dc_surface(hdc);
+                    if let Some(surf) = super::super::gdi::surface::get_surface(surface_handle) {
+                        let client_rect = Rect::new(
+                            wnd.client_rect.left + wnd.rect.left,
+                            wnd.client_rect.top + wnd.rect.top,
+                            wnd.client_rect.right + wnd.rect.left,
+                            wnd.client_rect.bottom + wnd.rect.top,
+                        );
+                        surf.fill_rect(&client_rect, ColorRef::WHITE);
+                    }
+                    dc::delete_dc(hdc);
+                }
+            }
+        }
+    }
+}
+
+/// Paint Explorer window client area (My Computer, My Documents, etc.)
+fn paint_explorer_window_client(hwnd: HWND, title: &str) {
+    if let Some(wnd) = window::get_window(hwnd) {
+        if let Ok(hdc) = dc::create_display_dc() {
+            let surface_handle = dc::get_dc_surface(hdc);
+            if let Some(surf) = super::super::gdi::surface::get_surface(surface_handle) {
+                // Calculate client area in screen coordinates
+                let client_rect = Rect::new(
+                    wnd.client_rect.left + wnd.rect.left,
+                    wnd.client_rect.top + wnd.rect.top,
+                    wnd.client_rect.right + wnd.rect.left,
+                    wnd.client_rect.bottom + wnd.rect.top,
+                );
+
+                // Fill with white background
+                surf.fill_rect(&client_rect, ColorRef::WHITE);
+
+                // Paint content based on title
+                if title.starts_with("My Computer") {
+                    paint_my_computer_content(&surf, hdc, &client_rect);
+                } else if title.starts_with("Recycle Bin") {
+                    dc::set_text_color(hdc, ColorRef::BLACK);
+                    dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+                    super::super::gdi::text_out(hdc, client_rect.left + 20, client_rect.top + 20,
+                        "Recycle Bin is empty");
+                } else if title.starts_with("My Documents") {
+                    dc::set_text_color(hdc, ColorRef::BLACK);
+                    dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+                    super::super::gdi::text_out(hdc, client_rect.left + 20, client_rect.top + 20,
+                        "My Documents");
+                    super::super::gdi::text_out(hdc, client_rect.left + 20, client_rect.top + 40,
+                        "Your personal documents");
+                } else if title.starts_with("Network Places") {
+                    dc::set_text_color(hdc, ColorRef::BLACK);
+                    dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+                    super::super::gdi::text_out(hdc, client_rect.left + 20, client_rect.top + 20,
+                        "Network Places");
+                    super::super::gdi::text_out(hdc, client_rect.left + 20, client_rect.top + 40,
+                        "Network resources");
+                }
+            }
+            dc::delete_dc(hdc);
+        }
+    }
+}
+
+/// Paint My Computer window content showing drives
+fn paint_my_computer_content(surf: &super::super::gdi::surface::Surface, hdc: HDC, client_rect: &Rect) {
+    // Draw drive list
+    let drives = [
+        ("C:", "Local Disk"),
+        ("D:", "CD-ROM Drive"),
+    ];
+
+    let mut y = client_rect.top + 30;
+
+    dc::set_text_color(hdc, ColorRef::BLACK);
+    dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+
+    for (letter, label) in drives.iter() {
+        let icon_x = client_rect.left + 30;
+
+        // Draw hard drive icon
+        surf.fill_rect(&Rect::new(icon_x, y, icon_x + 32, y + 24), ColorRef::rgb(192, 192, 192));
+        surf.fill_rect(&Rect::new(icon_x + 2, y + 2, icon_x + 30, y + 6), ColorRef::rgb(0, 128, 0));
+        surf.hline(icon_x, icon_x + 32, y + 12, ColorRef::GRAY);
+
+        // Draw drive letter and label
+        super::super::gdi::text_out(hdc, icon_x + 40, y, letter);
+        super::super::gdi::text_out(hdc, icon_x + 70, y, label);
+
+        y += 40;
     }
 }
 
@@ -1437,7 +1551,7 @@ fn handle_desktop_icon_double_click(icon_idx: usize) {
 }
 
 /// Create a simple window with title and content
-fn create_simple_window(title: &str, content: &str) {
+fn create_simple_window(title: &str, _content: &str) {
     let hwnd = window::create_window(
         "EXPLORER_WINDOW",
         title,
@@ -1449,6 +1563,8 @@ fn create_simple_window(title: &str, content: &str) {
     );
 
     if hwnd.is_valid() {
+        crate::serial_println!("[EXPLORER] Created window: {}", title);
+
         // Add to taskbar
         add_taskbar_button(hwnd);
 
@@ -1456,35 +1572,10 @@ fn create_simple_window(title: &str, content: &str) {
         window::set_foreground_window(hwnd);
         input::set_active_window(hwnd);
 
-        // Paint it
-        super::paint::draw_window_frame(hwnd);
-
-        // Paint content
-        if let Some(wnd) = window::get_window(hwnd) {
-            if let Ok(hdc) = dc::create_display_dc() {
-                let surface_handle = dc::get_dc_surface(hdc);
-                if let Some(surf) = super::super::gdi::surface::get_surface(surface_handle) {
-                    // Fill client area
-                    let client_rect = Rect::new(
-                        wnd.client_rect.left + wnd.rect.left,
-                        wnd.client_rect.top + wnd.rect.top,
-                        wnd.client_rect.right + wnd.rect.left,
-                        wnd.client_rect.bottom + wnd.rect.top,
-                    );
-                    surf.fill_rect(&client_rect, ColorRef::WHITE);
-
-                    // Draw content text
-                    dc::set_text_color(hdc, ColorRef::BLACK);
-                    super::super::gdi::draw::gdi_text_out(
-                        hdc,
-                        client_rect.left + 10,
-                        client_rect.top + 10,
-                        content,
-                    );
-                }
-                dc::delete_dc(hdc);
-            }
-        }
+        // Mark for painting - the paint system will handle the content
+        window::with_window_mut(hwnd, |wnd| {
+            wnd.needs_paint = true;
+        });
 
         paint_taskbar();
     }
