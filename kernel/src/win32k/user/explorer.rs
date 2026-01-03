@@ -1105,8 +1105,8 @@ fn process_paint_requests() {
             // Paint the window frame
             super::paint::draw_window_frame(*hwnd);
 
-            // Paint client content for test windows
-            paint_test_window_client(*hwnd);
+            // Paint client content for test windows (disabled)
+            // paint_test_window_client(*hwnd);
 
             // Clear the needs_paint flag
             window::with_window_mut(*hwnd, |wnd| {
