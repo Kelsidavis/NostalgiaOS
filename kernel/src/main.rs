@@ -600,7 +600,18 @@ fn shell_thread_entry() {
         unsafe { core::arch::asm!("pause"); }
     }
 
-    // Run the shell
+    // Check if graphical shell is enabled (Win32k initialized)
+    let stats = win32k::get_stats();
+    if stats.initialized {
+        serial_println!("[SHELL] Starting graphical desktop shell...");
+
+        // Run the Explorer graphical shell message pump
+        win32k::user::explorer::run_message_pump();
+
+        serial_println!("[SHELL] Graphical shell exited, falling back to text shell");
+    }
+
+    // Fall back to text shell
     shell::run();
 
     // Shell exited - halt this thread
