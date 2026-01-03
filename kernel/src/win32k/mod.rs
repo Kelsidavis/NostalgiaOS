@@ -398,7 +398,8 @@ impl ColorRef {
     pub const WINDOW_BG: ColorRef = ColorRef::rgb(212, 208, 200);      // Classic window background
     pub const WINDOW_FRAME: ColorRef = ColorRef::rgb(0, 0, 128);       // Dark blue title bar
     pub const ACTIVE_CAPTION: ColorRef = ColorRef::rgb(0, 84, 227);    // Active title bar (XP blue)
-    pub const INACTIVE_CAPTION: ColorRef = ColorRef::rgb(122, 150, 223);
+    pub const INACTIVE_CAPTION: ColorRef = ColorRef::rgb(128, 128, 128);  // Gray for inactive title bar
+    pub const INACTIVE_CAPTION_TEXT: ColorRef = ColorRef::rgb(192, 192, 192);  // Light gray text
     pub const BUTTON_FACE: ColorRef = ColorRef::rgb(212, 208, 200);
     pub const BUTTON_SHADOW: ColorRef = ColorRef::rgb(128, 128, 128);
     pub const BUTTON_HIGHLIGHT: ColorRef = ColorRef::rgb(255, 255, 255);

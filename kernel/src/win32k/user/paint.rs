@@ -270,16 +270,28 @@ fn draw_caption(hdc: HDC, wnd: &window::Window, metrics: &FrameMetrics) {
         offset.y + border + caption_height,
     );
 
-    // Draw caption background (gradient for XP style, solid for classic)
-    let caption_color = ColorRef::ACTIVE_CAPTION;
+    // Check if this window is active
+    let is_active = super::input::get_active_window() == wnd.hwnd;
+
+    // Draw caption background - blue for active, gray for inactive
+    let caption_color = if is_active {
+        ColorRef::ACTIVE_CAPTION  // Blue (#0A246A for classic, or #0054E3)
+    } else {
+        ColorRef::INACTIVE_CAPTION  // Gray (#808080)
+    };
     surf.fill_rect(&caption_rect, caption_color);
 
     // Draw caption text
     let text_x = caption_rect.left + 4;
     let text_y = caption_rect.top + 2;
 
-    // Set text color
-    dc::set_text_color(hdc, ColorRef::WHITE);
+    // Set text color - white for active, light gray for inactive
+    let text_color = if is_active {
+        ColorRef::WHITE
+    } else {
+        ColorRef::INACTIVE_CAPTION_TEXT
+    };
+    dc::set_text_color(hdc, text_color);
     dc::set_bk_mode(hdc, dc::BkMode::Transparent);
 
     // Draw the title
