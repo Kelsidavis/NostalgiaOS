@@ -416,6 +416,9 @@ fn try_start_window_drag(x: i32, y: i32) {
             // Bring window to front
             window::set_foreground_window(hwnd);
             input::set_active_window(hwnd);
+
+            // Repaint taskbar to show active state
+            paint_taskbar();
         }
         message::hittest::HTCLOSE | message::hittest::HTMINBUTTON | message::hittest::HTMAXBUTTON => {
             // Caption button clicked - send NC button down message
@@ -425,6 +428,9 @@ fn try_start_window_drag(x: i32, y: i32) {
             // Client area clicked - activate window
             window::set_foreground_window(hwnd);
             input::set_active_window(hwnd);
+
+            // Repaint taskbar to show active state
+            paint_taskbar();
         }
         _ => {}
     }
