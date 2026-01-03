@@ -851,7 +851,197 @@ pub fn paint_desktop() {
         let bg_brush = brush::create_solid_brush(ColorRef::DESKTOP);
         super::super::gdi::fill_rect(hdc, &desktop_rect, bg_brush);
 
+        // Draw desktop icons
+        paint_desktop_icons(hdc);
+
         dc::delete_dc(hdc);
+    }
+}
+
+// ============================================================================
+// Desktop Icons
+// ============================================================================
+
+/// Desktop icon size
+const ICON_SIZE: i32 = 32;
+const ICON_SPACING_X: i32 = 75;
+const ICON_SPACING_Y: i32 = 75;
+const ICON_MARGIN: i32 = 10;
+
+/// Desktop icon definition
+struct DesktopIcon {
+    name: &'static str,
+    icon_type: IconType,
+}
+
+/// Icon types for different desktop items
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IconType {
+    MyComputer,
+    RecycleBin,
+    MyDocuments,
+    NetworkPlaces,
+}
+
+/// Static list of desktop icons
+static DESKTOP_ICONS: [DesktopIcon; 4] = [
+    DesktopIcon { name: "My Computer", icon_type: IconType::MyComputer },
+    DesktopIcon { name: "Recycle Bin", icon_type: IconType::RecycleBin },
+    DesktopIcon { name: "My Documents", icon_type: IconType::MyDocuments },
+    DesktopIcon { name: "Network Places", icon_type: IconType::NetworkPlaces },
+];
+
+/// Paint desktop icons
+fn paint_desktop_icons(hdc: HDC) {
+    let surface_handle = dc::get_dc_surface(hdc);
+    let surf = match super::super::gdi::surface::get_surface(surface_handle) {
+        Some(s) => s,
+        None => return,
+    };
+
+    let mut x = ICON_MARGIN;
+    let mut y = ICON_MARGIN;
+
+    for icon in DESKTOP_ICONS.iter() {
+        // Draw icon
+        draw_desktop_icon(&surf, x, y, icon.icon_type);
+
+        // Draw label
+        let label_x = x + ICON_SIZE / 2;
+        let label_y = y + ICON_SIZE + 4;
+        draw_icon_label(&surf, label_x, label_y, icon.name);
+
+        // Move to next position (vertical layout)
+        y += ICON_SPACING_Y;
+    }
+}
+
+/// Draw a single desktop icon
+fn draw_desktop_icon(surf: &super::super::gdi::surface::Surface, x: i32, y: i32, icon_type: IconType) {
+    // Simple 32x32 icon representation
+    match icon_type {
+        IconType::MyComputer => {
+            // Monitor shape
+            let frame = ColorRef::rgb(64, 64, 64);
+            let screen = ColorRef::rgb(0, 128, 255);
+            let body = ColorRef::rgb(192, 192, 192);
+
+            // Screen outline
+            surf.fill_rect(&Rect::new(x + 2, y + 2, x + 30, y + 22), frame);
+            surf.fill_rect(&Rect::new(x + 4, y + 4, x + 28, y + 20), screen);
+
+            // Monitor base
+            surf.fill_rect(&Rect::new(x + 12, y + 22, x + 20, y + 25), frame);
+            surf.fill_rect(&Rect::new(x + 8, y + 25, x + 24, y + 28), body);
+        }
+        IconType::RecycleBin => {
+            // Trash can shape
+            let bin_color = ColorRef::rgb(128, 128, 128);
+            let lid_color = ColorRef::rgb(96, 96, 96);
+
+            // Lid
+            surf.fill_rect(&Rect::new(x + 6, y + 2, x + 26, y + 6), lid_color);
+            surf.fill_rect(&Rect::new(x + 12, y, x + 20, y + 4), lid_color);
+
+            // Bin body
+            surf.fill_rect(&Rect::new(x + 8, y + 6, x + 24, y + 28), bin_color);
+
+            // Lines on bin
+            surf.vline(x + 12, y + 10, y + 24, ColorRef::DARK_GRAY);
+            surf.vline(x + 16, y + 10, y + 24, ColorRef::DARK_GRAY);
+            surf.vline(x + 20, y + 10, y + 24, ColorRef::DARK_GRAY);
+        }
+        IconType::MyDocuments => {
+            // Folder shape
+            let folder = ColorRef::rgb(255, 232, 128);
+            let folder_dark = ColorRef::rgb(192, 168, 64);
+
+            // Folder tab
+            surf.fill_rect(&Rect::new(x + 4, y + 4, x + 14, y + 10), folder_dark);
+
+            // Folder body
+            surf.fill_rect(&Rect::new(x + 4, y + 8, x + 28, y + 28), folder);
+            surf.fill_rect(&Rect::new(x + 4, y + 8, x + 28, y + 12), folder_dark);
+        }
+        IconType::NetworkPlaces => {
+            // Computer network icon
+            let pc = ColorRef::rgb(192, 192, 192);
+            let wire = ColorRef::rgb(64, 64, 64);
+
+            // Two small computers
+            surf.fill_rect(&Rect::new(x + 2, y + 8, x + 14, y + 20), pc);
+            surf.fill_rect(&Rect::new(x + 18, y + 8, x + 30, y + 20), pc);
+
+            // Screens
+            surf.fill_rect(&Rect::new(x + 4, y + 10, x + 12, y + 16), ColorRef::rgb(0, 128, 255));
+            surf.fill_rect(&Rect::new(x + 20, y + 10, x + 28, y + 16), ColorRef::rgb(0, 128, 255));
+
+            // Connection line
+            surf.hline(x + 8, x + 24, y + 24, wire);
+            surf.vline(x + 8, y + 20, y + 24, wire);
+            surf.vline(x + 24, y + 20, y + 24, wire);
+        }
+    }
+}
+
+/// Draw icon label with shadow
+fn draw_icon_label(surf: &super::super::gdi::surface::Surface, center_x: i32, y: i32, text: &str) {
+    // Calculate text width (rough estimate: 6 pixels per character)
+    let text_width = (text.len() as i32) * 6;
+    let x = center_x - text_width / 2;
+
+    // Draw shadow
+    for (i, c) in text.chars().enumerate() {
+        let char_x = x + (i as i32) * 6 + 1;
+        draw_char(surf, char_x, y + 1, c, ColorRef::BLACK);
+    }
+
+    // Draw text
+    for (i, c) in text.chars().enumerate() {
+        let char_x = x + (i as i32) * 6;
+        draw_char(surf, char_x, y, c, ColorRef::WHITE);
+    }
+}
+
+/// Draw a single character (simple bitmap font)
+fn draw_char(surf: &super::super::gdi::surface::Surface, x: i32, y: i32, c: char, color: ColorRef) {
+    // Simple 5x7 font rendering
+    let pattern = get_char_pattern(c);
+    for (row, &bits) in pattern.iter().enumerate() {
+        for col in 0..5 {
+            if (bits >> (4 - col)) & 1 == 1 {
+                surf.set_pixel(x + col, y + row as i32, color);
+            }
+        }
+    }
+}
+
+/// Get 5x7 pattern for a character
+fn get_char_pattern(c: char) -> [u8; 7] {
+    match c.to_ascii_uppercase() {
+        'A' => [0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001],
+        'B' => [0b11110, 0b10001, 0b11110, 0b10001, 0b10001, 0b10001, 0b11110],
+        'C' => [0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110],
+        'D' => [0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110],
+        'E' => [0b11111, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000, 0b11111],
+        'F' => [0b11111, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000, 0b10000],
+        'G' => [0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01110],
+        'H' => [0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001, 0b10001],
+        'I' => [0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110],
+        'K' => [0b10001, 0b10010, 0b11100, 0b10010, 0b10001, 0b10001, 0b10001],
+        'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
+        'M' => [0b10001, 0b11011, 0b10101, 0b10001, 0b10001, 0b10001, 0b10001],
+        'N' => [0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001, 0b10001],
+        'O' => [0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
+        'P' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000],
+        'R' => [0b11110, 0b10001, 0b10001, 0b11110, 0b10010, 0b10001, 0b10001],
+        'S' => [0b01110, 0b10001, 0b10000, 0b01110, 0b00001, 0b10001, 0b01110],
+        'T' => [0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100],
+        'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
+        'W' => [0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b11011, 0b10001],
+        'Y' => [0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
+        ' ' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000],
+        _ => [0b00000, 0b00000, 0b00000, 0b00100, 0b00000, 0b00000, 0b00000], // dot for unknown
     }
 }
 
