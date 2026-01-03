@@ -495,6 +495,12 @@ pub fn update_cursor() {
     draw_cursor();
 }
 
+/// Invalidate cursor background (prevents restoring old pixels)
+pub fn invalidate_cursor_background() {
+    let mut bg = CURSOR_BACKGROUND.lock();
+    bg.valid = false;
+}
+
 /// Clip cursor to rectangle
 pub fn clip_cursor(left: i32, top: i32, right: i32, bottom: i32) {
     let x = CURSOR_X.load(Ordering::Relaxed);

@@ -948,9 +948,13 @@ fn handle_desktop_menu_click(x: i32, y: i32) -> bool {
 fn hide_desktop_context_menu() {
     if DESKTOP_MENU_VISIBLE.load(Ordering::SeqCst) {
         DESKTOP_MENU_VISIBLE.store(false, Ordering::SeqCst);
+        // Invalidate cursor background so it doesn't restore menu pixels
+        super::cursor::invalidate_cursor_background();
         // Repaint to clear menu
         super::paint::repaint_all();
         paint_taskbar();
+        // Redraw cursor with fresh background
+        super::cursor::draw_cursor();
     }
 }
 
@@ -1778,9 +1782,13 @@ fn show_date_tooltip() {
     if was_visible {
         // Hide it
         DATE_TOOLTIP_VISIBLE.store(false, Ordering::SeqCst);
+        // Invalidate cursor background so it doesn't restore tooltip pixels
+        super::cursor::invalidate_cursor_background();
         // Repaint to clear tooltip
         paint_desktop();
         paint_taskbar();
+        // Redraw cursor with fresh background
+        super::cursor::draw_cursor();
         return;
     }
 
@@ -1819,11 +1827,58 @@ fn show_date_tooltip() {
             _ => "Unknown",
         };
 
-        // Calculate tooltip position and size
-        // Estimated width: day name (9) + month name (9) + day (2) + year (4) + punctuation = ~30 chars
-        let tooltip_width = 180;
-        let tooltip_height = 20;
-        let tooltip_x = width as i32 - tooltip_width - 5;
+        // Build date string first to calculate dynamic width
+        let mut date_buf = [0u8; 64];
+        let mut buf_pos = 0;
+
+        // Copy day name
+        let day_bytes = day_name.as_bytes();
+        date_buf[buf_pos..buf_pos + day_bytes.len()].copy_from_slice(day_bytes);
+        buf_pos += day_bytes.len();
+
+        // Add ", "
+        date_buf[buf_pos] = b',';
+        date_buf[buf_pos + 1] = b' ';
+        buf_pos += 2;
+
+        // Copy month name
+        let month_bytes = month_name.as_bytes();
+        date_buf[buf_pos..buf_pos + month_bytes.len()].copy_from_slice(month_bytes);
+        buf_pos += month_bytes.len();
+
+        // Add space
+        date_buf[buf_pos] = b' ';
+        buf_pos += 1;
+
+        // Add day number
+        if datetime.day >= 10 {
+            date_buf[buf_pos] = b'0' + (datetime.day / 10);
+            buf_pos += 1;
+        }
+        date_buf[buf_pos] = b'0' + (datetime.day % 10);
+        buf_pos += 1;
+
+        // Add ", "
+        date_buf[buf_pos] = b',';
+        date_buf[buf_pos + 1] = b' ';
+        buf_pos += 2;
+
+        // Add year
+        let year = datetime.year;
+        date_buf[buf_pos] = b'0' + (year / 1000) as u8;
+        date_buf[buf_pos + 1] = b'0' + ((year / 100) % 10) as u8;
+        date_buf[buf_pos + 2] = b'0' + ((year / 10) % 10) as u8;
+        date_buf[buf_pos + 3] = b'0' + (year % 10) as u8;
+        buf_pos += 4;
+
+        // Get the complete date string
+        let date_str = core::str::from_utf8(&date_buf[..buf_pos]).unwrap_or("Invalid Date");
+
+        // Calculate dynamic tooltip size based on string length
+        // Average ~8 pixels per character + 16 pixels padding
+        let tooltip_width = (date_str.len() as i32) * 8 + 16;
+        let tooltip_height = 22;
+        let tooltip_x = width as i32 - tooltip_width - 8;
         let tooltip_y = taskbar_y - tooltip_height - 2;
 
         let tooltip_rect = Rect::new(
@@ -1840,41 +1895,12 @@ fn show_date_tooltip() {
         // Draw border
         super::super::gdi::draw_edge_sunken(hdc, &tooltip_rect);
 
-        // Draw text (day name, month, day number, year separately)
+        // Draw text
         dc::set_text_color(hdc, ColorRef::BLACK);
         dc::set_bk_mode(hdc, dc::BkMode::Transparent);
 
-        // Draw: "Wednesday, January 2, 2026"
-        let mut text_x = tooltip_x + 8;
-        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, day_name);
-        text_x += (day_name.len() as i32) * 6;
-        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, ", ");
-        text_x += 12;
-        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, month_name);
-        text_x += (month_name.len() as i32) * 6;
-        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, " ");
-        text_x += 6;
-        // Draw day as two digits
-        let day_tens = datetime.day / 10;
-        let day_ones = datetime.day % 10;
-        if day_tens > 0 {
-            let d = [b'0' + day_tens];
-            super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, core::str::from_utf8(&d).unwrap_or(""));
-            text_x += 6;
-        }
-        let d = [b'0' + day_ones];
-        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, core::str::from_utf8(&d).unwrap_or(""));
-        text_x += 6;
-        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, ", ");
-        text_x += 12;
-        // Draw year
-        let year = datetime.year;
-        let y3 = (year / 1000) as u8;
-        let y2 = ((year / 100) % 10) as u8;
-        let y1 = ((year / 10) % 10) as u8;
-        let y0 = (year % 10) as u8;
-        let yc = [b'0' + y3, b'0' + y2, b'0' + y1, b'0' + y0];
-        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, core::str::from_utf8(&yc).unwrap_or(""));
+        // Render the date string (already built above)
+        super::super::gdi::text_out(hdc, tooltip_x + 8, tooltip_y + 4, date_str);
 
         dc::delete_dc(hdc);
     }
@@ -2138,9 +2164,15 @@ fn hide_start_menu() {
     START_MENU_VISIBLE.store(false, Ordering::SeqCst);
     crate::serial_println!("[EXPLORER] Hiding Start menu");
 
+    // Invalidate cursor background so it doesn't restore menu pixels
+    super::cursor::invalidate_cursor_background();
+
     // Repaint desktop to clear the menu
     paint_desktop();
     paint_taskbar();
+
+    // Redraw cursor with fresh background
+    super::cursor::draw_cursor();
 }
 
 /// Paint the Start menu with Windows 2003 styling
