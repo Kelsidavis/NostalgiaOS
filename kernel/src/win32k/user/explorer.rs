@@ -118,6 +118,22 @@ static RESIZE_WINDOW_RECT: SpinLock<Rect> = SpinLock::new(Rect::new(0, 0, 0, 0))
 const MIN_WINDOW_WIDTH: i32 = 100;
 const MIN_WINDOW_HEIGHT: i32 = 50;
 
+// ============================================================================
+// Double-Click Detection
+// ============================================================================
+
+/// Last click time (tick count)
+static LAST_CLICK_TIME: AtomicU32 = AtomicU32::new(0);
+
+/// Last click position
+static LAST_CLICK_POS: SpinLock<Point> = SpinLock::new(Point::new(0, 0));
+
+/// Double-click time threshold (in ticks)
+const DOUBLE_CLICK_TIME: u32 = 500;
+
+/// Double-click distance threshold
+const DOUBLE_CLICK_DIST: i32 = 4;
+
 /// Taskbar button entry
 #[derive(Debug, Clone, Copy)]
 struct TaskbarButtonEntry {
@@ -391,6 +407,19 @@ fn process_mouse_input(event: mouse::MouseEvent) {
                     return;
                 }
 
+                // Check for double-click
+                let current_time = crate::hal::rtc::get_system_time() as u32;
+                let last_time = LAST_CLICK_TIME.load(Ordering::SeqCst);
+                let last_pos = *LAST_CLICK_POS.lock();
+
+                let is_double_click = (current_time.wrapping_sub(last_time) < DOUBLE_CLICK_TIME)
+                    && ((x - last_pos.x).abs() < DOUBLE_CLICK_DIST)
+                    && ((y - last_pos.y).abs() < DOUBLE_CLICK_DIST);
+
+                // Update last click info
+                LAST_CLICK_TIME.store(current_time, Ordering::SeqCst);
+                *LAST_CLICK_POS.lock() = Point::new(x, y);
+
                 // Check if we clicked on taskbar first
                 let (_, height) = super::super::gdi::surface::get_primary_dimensions();
                 let taskbar_y = height as i32 - TASKBAR_HEIGHT;
@@ -399,6 +428,11 @@ fn process_mouse_input(event: mouse::MouseEvent) {
                 } else if START_MENU_VISIBLE.load(Ordering::SeqCst) {
                     // Click outside start menu - hide it
                     handle_start_menu_click(x, y);
+                } else if is_double_click {
+                    // Check for double-click on desktop icon
+                    if let Some(icon_idx) = get_icon_at_position(x, y) {
+                        handle_desktop_icon_double_click(icon_idx);
+                    }
                 } else {
                     // Check if we clicked on a window caption
                     try_start_window_drag(x, y);
@@ -1225,6 +1259,198 @@ fn get_char_pattern(c: char) -> [u8; 7] {
         'Y' => [0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100],
         ' ' => [0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000],
         _ => [0b00000, 0b00000, 0b00000, 0b00100, 0b00000, 0b00000, 0b00000], // dot for unknown
+    }
+}
+
+// ============================================================================
+// Desktop Icon Hit Testing
+// ============================================================================
+
+/// Get the desktop icon at a position, if any
+fn get_icon_at_position(x: i32, y: i32) -> Option<usize> {
+    // Check if position is in the desktop area (not on a window)
+    let hwnd = window::window_from_point(Point::new(x, y));
+    let desktop_hwnd = *DESKTOP_HWND.lock();
+    if hwnd.is_valid() && hwnd != desktop_hwnd {
+        return None;
+    }
+
+    // Calculate icon positions and check each one
+    let mut icon_x = ICON_MARGIN;
+    let mut icon_y = ICON_MARGIN;
+
+    // Each icon has a clickable area including the icon and label
+    let icon_height = ICON_SIZE + 20; // Icon + label
+
+    for (idx, _icon) in DESKTOP_ICONS.iter().enumerate() {
+        let icon_rect = Rect::new(
+            icon_x - 5,
+            icon_y - 5,
+            icon_x + ICON_SIZE + 5,
+            icon_y + icon_height,
+        );
+
+        if x >= icon_rect.left && x < icon_rect.right &&
+           y >= icon_rect.top && y < icon_rect.bottom {
+            return Some(idx);
+        }
+
+        // Move to next position (vertical layout)
+        icon_y += ICON_SPACING_Y;
+    }
+
+    None
+}
+
+/// Handle double-click on a desktop icon
+fn handle_desktop_icon_double_click(icon_idx: usize) {
+    if icon_idx >= DESKTOP_ICONS.len() {
+        return;
+    }
+
+    let icon = &DESKTOP_ICONS[icon_idx];
+    crate::serial_println!("[EXPLORER] Double-clicked on: {}", icon.name);
+
+    match icon.icon_type {
+        IconType::MyComputer => {
+            // Open "My Computer" window - shows drives
+            create_my_computer_window();
+        }
+        IconType::RecycleBin => {
+            // Open Recycle Bin window
+            create_simple_window("Recycle Bin", "Recycle Bin is empty");
+        }
+        IconType::MyDocuments => {
+            // Open My Documents
+            create_simple_window("My Documents", "Your documents folder");
+        }
+        IconType::NetworkPlaces => {
+            // Open Network Places
+            create_simple_window("Network Places", "Network resources");
+        }
+    }
+}
+
+/// Create a simple window with title and content
+fn create_simple_window(title: &str, content: &str) {
+    let hwnd = window::create_window(
+        "EXPLORER_WINDOW",
+        title,
+        WindowStyle::OVERLAPPEDWINDOW | WindowStyle::VISIBLE,
+        WindowStyleEx::empty(),
+        200, 100, 400, 300,
+        super::super::HWND::NULL,
+        0, // menu
+    );
+
+    if hwnd.is_valid() {
+        // Add to taskbar
+        add_taskbar_button(hwnd);
+
+        // Make it active
+        window::set_foreground_window(hwnd);
+        input::set_active_window(hwnd);
+
+        // Paint it
+        super::paint::draw_window_frame(hwnd);
+
+        // Paint content
+        if let Some(wnd) = window::get_window(hwnd) {
+            if let Ok(hdc) = dc::create_display_dc() {
+                let surface_handle = dc::get_dc_surface(hdc);
+                if let Some(surf) = super::super::gdi::surface::get_surface(surface_handle) {
+                    // Fill client area
+                    let client_rect = Rect::new(
+                        wnd.client_rect.left + wnd.rect.left,
+                        wnd.client_rect.top + wnd.rect.top,
+                        wnd.client_rect.right + wnd.rect.left,
+                        wnd.client_rect.bottom + wnd.rect.top,
+                    );
+                    surf.fill_rect(&client_rect, ColorRef::WHITE);
+
+                    // Draw content text
+                    dc::set_text_color(hdc, ColorRef::BLACK);
+                    super::super::gdi::draw::gdi_text_out(
+                        hdc,
+                        client_rect.left + 10,
+                        client_rect.top + 10,
+                        content,
+                    );
+                }
+                dc::delete_dc(hdc);
+            }
+        }
+
+        paint_taskbar();
+    }
+}
+
+/// Create My Computer window with drive list
+fn create_my_computer_window() {
+    let hwnd = window::create_window(
+        "EXPLORER_WINDOW",
+        "My Computer",
+        WindowStyle::OVERLAPPEDWINDOW | WindowStyle::VISIBLE,
+        WindowStyleEx::empty(),
+        150, 80, 500, 400,
+        super::super::HWND::NULL,
+        0, // menu
+    );
+
+    if hwnd.is_valid() {
+        // Add to taskbar
+        add_taskbar_button(hwnd);
+
+        // Make it active
+        window::set_foreground_window(hwnd);
+        input::set_active_window(hwnd);
+
+        // Paint it
+        super::paint::draw_window_frame(hwnd);
+
+        // Paint My Computer content
+        if let Some(wnd) = window::get_window(hwnd) {
+            if let Ok(hdc) = dc::create_display_dc() {
+                let surface_handle = dc::get_dc_surface(hdc);
+                if let Some(surf) = super::super::gdi::surface::get_surface(surface_handle) {
+                    // Fill client area
+                    let client_rect = Rect::new(
+                        wnd.client_rect.left + wnd.rect.left,
+                        wnd.client_rect.top + wnd.rect.top,
+                        wnd.client_rect.right + wnd.rect.left,
+                        wnd.client_rect.bottom + wnd.rect.top,
+                    );
+                    surf.fill_rect(&client_rect, ColorRef::WHITE);
+
+                    // Draw drive icons
+                    let drives = [
+                        ("C:", "Local Disk"),
+                        ("D:", "CD-ROM Drive"),
+                    ];
+
+                    let mut y = client_rect.top + 20;
+                    for (letter, label) in drives.iter() {
+                        // Draw simple drive icon
+                        let icon_x = client_rect.left + 30;
+
+                        // Hard drive shape
+                        surf.fill_rect(&Rect::new(icon_x, y, icon_x + 32, y + 24), ColorRef::rgb(192, 192, 192));
+                        surf.fill_rect(&Rect::new(icon_x + 2, y + 2, icon_x + 30, y + 6), ColorRef::rgb(0, 128, 0));
+                        surf.hline(icon_x, icon_x + 32, y + 12, ColorRef::GRAY);
+
+                        // Drive label
+                        dc::set_text_color(hdc, ColorRef::BLACK);
+                        super::super::gdi::draw::gdi_text_out(hdc, icon_x + 40, y + 4, letter);
+                        super::super::gdi::draw::gdi_text_out(hdc, icon_x + 70, y + 4, label);
+
+                        y += 50;
+                    }
+                }
+                dc::delete_dc(hdc);
+            }
+        }
+
+        paint_taskbar();
     }
 }
 
