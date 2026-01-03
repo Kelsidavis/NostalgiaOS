@@ -458,6 +458,15 @@ fn call_window_proc(hwnd: HWND, msg: &Message) -> isize {
             let y = ((msg.lparam >> 16) & 0xFFFF) as i16 as i32;
             nc_hit_test(hwnd, x, y)
         }
+        WM_NCLBUTTONDOWN => {
+            // Non-client left button down - handle caption button clicks
+            let hit_test = msg.wparam as isize;
+            handle_nc_button_down(hwnd, hit_test)
+        }
+        WM_SYSCOMMAND => {
+            // System command - handle minimize, maximize, close, etc.
+            handle_sys_command(hwnd, msg.wparam, msg.lparam)
+        }
         WM_SETTEXT => {
             // Set window text
             0
@@ -601,4 +610,114 @@ fn nc_hit_test(hwnd: HWND, x: i32, y: i32) -> isize {
 
     // Must be client area
     hittest::HTCLIENT
+}
+
+// ============================================================================
+// Non-Client Button Handling
+// ============================================================================
+
+/// Handle non-client left button down
+fn handle_nc_button_down(hwnd: HWND, hit_test: isize) -> isize {
+    match hit_test {
+        hittest::HTCLOSE => {
+            // Close button clicked - send WM_SYSCOMMAND SC_CLOSE
+            send_message(hwnd, WM_SYSCOMMAND, syscmd::SC_CLOSE, 0);
+            0
+        }
+        hittest::HTMINBUTTON => {
+            // Minimize button clicked
+            send_message(hwnd, WM_SYSCOMMAND, syscmd::SC_MINIMIZE, 0);
+            0
+        }
+        hittest::HTMAXBUTTON => {
+            // Maximize button clicked
+            // Check if already maximized -> restore, else maximize
+            if let Some(wnd) = super::window::get_window(hwnd) {
+                if wnd.maximized {
+                    send_message(hwnd, WM_SYSCOMMAND, syscmd::SC_RESTORE, 0);
+                } else {
+                    send_message(hwnd, WM_SYSCOMMAND, syscmd::SC_MAXIMIZE, 0);
+                }
+            }
+            0
+        }
+        hittest::HTCAPTION => {
+            // Caption clicked - initiate window move
+            // TODO: Implement window dragging
+            crate::serial_println!("[USER/Msg] Caption click - would start window drag");
+            0
+        }
+        _ => 0,
+    }
+}
+
+/// Handle system commands (WM_SYSCOMMAND)
+fn handle_sys_command(hwnd: HWND, wparam: usize, _lparam: isize) -> isize {
+    let cmd = wparam & 0xFFF0; // Mask out lower bits (contain mouse position info)
+
+    match cmd {
+        syscmd::SC_CLOSE => {
+            // Close the window
+            crate::serial_println!("[USER/Msg] SC_CLOSE: closing window {:#x}", hwnd.raw());
+            send_message(hwnd, WM_CLOSE, 0, 0);
+            0
+        }
+        syscmd::SC_MINIMIZE => {
+            // Minimize the window
+            crate::serial_println!("[USER/Msg] SC_MINIMIZE: minimizing window {:#x}", hwnd.raw());
+            super::window::show_window(hwnd, super::ShowCommand::Minimize);
+            // Repaint desktop and other windows
+            super::paint::repaint_all();
+            0
+        }
+        syscmd::SC_MAXIMIZE => {
+            // Maximize the window
+            crate::serial_println!("[USER/Msg] SC_MAXIMIZE: maximizing window {:#x}", hwnd.raw());
+            if super::window::get_window(hwnd).is_some() {
+                // Get screen dimensions for maximize
+                let (width, height) = super::super::gdi::surface::get_primary_dimensions();
+                // Leave room for taskbar
+                let taskbar_height = 28;
+                super::window::set_window_pos(
+                    hwnd,
+                    0, 0,
+                    width as i32,
+                    height as i32 - taskbar_height,
+                    0
+                );
+                super::window::with_window_mut(hwnd, |w| {
+                    w.maximized = true;
+                    w.minimized = false;
+                });
+                super::paint::draw_window_frame(hwnd);
+            }
+            0
+        }
+        syscmd::SC_RESTORE => {
+            // Restore the window from minimized or maximized state
+            crate::serial_println!("[USER/Msg] SC_RESTORE: restoring window {:#x}", hwnd.raw());
+            super::window::show_window(hwnd, super::ShowCommand::Restore);
+            // TODO: Restore to saved size/position before maximize
+            super::window::with_window_mut(hwnd, |w| {
+                w.maximized = false;
+                w.minimized = false;
+            });
+            super::paint::repaint_all();
+            0
+        }
+        syscmd::SC_MOVE => {
+            // Enter move mode
+            crate::serial_println!("[USER/Msg] SC_MOVE: move mode for window {:#x}", hwnd.raw());
+            0
+        }
+        syscmd::SC_SIZE => {
+            // Enter size mode
+            crate::serial_println!("[USER/Msg] SC_SIZE: size mode for window {:#x}", hwnd.raw());
+            0
+        }
+        _ => {
+            crate::serial_println!("[USER/Msg] Unhandled syscommand: {:#x}", cmd);
+            0
+        }
+    }
 }
