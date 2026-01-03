@@ -666,8 +666,9 @@ fn handle_sys_command(hwnd: HWND, wparam: usize, _lparam: isize) -> isize {
             // Minimize the window
             crate::serial_println!("[USER/Msg] SC_MINIMIZE: minimizing window {:#x}", hwnd.raw());
             super::window::show_window(hwnd, super::ShowCommand::Minimize);
-            // Repaint desktop and other windows
+            // Repaint desktop and other windows (minimized window won't be painted)
             super::paint::repaint_all();
+            super::explorer::paint_taskbar();
             0
         }
         syscmd::SC_MAXIMIZE => {

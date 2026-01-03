@@ -452,7 +452,8 @@ fn repaint_window_tree(hwnd: HWND) {
     }
 
     if let Some(wnd) = window::get_window(hwnd) {
-        if wnd.visible {
+        // Skip minimized windows (they shouldn't be painted on screen)
+        if wnd.visible && !wnd.minimized {
             // Paint this window's frame
             draw_window_frame(hwnd);
 
