@@ -272,12 +272,10 @@ pub extern "C" fn kernel_main(boot_info_ptr: *const BootInfo) -> ! {
     kprintln!("[Phase 1] Complete");
     serial_println!("[Phase 1] Complete");
 
-    // SMP disabled for now - AP trampoline needs low memory identity mapping
-    // TODO: Fix AP trampoline memory mapping before enabling SMP
-    // kprintln!("[SMP] Starting multiprocessor support...");
-    // unsafe { hal::apic::start_all_aps(); }
-    kprintln!("[SMP] Running on single CPU (SMP disabled)");
-    serial_println!("[SMP] Running on single CPU (SMP disabled)");
+    // Start Application Processors (SMP)
+    kprintln!("[SMP] Starting multiprocessor support...");
+    serial_println!("[SMP] Starting multiprocessor support...");
+    unsafe { hal::apic::start_all_aps(); }
     kprintln!("[SMP] Active CPUs: {}", ke::prcb::get_active_cpu_count());
     serial_println!("[SMP] Active CPUs: {}", ke::prcb::get_active_cpu_count());
 

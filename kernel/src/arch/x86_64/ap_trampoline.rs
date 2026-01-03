@@ -182,12 +182,14 @@ pub unsafe fn setup_trampoline() {
 
     // Set up GDT descriptor at 0x8150
     // Format: 2-byte limit, 4-byte base (for 16/32-bit mode)
+    // Note: The base is at offset +2, which is NOT 4-byte aligned,
+    // so we must use write_unaligned for the 32-bit base write
     let gdt_desc_ptr = TRAMPOLINE_GDT_DESC as *mut u8;
     let gdt_limit: u16 = (TRAMPOLINE_GDT_ENTRIES.len() * 8 - 1) as u16;
     let gdt_base: u32 = TRAMPOLINE_GDT as u32;
 
     ptr::write_volatile(gdt_desc_ptr as *mut u16, gdt_limit);
-    ptr::write_volatile((gdt_desc_ptr.add(2)) as *mut u32, gdt_base);
+    ptr::write_unaligned((gdt_desc_ptr.add(2)) as *mut u32, gdt_base);
 
     // Store AP entry point address at 0x8158
     let entry_ptr = TRAMPOLINE_ENTRY_ADDR as *mut u64;
