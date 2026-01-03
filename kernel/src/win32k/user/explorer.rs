@@ -440,8 +440,18 @@ fn process_mouse_input(event: mouse::MouseEvent) {
                         try_caption_double_click(x, y);
                     }
                 } else {
-                    // Check if we clicked on a window caption
-                    try_start_window_drag(x, y);
+                    // Check if we clicked on a desktop icon (single click = select)
+                    if let Some(icon_idx) = get_icon_at_position(x, y) {
+                        select_desktop_icon(Some(icon_idx));
+                    } else {
+                        // Clicked on desktop but not on icon - deselect
+                        let hwnd = window::window_from_point(Point::new(x, y));
+                        if !hwnd.is_valid() || hwnd == window::get_desktop_window() {
+                            select_desktop_icon(None);
+                        }
+                        // Check if we clicked on a window caption
+                        try_start_window_drag(x, y);
+                    }
                 }
             } else if was_down {
                 // Button released
@@ -1157,6 +1167,19 @@ static DESKTOP_ICONS: [DesktopIcon; 4] = [
     DesktopIcon { name: "Network Places", icon_type: IconType::NetworkPlaces },
 ];
 
+/// Currently selected desktop icon (None = no selection)
+static SELECTED_ICON: SpinLock<Option<usize>> = SpinLock::new(None);
+
+/// Select a desktop icon
+fn select_desktop_icon(idx: Option<usize>) {
+    let current = *SELECTED_ICON.lock();
+    if current != idx {
+        *SELECTED_ICON.lock() = idx;
+        // Repaint desktop to show selection
+        paint_desktop();
+    }
+}
+
 /// Paint desktop icons
 fn paint_desktop_icons(hdc: HDC) {
     let surface_handle = dc::get_dc_surface(hdc);
@@ -1165,17 +1188,33 @@ fn paint_desktop_icons(hdc: HDC) {
         None => return,
     };
 
+    let selected = *SELECTED_ICON.lock();
     let mut x = ICON_MARGIN;
     let mut y = ICON_MARGIN;
 
-    for icon in DESKTOP_ICONS.iter() {
+    for (idx, icon) in DESKTOP_ICONS.iter().enumerate() {
+        let is_selected = selected == Some(idx);
+
+        // Draw selection highlight if selected
+        if is_selected {
+            // Draw highlight rectangle around icon and label
+            let highlight_rect = Rect::new(
+                x - 4,
+                y - 2,
+                x + ICON_SIZE + 4,
+                y + ICON_SIZE + 20,
+            );
+            // Blue selection background (semi-transparent effect via dithering)
+            surf.fill_rect(&highlight_rect, ColorRef::rgb(0, 84, 227));
+        }
+
         // Draw icon
         draw_desktop_icon(&surf, x, y, icon.icon_type);
 
-        // Draw label
+        // Draw label with selection color
         let label_x = x + ICON_SIZE / 2;
         let label_y = y + ICON_SIZE + 4;
-        draw_icon_label(&surf, label_x, label_y, icon.name);
+        draw_icon_label(&surf, label_x, label_y, icon.name, is_selected);
 
         // Move to next position (vertical layout)
         y += ICON_SPACING_Y;
@@ -1251,21 +1290,29 @@ fn draw_desktop_icon(surf: &super::super::gdi::surface::Surface, x: i32, y: i32,
 }
 
 /// Draw icon label with shadow
-fn draw_icon_label(surf: &super::super::gdi::surface::Surface, center_x: i32, y: i32, text: &str) {
+fn draw_icon_label(surf: &super::super::gdi::surface::Surface, center_x: i32, y: i32, text: &str, selected: bool) {
     // Calculate text width (rough estimate: 6 pixels per character)
     let text_width = (text.len() as i32) * 6;
     let x = center_x - text_width / 2;
 
-    // Draw shadow
-    for (i, c) in text.chars().enumerate() {
-        let char_x = x + (i as i32) * 6 + 1;
-        draw_char(surf, char_x, y + 1, c, ColorRef::BLACK);
-    }
-
-    // Draw text
-    for (i, c) in text.chars().enumerate() {
-        let char_x = x + (i as i32) * 6;
-        draw_char(surf, char_x, y, c, ColorRef::WHITE);
+    if selected {
+        // Selected: white text on blue (no shadow needed, background already blue)
+        for (i, c) in text.chars().enumerate() {
+            let char_x = x + (i as i32) * 6;
+            draw_char(surf, char_x, y, c, ColorRef::WHITE);
+        }
+    } else {
+        // Normal: white text with black shadow
+        // Draw shadow
+        for (i, c) in text.chars().enumerate() {
+            let char_x = x + (i as i32) * 6 + 1;
+            draw_char(surf, char_x, y + 1, c, ColorRef::BLACK);
+        }
+        // Draw text
+        for (i, c) in text.chars().enumerate() {
+            let char_x = x + (i as i32) * 6;
+            draw_char(surf, char_x, y, c, ColorRef::WHITE);
+        }
     }
 }
 
