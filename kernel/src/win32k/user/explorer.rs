@@ -1048,9 +1048,9 @@ pub fn handle_start_menu_click(x: i32, y: i32) -> bool {
 
         match item {
             3 => {
-                // Run...
+                // Run... - for now, create a test window
                 hide_start_menu();
-                // TODO: Show Run dialog
+                create_test_window();
             }
             4 => {
                 // Shut Down...
@@ -1072,4 +1072,102 @@ pub fn handle_start_menu_click(x: i32, y: i32) -> bool {
     }
 
     true
+}
+
+// ============================================================================
+// Test Window Creation
+// ============================================================================
+
+/// Counter for test window naming
+static TEST_WINDOW_COUNT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(1);
+
+/// Create a test window for desktop verification
+fn create_test_window() {
+    // Get unique window number
+    let num = TEST_WINDOW_COUNT.fetch_add(1, Ordering::SeqCst);
+
+    // Calculate position (cascade windows from top-left)
+    let offset = ((num - 1) % 10) as i32 * 30;
+    let x = 50 + offset;
+    let y = 50 + offset;
+    let width = 300;
+    let height = 200;
+
+    // Create window with proper overlapped style (has caption, system menu, min/max buttons)
+    let hwnd = window::create_window(
+        "TestWindow",
+        "Test Window",
+        WindowStyle::OVERLAPPEDWINDOW | WindowStyle::VISIBLE,
+        WindowStyleEx::empty(),
+        x, y,
+        width, height,
+        HWND::NULL,
+        0,
+    );
+
+    if hwnd.is_valid() {
+        crate::serial_println!("[EXPLORER] Created test window #{}: {:#x}", num, hwnd.raw());
+
+        // Set window title with number
+        let title_buf = &[
+            b'T', b'e', b's', b't', b' ',
+            b'W', b'i', b'n', b'd', b'o', b'w', b' ',
+            b'#', b'0' + (num % 10) as u8,
+        ];
+        window::with_window_mut(hwnd, |wnd| {
+            wnd.title_len = 14;
+            for (i, &b) in title_buf.iter().enumerate() {
+                wnd.title[i] = b;
+            }
+        });
+
+        // Make it the active window
+        window::set_foreground_window(hwnd);
+        input::set_active_window(hwnd);
+
+        // Paint the window
+        super::paint::draw_window_frame(hwnd);
+
+        // Paint window client area with a simple color
+        paint_test_window_client(hwnd);
+
+        // Add to taskbar and repaint
+        add_taskbar_button(hwnd);
+        paint_taskbar();
+    } else {
+        crate::serial_println!("[EXPLORER] Failed to create test window");
+    }
+}
+
+/// Paint test window client area
+fn paint_test_window_client(hwnd: HWND) {
+    if let Some(wnd) = window::get_window(hwnd) {
+        if let Ok(hdc) = dc::create_display_dc() {
+            let metrics = wnd.get_frame_metrics();
+
+            // Calculate client area in screen coordinates
+            let client_x = wnd.rect.left + metrics.border_width;
+            let client_y = wnd.rect.top + metrics.border_width + metrics.caption_height;
+            let client_w = wnd.rect.width() - metrics.border_width * 2;
+            let client_h = wnd.rect.height() - metrics.border_width * 2 - metrics.caption_height;
+
+            let client_rect = Rect::new(
+                client_x, client_y,
+                client_x + client_w, client_y + client_h
+            );
+
+            // Fill with window background color
+            let bg_brush = brush::create_solid_brush(ColorRef::WINDOW_BG);
+            super::super::gdi::fill_rect(hdc, &client_rect, bg_brush);
+
+            // Draw some text in the window
+            dc::set_text_color(hdc, ColorRef::BLACK);
+            dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+            super::super::gdi::text_out(hdc, client_x + 10, client_y + 10, "Test Window Content");
+            super::super::gdi::text_out(hdc, client_x + 10, client_y + 30, "Click title bar to drag");
+            super::super::gdi::text_out(hdc, client_x + 10, client_y + 50, "Click X to close");
+
+            dc::delete_dc(hdc);
+        }
+    }
 }
