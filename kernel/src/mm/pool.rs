@@ -197,8 +197,16 @@ impl PoolArena {
 /// Required: (32+64+128+256+512+1024+2048+4096+8192+16384) * 256 = 8.2MB
 const POOL_HEAP_SIZE: usize = 10 * 1024 * 1024;
 
-/// Pool heap storage
-static mut POOL_HEAP: [u8; POOL_HEAP_SIZE] = [0; POOL_HEAP_SIZE];
+/// Aligned pool heap wrapper
+/// The pool heap must be aligned to at least 16 bytes to ensure all
+/// PoolHeader writes are properly aligned (PoolHeader contains u32 fields)
+#[repr(C, align(16))]
+struct AlignedPoolHeap {
+    data: [u8; POOL_HEAP_SIZE],
+}
+
+/// Pool heap storage (properly aligned for PoolHeader access)
+static mut POOL_HEAP: AlignedPoolHeap = AlignedPoolHeap { data: [0; POOL_HEAP_SIZE] };
 
 /// Pool arenas for each size class
 static mut POOL_ARENAS: [PoolArena; 10] = [
@@ -270,7 +278,7 @@ pub unsafe fn ex_allocate_pool_with_tag(
         return ptr::null_mut();
     }
 
-    let block_ptr = POOL_HEAP.as_mut_ptr().add(block_offset);
+    let block_ptr = POOL_HEAP.data.as_mut_ptr().add(block_offset);
 
     // Write header
     let header = block_ptr as *mut PoolHeader;
@@ -337,7 +345,7 @@ pub unsafe fn ex_free_pool_with_tag(ptr: *mut u8, tag: PoolTag) {
 
     // Calculate block index
     let arena_offset = get_arena_offset(class_idx);
-    let heap_base = POOL_HEAP.as_ptr() as usize;
+    let heap_base = POOL_HEAP.data.as_ptr() as usize;
     let block_addr = header_ptr as usize;
     let block_offset = block_addr - heap_base;
 

@@ -38,8 +38,8 @@ mkdir -p "$ESP_DIR/EFI/nostalgia"
 cp "$TARGET_DIR/x86_64-unknown-uefi/release/uefi-loader.efi" \
    "$ESP_DIR/EFI/BOOT/BOOTX64.EFI"
 
-# Copy kernel
-cp "$TARGET_DIR/x86_64-unknown-none/release/kernel.bin" \
+# Copy kernel (ELF format required by bootloader)
+cp "$TARGET_DIR/x86_64-unknown-none/release/kernel" \
    "$ESP_DIR/EFI/nostalgia/kernel.bin"
 
 echo ""

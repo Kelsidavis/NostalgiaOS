@@ -272,13 +272,12 @@ pub extern "C" fn kernel_main(boot_info_ptr: *const BootInfo) -> ! {
     kprintln!("[Phase 1] Complete");
     serial_println!("[Phase 1] Complete");
 
-    // Start Application Processors (SMP)
-    kprintln!("");
-    kprintln!("[SMP] Starting multiprocessor support...");
-    serial_println!("[SMP] Starting multiprocessor support...");
-    unsafe {
-        hal::apic::start_all_aps();
-    }
+    // SMP disabled for now - AP trampoline needs low memory identity mapping
+    // TODO: Fix AP trampoline memory mapping before enabling SMP
+    // kprintln!("[SMP] Starting multiprocessor support...");
+    // unsafe { hal::apic::start_all_aps(); }
+    kprintln!("[SMP] Running on single CPU (SMP disabled)");
+    serial_println!("[SMP] Running on single CPU (SMP disabled)");
     kprintln!("[SMP] Active CPUs: {}", ke::prcb::get_active_cpu_count());
     serial_println!("[SMP] Active CPUs: {}", ke::prcb::get_active_cpu_count());
 
@@ -559,15 +558,14 @@ fn phase1_init(boot_info: &BootInfo) {
     // Test syscall infrastructure (runs regardless of FS mount status)
     test_syscall();
 
-    // Create test threads to verify context switching
-    kprintln!("  Creating test threads...");
-    serial_println!("  Creating test threads...");
-    unsafe {
-        // Timer and APC tests
-        ke::init::create_test_threads();
-        // Multi-object wait tests
-        ke::init::create_wait_test_threads();
-    }
+    // Test threads disabled for clean desktop boot
+    // To enable scheduler stress testing, uncomment below:
+    // kprintln!("  Creating test threads...");
+    // serial_println!("  Creating test threads...");
+    // unsafe {
+    //     ke::init::create_test_threads();
+    //     ke::init::create_wait_test_threads();
+    // }
 
     // Initialize PIC and keyboard for PS/2 input
     kprintln!("  Initializing keyboard...");

@@ -412,18 +412,23 @@ pub fn ob_list_symbolic_links() -> Vec<(String, String)> {
 /// Initialize symbolic link subsystem
 pub fn obp_symlink_init() {
     // Create standard symbolic links
+    crate::serial_println!("[OB-SYMLINK] Creating standard symlinks...");
 
     // DosDevices aliases
+    crate::serial_println!("[OB-SYMLINK] Creating ??...");
     let _ = ob_create_symbolic_link("??", "\\DosDevices");
+    crate::serial_println!("[OB-SYMLINK] Creating GLOBAL??...");
     let _ = ob_create_symbolic_link("GLOBAL??", "\\DosDevices");
 
     // Common device links
+    crate::serial_println!("[OB-SYMLINK] Creating device links...");
     let _ = ob_create_symbolic_link("DosDevices\\NUL", "\\Device\\Null");
     let _ = ob_create_symbolic_link("DosDevices\\CON", "\\Device\\Console");
     let _ = ob_create_symbolic_link("DosDevices\\AUX", "\\Device\\Serial0");
     let _ = ob_create_symbolic_link("DosDevices\\PRN", "\\Device\\Parallel0");
 
     // PhysicalDrive links (for raw disk access)
+    crate::serial_println!("[OB-SYMLINK] Creating PhysicalDrive0...");
     let _ = ob_create_symbolic_link("DosDevices\\PhysicalDrive0", "\\Device\\Harddisk0\\Partition0");
 
     crate::serial_println!("[OB] Symbolic link subsystem initialized");
