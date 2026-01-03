@@ -101,7 +101,7 @@ pub struct IoResourceDescriptor {
     pub data: ResourceData,
 }
 
-/// I/O resource option flags
+// I/O resource option flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct IoResourceOption: u8 {

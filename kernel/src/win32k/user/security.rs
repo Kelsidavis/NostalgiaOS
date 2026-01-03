@@ -178,7 +178,7 @@ pub enum AceType {
     SystemMandatoryLabel = 17,
 }
 
-/// ACE flags
+// ACE flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct AceFlags: u8 {
@@ -468,7 +468,7 @@ pub fn show_group_dialog(
 // Principal Selection (Object Picker)
 // ============================================================================
 
-/// Object picker scope
+// Object picker scope
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct PickerScope: u32 {
@@ -485,7 +485,7 @@ bitflags::bitflags! {
     }
 }
 
-/// Object picker filter
+// Object picker filter
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct PickerFilter: u32 {
@@ -659,7 +659,7 @@ pub fn show_certificate_trust_dialog(
 // Password Dialog
 // ============================================================================
 
-/// Password dialog flags
+// Password dialog flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct PasswordFlags: u32 {

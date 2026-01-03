@@ -89,7 +89,7 @@ impl Default for ObjectClass {
     }
 }
 
-/// User account control flags
+// User account control flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct UserAccountControl: u32 {

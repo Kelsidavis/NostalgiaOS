@@ -87,7 +87,7 @@ pub enum DeviceTextType {
     LocationInformation = 1,
 }
 
-/// PnP device state flags
+// PnP device state flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct PnpDeviceState: u32 {

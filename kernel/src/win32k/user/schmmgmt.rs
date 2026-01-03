@@ -170,7 +170,7 @@ impl Default for ClassType {
     }
 }
 
-/// Search flags for attributes
+// Search flags for attributes
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SearchFlags: u32 {
@@ -201,7 +201,7 @@ impl Default for SearchFlags {
     }
 }
 
-/// System flags for schema objects
+// System flags for schema objects
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SystemFlags: u32 {

@@ -62,7 +62,7 @@ pub enum DeviceNodeType {
     RootEnumerator = 4,
 }
 
-/// Device node flags
+// Device node flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct DeviceNodeFlags: u32 {

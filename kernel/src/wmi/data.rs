@@ -195,7 +195,7 @@ pub struct WnodeTooSmall {
     pub size_needed: u32,
 }
 
-/// Data block flags
+// Data block flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct WmiDataBlockFlags: u32 {

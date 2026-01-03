@@ -120,7 +120,7 @@ pub enum DisplayType {
     NdsContainer = 0x0000000B,
 }
 
-/// Resource usage
+// Resource usage
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct ResourceUsage: u32 {
@@ -1008,7 +1008,7 @@ pub fn wnet_get_universal_name(
 // Browse Dialog
 // ============================================================================
 
-/// Browse dialog flags
+// Browse dialog flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct BrowseFlags: u32 {

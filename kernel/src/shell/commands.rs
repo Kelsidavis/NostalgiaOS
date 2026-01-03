@@ -16,6 +16,7 @@ static mut FMT_BUF: [u8; 512] = [0u8; 512];
 macro_rules! out {
     ($($arg:tt)*) => {{
         use core::fmt::Write;
+        #[allow(unused_unsafe)]
         unsafe {
             let buf = &mut *addr_of_mut!(FMT_BUF);
             let mut pos = 0usize;
@@ -35,6 +36,7 @@ macro_rules! outln {
     () => { shell_writeln(""); };
     ($($arg:tt)*) => {{
         use core::fmt::Write;
+        #[allow(unused_unsafe)]
         unsafe {
             let buf = &mut *addr_of_mut!(FMT_BUF);
             let mut pos = 0usize;
@@ -3085,7 +3087,7 @@ pub fn cmd_ldr(args: &[&str]) {
             let pid = args[1].parse::<u32>().unwrap_or(0);
             unsafe { crate::ps::ps_lookup_process_by_id(pid) as *mut crate::ps::EProcess }
         } else {
-            unsafe { crate::ps::get_system_process() }
+            crate::ps::get_system_process()
         };
 
         if process.is_null() {
@@ -3332,18 +3334,16 @@ pub fn cmd_usertest(args: &[&str]) {
     } else if eq_ignore_case(cmd, "info") {
         outln!("User-Mode Page Table Info:");
         outln!("");
-        unsafe {
-            if crate::mm::user_pages_initialized() {
-                let cr3 = crate::mm::get_user_cr3();
-                outln!("  User CR3:     {:#x}", cr3);
-                outln!("  Test Base:    {:#x}", crate::mm::USER_TEST_BASE);
-                outln!("  Stack Top:    {:#x}", crate::mm::USER_STACK_TOP);
-                outln!("  Status:       Initialized");
-            } else {
-                outln!("  Status:       Not initialized");
-                outln!("");
-                outln!("Use 'mm init' to initialize user-mode page tables.");
-            }
+        if crate::mm::user_pages_initialized() {
+            let cr3 = crate::mm::get_user_cr3();
+            outln!("  User CR3:     {:#x}", cr3);
+            outln!("  Test Base:    {:#x}", crate::mm::USER_TEST_BASE);
+            outln!("  Stack Top:    {:#x}", crate::mm::USER_STACK_TOP);
+            outln!("  Status:       Initialized");
+        } else {
+            outln!("  Status:       Not initialized");
+            outln!("");
+            outln!("Use 'mm init' to initialize user-mode page tables.");
         }
     } else if eq_ignore_case(cmd, "process") {
         cmd_usertest_process();
@@ -4369,30 +4369,28 @@ pub fn cmd_ke(args: &[&str]) {
         outln!("Current IRQL Status");
         outln!("");
 
-        unsafe {
-            let current_irql = ke::ke_get_current_irql();
-            let irql_name = match current_irql {
-                0 => "PASSIVE_LEVEL",
-                1 => "APC_LEVEL",
-                2 => "DISPATCH_LEVEL",
-                29 => "IPI_LEVEL",
-                30 => "POWER_LEVEL",
-                31 => "HIGH_LEVEL",
-                _ => "Device IRQL",
-            };
+        let current_irql = ke::ke_get_current_irql();
+        let irql_name = match current_irql {
+            0 => "PASSIVE_LEVEL",
+            1 => "APC_LEVEL",
+            2 => "DISPATCH_LEVEL",
+            29 => "IPI_LEVEL",
+            30 => "POWER_LEVEL",
+            31 => "HIGH_LEVEL",
+            _ => "Device IRQL",
+        };
 
-            outln!("Current IRQL: {} ({})", current_irql, irql_name);
-            outln!("");
-            outln!("IRQL thresholds:");
-            outln!("  DPC Level:  {}", ke::irql::DISPATCH_LEVEL);
-            outln!("  Synch Level: {}", ke::irql::SYNCH_LEVEL);
-            outln!("");
+        outln!("Current IRQL: {} ({})", current_irql, irql_name);
+        outln!("");
+        outln!("IRQL thresholds:");
+        outln!("  DPC Level:  {}", ke::irql::DISPATCH_LEVEL);
+        outln!("  Synch Level: {}", ke::irql::SYNCH_LEVEL);
+        outln!("");
 
-            let is_dpc = ke::ke_is_dpc_active();
-            let is_intr = ke::ke_is_executing_interrupt();
-            outln!("DPC Active:       {}", if is_dpc { "Yes" } else { "No" });
-            outln!("In Interrupt:     {}", if is_intr { "Yes" } else { "No" });
-        }
+        let is_dpc = ke::ke_is_dpc_active();
+        let is_intr = ke::ke_is_executing_interrupt();
+        outln!("DPC Active:       {}", if is_dpc { "Yes" } else { "No" });
+        outln!("In Interrupt:     {}", if is_intr { "Yes" } else { "No" });
     } else if eq_ignore_case(cmd, "dpc") {
         outln!("Deferred Procedure Call (DPC) Information");
         outln!("");
@@ -4402,12 +4400,10 @@ pub fn cmd_ke(args: &[&str]) {
         outln!("  HighImportance:   Queue at head");
         outln!("");
 
-        unsafe {
-            let _prcb = ke::get_current_prcb();
-            outln!("Current processor DPC status:");
-            outln!("  DPC list:     (pending DPCs in queue)");
-            outln!("  DPC active:   {}", if ke::ke_is_dpc_active() { "Yes" } else { "No" });
-        }
+        let _prcb = ke::get_current_prcb();
+        outln!("Current processor DPC status:");
+        outln!("  DPC list:     (pending DPCs in queue)");
+        outln!("  DPC active:   {}", if ke::ke_is_dpc_active() { "Yes" } else { "No" });
     } else if eq_ignore_case(cmd, "apc") {
         outln!("Asynchronous Procedure Call (APC) Information");
         outln!("");
@@ -4436,22 +4432,20 @@ pub fn cmd_ke(args: &[&str]) {
         outln!("Processor Control Block (PRCB) Information");
         outln!("");
 
-        unsafe {
-            let active_cpus = ke::get_active_cpu_count();
-            outln!("Active Processors: {}", active_cpus);
-            outln!("Maximum CPUs:      {}", ke::MAX_CPUS);
-            outln!("");
+        let active_cpus = ke::get_active_cpu_count();
+        outln!("Active Processors: {}", active_cpus);
+        outln!("Maximum CPUs:      {}", ke::MAX_CPUS);
+        outln!("");
 
-            let current_cpu = ke::ke_get_current_processor_number();
-            outln!("Current CPU:       {}", current_cpu);
-            outln!("");
+        let current_cpu = ke::ke_get_current_processor_number();
+        outln!("Current CPU:       {}", current_cpu);
+        outln!("");
 
-            let idle_summary = ke::ki_get_idle_summary();
-            outln!("Idle Summary:      {:#x}", idle_summary);
+        let idle_summary = ke::ki_get_idle_summary();
+        outln!("Idle Summary:      {:#x}", idle_summary);
 
-            outln!("");
-            outln!("Queued Spinlock Queues: {}", ke::LOCK_QUEUE_MAXIMUM);
-        }
+        outln!("");
+        outln!("Queued Spinlock Queues: {}", ke::LOCK_QUEUE_MAXIMUM);
     } else if eq_ignore_case(cmd, "balance") {
         outln!("Balance Set Manager Status");
         outln!("");
@@ -4897,17 +4891,15 @@ pub fn cmd_sysinfo() {
     outln!("");
 
     // CPU Information
-    unsafe {
-        let cpu_count = ke::get_active_cpu_count();
-        let current_cpu = ke::ke_get_current_processor_number();
-        let irql = ke::ke_get_current_irql();
+    let cpu_count = ke::get_active_cpu_count();
+    let current_cpu = ke::ke_get_current_processor_number();
+    let irql = ke::ke_get_current_irql();
 
-        outln!("Processor:");
-        outln!("  Active CPUs:  {}", cpu_count);
-        outln!("  Current CPU:  {}", current_cpu);
-        outln!("  Current IRQL: {}", irql);
-        outln!("");
-    }
+    outln!("Processor:");
+    outln!("  Active CPUs:  {}", cpu_count);
+    outln!("  Current CPU:  {}", current_cpu);
+    outln!("  Current IRQL: {}", irql);
+    outln!("");
 
     // Memory Information
     let mem_stats = mm::mm_get_stats();
@@ -5010,9 +5002,7 @@ pub fn cmd_debug(args: &[&str]) {
 
         if args.len() > 1 && eq_ignore_case(args[1], "confirm") {
             outln!("Triggering bugcheck with code 0xDEADBEEF...");
-            unsafe {
-                ke::ke_bugcheck(0xDEADBEEF);
-            }
+            ke::ke_bugcheck(0xDEADBEEF);
         } else {
             outln!("Use 'debug bugcheck confirm' to actually trigger.");
         }
@@ -15426,19 +15416,17 @@ fn show_heap_stats() {
     outln!("");
 
     // Check process default heap
-    unsafe {
-        if let Some(handle) = heap::rtl_get_process_heap() {
-            outln!("Process Heap ({})", handle);
-            if let Some(stats) = heap::rtl_get_heap_stats(handle) {
-                outln!("  Total Size:    {} bytes", stats.total_size);
-                outln!("  Free Size:     {} bytes", stats.total_free_size);
-                outln!("  Allocations:   {}", stats.alloc_count);
-                outln!("  Frees:         {}", stats.free_count);
-                outln!("  Segments:      {}", stats.segment_count);
-            }
-        } else {
-            outln!("No process heap initialized");
+    if let Some(handle) = heap::rtl_get_process_heap() {
+        outln!("Process Heap ({})", handle);
+        if let Some(stats) = heap::rtl_get_heap_stats(handle) {
+            outln!("  Total Size:    {} bytes", stats.total_size);
+            outln!("  Free Size:     {} bytes", stats.total_free_size);
+            outln!("  Allocations:   {}", stats.alloc_count);
+            outln!("  Frees:         {}", stats.free_count);
+            outln!("  Segments:      {}", stats.segment_count);
         }
+    } else {
+        outln!("No process heap initialized");
     }
 }
 
@@ -15450,13 +15438,11 @@ fn show_heap_info() {
     outln!("");
     outln!("Process Default Heap:");
 
-    unsafe {
-        if let Some(handle) = heap::rtl_get_process_heap() {
-            outln!("  Handle:    {:#x}", handle);
-            outln!("  Status:    Active");
-        } else {
-            outln!("  Status:    Not initialized");
-        }
+    if let Some(handle) = heap::rtl_get_process_heap() {
+        outln!("  Handle:    {:#x}", handle);
+        outln!("  Status:    Active");
+    } else {
+        outln!("  Status:    Not initialized");
     }
 
     outln!("");

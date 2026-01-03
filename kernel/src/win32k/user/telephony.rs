@@ -120,7 +120,7 @@ impl Default for LineStatus {
     }
 }
 
-/// Media mode capabilities
+// Media mode capabilities
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct MediaModes: u32 {
@@ -157,7 +157,7 @@ impl Default for MediaModes {
     }
 }
 
-/// Bearer mode capabilities
+// Bearer mode capabilities
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct BearerModes: u32 {

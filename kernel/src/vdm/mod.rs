@@ -82,7 +82,7 @@ pub enum VdmServiceClass {
     VdmAdapterInfo = 11,
 }
 
-/// VDM state flags
+// VDM state flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct VdmFlags: u32 {

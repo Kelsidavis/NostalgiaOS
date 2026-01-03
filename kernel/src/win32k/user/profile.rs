@@ -51,7 +51,7 @@ pub enum ProfileType {
     Temporary = 4,
 }
 
-/// Profile info flags
+// Profile info flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct ProfileFlags: u32 {

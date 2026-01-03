@@ -56,7 +56,7 @@ pub enum TaskStatus {
     NoValidTriggers = 7,
 }
 
-/// Task flags
+// Task flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct TaskFlags: u32 {
@@ -108,7 +108,7 @@ pub enum TriggerType {
     OnSessionStateChange = 11,
 }
 
-/// Days of the week
+// Days of the week
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct WeekDays: u8 {
@@ -123,7 +123,7 @@ bitflags::bitflags! {
     }
 }
 
-/// Months of the year
+// Months of the year
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct Months: u16 {

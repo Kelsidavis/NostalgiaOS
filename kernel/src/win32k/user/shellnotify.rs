@@ -151,7 +151,7 @@ impl ChangeNotifyReg {
     }
 }
 
-/// Change notification sources
+// Change notification sources
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct ShellChangeNotifySource: u32 {
@@ -363,7 +363,7 @@ fn flush_pending_events() {
 // File System Notifications
 // ============================================================================
 
-/// File notify change flags
+// File notify change flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct FileNotifyChange: u32 {

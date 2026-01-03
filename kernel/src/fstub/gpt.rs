@@ -105,7 +105,7 @@ pub mod gpt_types {
     };
 }
 
-/// GPT partition attributes
+// GPT partition attributes
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct GptAttributes: u64 {

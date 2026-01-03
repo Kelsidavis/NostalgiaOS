@@ -36,7 +36,7 @@ const MAX_FONT_FILES: usize = 128;
 // Font Types
 // ============================================================================
 
-/// Font resource flags
+// Font resource flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct FontResourceFlags: u32 {

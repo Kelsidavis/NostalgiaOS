@@ -175,7 +175,7 @@ impl Default for TrustType {
     }
 }
 
-/// Trust attributes
+// Trust attributes
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct TrustAttributes: u32 {

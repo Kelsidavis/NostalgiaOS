@@ -52,7 +52,7 @@ pub enum CmShareDisposition {
     Shared = 3,
 }
 
-/// Resource flags for memory
+// Resource flags for memory
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct CmMemoryFlags: u16 {
@@ -73,7 +73,7 @@ bitflags::bitflags! {
     }
 }
 
-/// Resource flags for port
+// Resource flags for port
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct CmPortFlags: u16 {
@@ -96,7 +96,7 @@ bitflags::bitflags! {
     }
 }
 
-/// Resource flags for interrupt
+// Resource flags for interrupt
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct CmInterruptFlags: u16 {
@@ -113,7 +113,7 @@ bitflags::bitflags! {
     }
 }
 
-/// Resource flags for DMA
+// Resource flags for DMA
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct CmDmaFlags: u16 {
@@ -371,8 +371,8 @@ impl ResourceArbiter for IrqArbiter {
         let mut allocated = self.allocated.lock();
 
         // Try each IRQ in range
-        let min_irq = unsafe { requirement.data.memory.minimum_address as u32 };
-        let max_irq = unsafe { requirement.data.memory.maximum_address as u32 };
+        let min_irq = requirement.data.memory.minimum_address as u32;
+        let max_irq = requirement.data.memory.maximum_address as u32;
 
         for irq in min_irq..=max_irq {
             if let Some(info) = allocated.get_mut(&irq) {
@@ -446,8 +446,8 @@ impl ResourceArbiter for IrqArbiter {
         requirement: &super::enumerate::IoResourceDescriptor,
     ) -> bool {
         let allocated = self.allocated.lock();
-        let min_irq = unsafe { requirement.data.memory.minimum_address as u32 };
-        let max_irq = unsafe { requirement.data.memory.maximum_address as u32 };
+        let min_irq = requirement.data.memory.minimum_address as u32;
+        let max_irq = requirement.data.memory.maximum_address as u32;
 
         for irq in min_irq..=max_irq {
             if let Some(info) = allocated.get(&irq) {
@@ -505,10 +505,10 @@ impl ResourceArbiter for MemoryArbiter {
     ) -> Result<CmPartialResourceDescriptor, PnpError> {
         let mut allocated = self.allocated.lock();
 
-        let min_addr = unsafe { requirement.data.memory.minimum_address };
-        let max_addr = unsafe { requirement.data.memory.maximum_address };
-        let length = unsafe { requirement.data.memory.length as u64 };
-        let alignment = unsafe { requirement.data.memory.alignment as u64 };
+        let min_addr = requirement.data.memory.minimum_address;
+        let max_addr = requirement.data.memory.maximum_address;
+        let length = requirement.data.memory.length as u64;
+        let alignment = requirement.data.memory.alignment as u64;
 
         // Find a suitable range
         let mut addr = (min_addr + alignment - 1) & !(alignment - 1);
@@ -564,10 +564,10 @@ impl ResourceArbiter for MemoryArbiter {
     ) -> bool {
         let allocated = self.allocated.lock();
 
-        let min_addr = unsafe { requirement.data.memory.minimum_address };
-        let max_addr = unsafe { requirement.data.memory.maximum_address };
-        let length = unsafe { requirement.data.memory.length as u64 };
-        let alignment = unsafe { requirement.data.memory.alignment as u64 };
+        let min_addr = requirement.data.memory.minimum_address;
+        let max_addr = requirement.data.memory.maximum_address;
+        let length = requirement.data.memory.length as u64;
+        let alignment = requirement.data.memory.alignment as u64;
 
         let mut addr = (min_addr + alignment - 1) & !(alignment - 1);
 
@@ -629,9 +629,9 @@ impl ResourceArbiter for IoPortArbiter {
     ) -> Result<CmPartialResourceDescriptor, PnpError> {
         let mut allocated = self.allocated.lock();
 
-        let min_port = unsafe { requirement.data.memory.minimum_address };
-        let max_port = unsafe { requirement.data.memory.maximum_address };
-        let length = unsafe { requirement.data.memory.length as u64 };
+        let min_port = requirement.data.memory.minimum_address;
+        let max_port = requirement.data.memory.maximum_address;
+        let length = requirement.data.memory.length as u64;
 
         // Find a suitable range
         let mut port = min_port;
@@ -687,9 +687,9 @@ impl ResourceArbiter for IoPortArbiter {
     ) -> bool {
         let allocated = self.allocated.lock();
 
-        let min_port = unsafe { requirement.data.memory.minimum_address };
-        let max_port = unsafe { requirement.data.memory.maximum_address };
-        let length = unsafe { requirement.data.memory.length as u64 };
+        let min_port = requirement.data.memory.minimum_address;
+        let max_port = requirement.data.memory.maximum_address;
+        let length = requirement.data.memory.length as u64;
 
         let mut port = min_port;
 
@@ -740,8 +740,8 @@ impl ResourceArbiter for DmaArbiter {
     ) -> Result<CmPartialResourceDescriptor, PnpError> {
         let mut allocated = self.allocated.lock();
 
-        let min_channel = unsafe { requirement.data.memory.minimum_address as u32 };
-        let max_channel = unsafe { requirement.data.memory.maximum_address as u32 };
+        let min_channel = requirement.data.memory.minimum_address as u32;
+        let max_channel = requirement.data.memory.maximum_address as u32;
 
         for channel in min_channel..=max_channel {
             if !allocated.contains_key(&channel) {
@@ -789,8 +789,8 @@ impl ResourceArbiter for DmaArbiter {
     ) -> bool {
         let allocated = self.allocated.lock();
 
-        let min_channel = unsafe { requirement.data.memory.minimum_address as u32 };
-        let max_channel = unsafe { requirement.data.memory.maximum_address as u32 };
+        let min_channel = requirement.data.memory.minimum_address as u32;
+        let max_channel = requirement.data.memory.maximum_address as u32;
 
         for channel in min_channel..=max_channel {
             if !allocated.contains_key(&channel) {

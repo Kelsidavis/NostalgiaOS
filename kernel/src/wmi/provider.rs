@@ -79,7 +79,7 @@ impl core::fmt::Debug for WmiProvider {
     }
 }
 
-/// WMI provider flags
+// WMI provider flags
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct WmiProviderFlags: u32 {

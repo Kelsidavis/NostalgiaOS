@@ -86,7 +86,7 @@ impl Default for ServerRole {
     }
 }
 
-/// NTDS Settings options
+// NTDS Settings options
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct NtdsOptions: u32 {
@@ -107,7 +107,7 @@ impl Default for NtdsOptions {
     }
 }
 
-/// Site link options
+// Site link options
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct SiteLinkOptions: u32 {

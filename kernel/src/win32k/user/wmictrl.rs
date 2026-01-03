@@ -194,7 +194,7 @@ impl Default for LogLevel {
     }
 }
 
-/// WMI permissions
+// WMI permissions
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct WmiPermissions: u32 {

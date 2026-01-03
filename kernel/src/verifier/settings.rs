@@ -2,7 +2,7 @@
 //!
 //! Manages verifier options and configuration flags.
 
-/// Verifier flags - high-level feature categories
+// Verifier flags - high-level feature categories
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct VerifierFlags: u32 {
@@ -39,7 +39,7 @@ bitflags::bitflags! {
     }
 }
 
-/// Verifier options - granular settings
+// Verifier options - granular settings
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
     pub struct VerifierOptions: u64 {
