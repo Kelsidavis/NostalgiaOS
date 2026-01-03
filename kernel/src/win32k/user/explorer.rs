@@ -17,7 +17,7 @@ use crate::ke::spinlock::SpinLock;
 use crate::hal::{keyboard, mouse};
 use super::super::{HWND, HDC, Rect, Point, ColorRef, GdiHandle, UserHandle};
 use super::super::gdi::{dc, brush, pen};
-use super::{message, window, input, desktop, controls, cursor, WindowStyle, WindowStyleEx, ShowCommand};
+use super::{message, window, input, desktop, controls, cursor, winlogon, WindowStyle, WindowStyleEx, ShowCommand};
 
 // ============================================================================
 // Constants
@@ -72,6 +72,18 @@ static ALT_TAB_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// Currently selected window in Alt-Tab
 static ALT_TAB_INDEX: AtomicU32 = AtomicU32::new(0);
+
+/// Start menu visible
+static START_MENU_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+/// Start menu item count
+const START_MENU_ITEMS: usize = 6;
+
+/// Start menu item height
+const START_MENU_ITEM_HEIGHT: i32 = 24;
+
+/// Start menu width
+const START_MENU_WIDTH: i32 = 180;
 
 /// Taskbar button entry
 #[derive(Debug, Clone, Copy)]
@@ -338,8 +350,8 @@ fn handle_taskbar_click(x: i32, y: i32) {
 
     // Check Start button
     if x >= state.start_rect.left && x < state.start_rect.right {
-        crate::serial_println!("[EXPLORER] Start button clicked");
-        // TODO: Show Start menu
+        drop(state);
+        toggle_start_menu();
         return;
     }
 
@@ -371,8 +383,16 @@ fn process_keyboard_input(scancode: u8) {
     let pressed = (scancode & 0x80) == 0;
     let code = scancode & 0x7F;
 
-    // Check for Alt key (high bit set means key is down, 0x8000 as i16 is -32768)
+    // Check modifier key states
+    let ctrl_down = (input::get_key_state(input::vk::CONTROL) & (-32768i16)) != 0;
     let alt_down = (input::get_key_state(input::vk::MENU) & (-32768i16)) != 0;
+
+    // Handle Ctrl+Alt+Delete (SAS - Secure Attention Sequence)
+    // Delete key scancode is 0x53
+    if pressed && code == 0x53 && ctrl_down && alt_down {
+        handle_ctrl_alt_del();
+        return;
+    }
 
     // Handle Alt+Tab
     if pressed && code == 0x0F { // Tab scancode
@@ -392,6 +412,17 @@ fn process_keyboard_input(scancode: u8) {
 
     // Route to input system
     input::process_key_event(code, pressed);
+}
+
+/// Handle Ctrl+Alt+Delete (Secure Attention Sequence)
+fn handle_ctrl_alt_del() {
+    crate::serial_println!("[EXPLORER] Ctrl+Alt+Del pressed - signaling SAS");
+
+    // Signal SAS to Winlogon
+    winlogon::signal_sas(winlogon::SasType::CtrlAltDel);
+
+    // Process the SAS immediately
+    winlogon::process_sas();
 }
 
 /// Process all pending messages
@@ -751,4 +782,153 @@ pub fn get_desktop_hwnd() -> HWND {
 /// Get taskbar window handle
 pub fn get_taskbar_hwnd() -> HWND {
     *TASKBAR_HWND.lock()
+}
+
+// ============================================================================
+// Start Menu
+// ============================================================================
+
+/// Start menu item names
+const START_MENU_ITEM_NAMES: [&str; START_MENU_ITEMS] = [
+    "Programs",
+    "Documents",
+    "Settings",
+    "Run...",
+    "Shut Down...",
+    "Log Off",
+];
+
+/// Toggle Start menu visibility
+fn toggle_start_menu() {
+    let visible = START_MENU_VISIBLE.load(Ordering::SeqCst);
+    if visible {
+        hide_start_menu();
+    } else {
+        show_start_menu();
+    }
+}
+
+/// Show the Start menu
+fn show_start_menu() {
+    START_MENU_VISIBLE.store(true, Ordering::SeqCst);
+    crate::serial_println!("[EXPLORER] Showing Start menu");
+    paint_start_menu();
+}
+
+/// Hide the Start menu
+fn hide_start_menu() {
+    START_MENU_VISIBLE.store(false, Ordering::SeqCst);
+    crate::serial_println!("[EXPLORER] Hiding Start menu");
+
+    // Repaint desktop to clear the menu
+    paint_desktop();
+    paint_taskbar();
+}
+
+/// Paint the Start menu
+fn paint_start_menu() {
+    if !START_MENU_VISIBLE.load(Ordering::SeqCst) {
+        return;
+    }
+
+    if let Ok(hdc) = dc::create_display_dc() {
+        let (_, height) = super::super::gdi::surface::get_primary_dimensions();
+        let taskbar_y = height as i32 - TASKBAR_HEIGHT;
+
+        // Calculate menu position (above Start button)
+        let menu_height = START_MENU_ITEMS as i32 * START_MENU_ITEM_HEIGHT + 4;
+        let menu_x = 2;
+        let menu_y = taskbar_y - menu_height;
+
+        let menu_rect = Rect::new(
+            menu_x, menu_y,
+            menu_x + START_MENU_WIDTH, taskbar_y
+        );
+
+        // Draw menu background
+        let bg_brush = brush::create_solid_brush(ColorRef::BUTTON_FACE);
+        super::super::gdi::fill_rect(hdc, &menu_rect, bg_brush);
+
+        // Draw raised edge
+        super::super::gdi::draw_edge_raised(hdc, &menu_rect);
+
+        // Draw menu items
+        dc::set_text_color(hdc, ColorRef::BLACK);
+        dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+
+        for (i, name) in START_MENU_ITEM_NAMES.iter().enumerate() {
+            let item_y = menu_y + 2 + (i as i32 * START_MENU_ITEM_HEIGHT);
+            let item_rect = Rect::new(
+                menu_x + 2, item_y,
+                menu_x + START_MENU_WIDTH - 2, item_y + START_MENU_ITEM_HEIGHT
+            );
+
+            // Draw item text
+            super::super::gdi::text_out(hdc, item_rect.left + 8, item_rect.top + 4, name);
+
+            // Draw separator after Settings
+            if i == 2 {
+                let sep_y = item_y + START_MENU_ITEM_HEIGHT - 2;
+                let sep_pen = pen::create_pen(pen::PenStyle::Solid, 1, ColorRef::BUTTON_SHADOW);
+                dc::select_object(hdc, sep_pen);
+                super::super::gdi::move_to(hdc, menu_x + 4, sep_y);
+                super::super::gdi::line_to(hdc, menu_x + START_MENU_WIDTH - 4, sep_y);
+            }
+        }
+
+        dc::delete_dc(hdc);
+    }
+}
+
+/// Handle click on Start menu
+pub fn handle_start_menu_click(x: i32, y: i32) -> bool {
+    if !START_MENU_VISIBLE.load(Ordering::SeqCst) {
+        return false;
+    }
+
+    let (_, height) = super::super::gdi::surface::get_primary_dimensions();
+    let taskbar_y = height as i32 - TASKBAR_HEIGHT;
+    let menu_height = START_MENU_ITEMS as i32 * START_MENU_ITEM_HEIGHT + 4;
+    let menu_y = taskbar_y - menu_height;
+
+    // Check if click is in menu area
+    if x < 2 || x > 2 + START_MENU_WIDTH || y < menu_y || y >= taskbar_y {
+        hide_start_menu();
+        return true;
+    }
+
+    // Determine which item was clicked
+    let relative_y = y - menu_y - 2;
+    let item_index = relative_y / START_MENU_ITEM_HEIGHT;
+
+    if item_index >= 0 && (item_index as usize) < START_MENU_ITEMS {
+        let item = item_index as usize;
+        crate::serial_println!("[EXPLORER] Start menu item clicked: {}", START_MENU_ITEM_NAMES[item]);
+
+        match item {
+            3 => {
+                // Run...
+                hide_start_menu();
+                // TODO: Show Run dialog
+            }
+            4 => {
+                // Shut Down...
+                hide_start_menu();
+                crate::serial_println!("[EXPLORER] Initiating shutdown...");
+                winlogon::shutdown(false);
+            }
+            5 => {
+                // Log Off
+                hide_start_menu();
+                crate::serial_println!("[EXPLORER] Initiating logoff...");
+                winlogon::logoff();
+            }
+            _ => {
+                hide_start_menu();
+                // TODO: Implement other menu items
+            }
+        }
+    }
+
+    true
 }
