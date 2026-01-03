@@ -212,6 +212,9 @@ pub fn init() {
         *hwnd = desktop_hwnd;
     }
 
+    // Initialize desktop icons with default positions
+    init_desktop_icons();
+
     // Create taskbar window
     let taskbar_rect = Rect::new(0, height - TASKBAR_HEIGHT, width, height);
     let taskbar_hwnd = create_taskbar_window(taskbar_rect);
@@ -369,8 +372,16 @@ fn process_mouse_input(event: mouse::MouseEvent) {
     let dragging_hwnd = *DRAGGING_WINDOW.lock();
     let resizing_hwnd = *RESIZING_WINDOW.lock();
 
-    if dragging_hwnd.is_valid() {
-        // We're in drag mode - handle window movement
+    // Check if we're dragging a desktop icon
+    let icon_dragging = is_icon_dragging();
+
+    if icon_dragging {
+        // We're dragging a desktop icon
+        if event.dx != 0 || event.dy != 0 {
+            update_icon_drag(x, y);
+        }
+    } else if dragging_hwnd.is_valid() {
+        // We're in window drag mode - handle window movement
         if event.dx != 0 || event.dy != 0 {
             handle_window_drag(x, y);
         }
@@ -404,7 +415,13 @@ fn process_mouse_input(event: mouse::MouseEvent) {
                 // Button pressed
                 input::process_mouse_button(0, true, x, y);
 
-                // Check if context menu is visible - handle or dismiss
+                // Check if icon context menu is visible - handle or dismiss
+                if ICON_MENU_VISIBLE.load(Ordering::SeqCst) {
+                    handle_icon_menu_click(x, y);
+                    return;
+                }
+
+                // Check if desktop context menu is visible - handle or dismiss
                 if DESKTOP_MENU_VISIBLE.load(Ordering::SeqCst) {
                     handle_desktop_menu_click(x, y);
                     return;
@@ -440,9 +457,11 @@ fn process_mouse_input(event: mouse::MouseEvent) {
                         try_caption_double_click(x, y);
                     }
                 } else {
-                    // Check if we clicked on a desktop icon (single click = select)
+                    // Check if we clicked on a desktop icon (single click = select + start drag)
                     if let Some(icon_idx) = get_icon_at_position(x, y) {
                         select_desktop_icon(Some(icon_idx));
+                        // Start icon drag
+                        start_icon_drag(icon_idx, x, y);
                     } else {
                         // Clicked on desktop but not on icon - deselect
                         let hwnd = window::window_from_point(Point::new(x, y));
@@ -457,7 +476,10 @@ fn process_mouse_input(event: mouse::MouseEvent) {
                 // Button released
                 input::process_mouse_button(0, false, x, y);
 
-                // End any drag or resize operation
+                // End any icon drag operation
+                end_icon_drag();
+
+                // End any window drag or resize operation
                 end_window_drag();
                 end_window_resize();
             }
@@ -798,7 +820,7 @@ static DESKTOP_MENU_VISIBLE: AtomicBool = AtomicBool::new(false);
 /// Desktop context menu position
 static DESKTOP_MENU_POS: SpinLock<Point> = SpinLock::new(Point::new(0, 0));
 
-/// Desktop context menu items
+/// Desktop context menu items (background)
 const DESKTOP_MENU_ITEMS: [&str; 6] = [
     "Refresh",
     "─────────────",
@@ -807,6 +829,26 @@ const DESKTOP_MENU_ITEMS: [&str; 6] = [
     "─────────────",
     "Properties",
 ];
+
+/// Icon context menu items
+const ICON_MENU_ITEMS: [&str; 7] = [
+    "Open",
+    "Explore",
+    "─────────────",
+    "Cut",
+    "Copy",
+    "─────────────",
+    "Properties",
+];
+
+/// Icon context menu visible flag
+static ICON_MENU_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+/// Icon context menu position
+static ICON_MENU_POS: SpinLock<Point> = SpinLock::new(Point::new(0, 0));
+
+/// Icon context menu target (which icon was right-clicked)
+static ICON_MENU_TARGET: SpinLock<Option<usize>> = SpinLock::new(None);
 
 /// Desktop menu item height
 const MENU_ITEM_HEIGHT: i32 = 20;
@@ -818,6 +860,14 @@ fn handle_right_click(x: i32, y: i32) {
     let (_, height) = super::super::gdi::surface::get_primary_dimensions();
     let taskbar_y = height as i32 - TASKBAR_HEIGHT;
     if y >= taskbar_y {
+        return;
+    }
+
+    // Check if right-clicked on a desktop icon
+    if let Some(icon_idx) = get_icon_at_position(x, y) {
+        // Select the icon and show icon context menu
+        select_desktop_icon(Some(icon_idx));
+        show_icon_context_menu(x, y, icon_idx);
         return;
     }
 
@@ -960,7 +1010,154 @@ fn hide_desktop_context_menu() {
 
 /// Check if context menu is visible
 pub fn is_context_menu_visible() -> bool {
-    DESKTOP_MENU_VISIBLE.load(Ordering::SeqCst)
+    DESKTOP_MENU_VISIBLE.load(Ordering::SeqCst) || ICON_MENU_VISIBLE.load(Ordering::SeqCst)
+}
+
+/// Show icon context menu
+fn show_icon_context_menu(x: i32, y: i32, icon_idx: usize) {
+    // Hide any other menus
+    if START_MENU_VISIBLE.load(Ordering::SeqCst) {
+        toggle_start_menu();
+    }
+    hide_desktop_context_menu();
+
+    // Store menu position and target
+    *ICON_MENU_POS.lock() = Point::new(x, y);
+    *ICON_MENU_TARGET.lock() = Some(icon_idx);
+    ICON_MENU_VISIBLE.store(true, Ordering::SeqCst);
+
+    // Paint the icon context menu
+    paint_icon_context_menu(x, y);
+}
+
+/// Paint the icon context menu
+fn paint_icon_context_menu(x: i32, y: i32) {
+    if let Ok(hdc) = dc::create_display_dc() {
+        let menu_height = (ICON_MENU_ITEMS.len() as i32) * MENU_ITEM_HEIGHT + 4;
+        let menu_rect = Rect::new(x, y, x + MENU_WIDTH, y + menu_height);
+
+        // Get surface
+        let surface_handle = dc::get_dc_surface(hdc);
+        if let Some(surf) = super::super::gdi::surface::get_surface(surface_handle) {
+            // Draw menu background
+            surf.fill_rect(&menu_rect, ColorRef::WINDOW_BG);
+
+            // Draw 3D raised border
+            surf.hline(menu_rect.left, menu_rect.right - 1, menu_rect.top, ColorRef::WHITE);
+            surf.hline(menu_rect.left + 1, menu_rect.right - 2, menu_rect.top + 1, ColorRef::WHITE);
+            surf.vline(menu_rect.left, menu_rect.top, menu_rect.bottom - 1, ColorRef::WHITE);
+            surf.vline(menu_rect.left + 1, menu_rect.top + 1, menu_rect.bottom - 2, ColorRef::WHITE);
+            surf.hline(menu_rect.left, menu_rect.right, menu_rect.bottom - 1, ColorRef::DARK_GRAY);
+            surf.hline(menu_rect.left + 1, menu_rect.right - 1, menu_rect.bottom - 2, ColorRef::GRAY);
+            surf.vline(menu_rect.right - 1, menu_rect.top, menu_rect.bottom, ColorRef::DARK_GRAY);
+            surf.vline(menu_rect.right - 2, menu_rect.top + 1, menu_rect.bottom - 1, ColorRef::GRAY);
+
+            // Draw menu items
+            let mut item_y = y + 2;
+            for (i, item) in ICON_MENU_ITEMS.iter().enumerate() {
+                if item.starts_with('─') {
+                    // Separator line
+                    let sep_y = item_y + MENU_ITEM_HEIGHT / 2;
+                    surf.hline(x + 2, x + MENU_WIDTH - 2, sep_y, ColorRef::GRAY);
+                    surf.hline(x + 2, x + MENU_WIDTH - 2, sep_y + 1, ColorRef::WHITE);
+                } else {
+                    // Regular item - bold the first item ("Open")
+                    if i == 0 {
+                        dc::set_text_color(hdc, ColorRef::BLACK);
+                        // Draw text twice offset for bold effect
+                        super::super::gdi::draw::gdi_text_out(hdc, x + 20, item_y + 2, item);
+                        super::super::gdi::draw::gdi_text_out(hdc, x + 21, item_y + 2, item);
+                    } else {
+                        dc::set_text_color(hdc, ColorRef::BLACK);
+                        super::super::gdi::draw::gdi_text_out(hdc, x + 20, item_y + 2, item);
+                    }
+                }
+                item_y += MENU_ITEM_HEIGHT;
+            }
+        }
+
+        dc::delete_dc(hdc);
+    }
+}
+
+/// Handle click on icon context menu
+fn handle_icon_menu_click(x: i32, y: i32) -> bool {
+    if !ICON_MENU_VISIBLE.load(Ordering::SeqCst) {
+        return false;
+    }
+
+    let menu_pos = *ICON_MENU_POS.lock();
+    let target_icon = *ICON_MENU_TARGET.lock();
+    let menu_height = (ICON_MENU_ITEMS.len() as i32) * MENU_ITEM_HEIGHT + 4;
+    let menu_rect = Rect::new(
+        menu_pos.x,
+        menu_pos.y,
+        menu_pos.x + MENU_WIDTH,
+        menu_pos.y + menu_height,
+    );
+
+    // Check if click is inside menu
+    if x >= menu_rect.left && x < menu_rect.right &&
+       y >= menu_rect.top && y < menu_rect.bottom {
+        // Determine which item was clicked
+        let relative_y = y - menu_rect.top - 2;
+        let item_index = (relative_y / MENU_ITEM_HEIGHT) as usize;
+
+        if item_index < ICON_MENU_ITEMS.len() {
+            let item = ICON_MENU_ITEMS[item_index];
+            if !item.starts_with('─') {
+                // Execute action
+                match item {
+                    "Open" => {
+                        if let Some(idx) = target_icon {
+                            handle_desktop_icon_double_click(idx);
+                        }
+                    }
+                    "Explore" => {
+                        if let Some(idx) = target_icon {
+                            handle_desktop_icon_double_click(idx);
+                        }
+                    }
+                    "Properties" => {
+                        if let Some(idx) = target_icon {
+                            let name = {
+                                let state = DESKTOP_ICONS.lock();
+                                if state.icons[idx].valid {
+                                    Some(state.icons[idx].name)
+                                } else {
+                                    None
+                                }
+                            };
+                            if let Some(n) = name {
+                                crate::serial_println!("[EXPLORER] Properties for: {}", n);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Hide menu
+        hide_icon_context_menu();
+        return true;
+    }
+
+    // Click outside menu - hide it
+    hide_icon_context_menu();
+    false
+}
+
+/// Hide icon context menu
+fn hide_icon_context_menu() {
+    if ICON_MENU_VISIBLE.load(Ordering::SeqCst) {
+        ICON_MENU_VISIBLE.store(false, Ordering::SeqCst);
+        *ICON_MENU_TARGET.lock() = None;
+        super::cursor::invalidate_cursor_background();
+        super::paint::repaint_all();
+        paint_taskbar();
+        super::cursor::draw_cursor();
+    }
 }
 
 /// Handle click on the taskbar
@@ -1265,20 +1462,23 @@ pub fn paint_desktop() {
 // Desktop Icons
 // ============================================================================
 
-/// Desktop icon size
+/// Desktop icon size (32x32 pixels)
 const ICON_SIZE: i32 = 32;
-const ICON_SPACING_X: i32 = 75;
-const ICON_SPACING_Y: i32 = 75;
-const ICON_MARGIN: i32 = 20;
 
-/// Desktop icon definition
-struct DesktopIcon {
-    name: &'static str,
-    icon_type: IconType,
-}
+/// Grid cell spacing - matches Windows XP default icon spacing
+/// SM_CXICONSPACING = 75, SM_CYICONSPACING = 75
+const ICON_GRID_X: i32 = 75;
+const ICON_GRID_Y: i32 = 75;
+
+/// Margin from desktop edges
+const ICON_MARGIN_X: i32 = 10;
+const ICON_MARGIN_Y: i32 = 10;
+
+/// Maximum number of desktop icons
+const MAX_DESKTOP_ICONS: usize = 64;
 
 /// Icon types for different desktop items
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum IconType {
     MyComputer,
     RecycleBin,
@@ -1286,22 +1486,179 @@ enum IconType {
     NetworkPlaces,
 }
 
-/// Static list of desktop icons
-static DESKTOP_ICONS: [DesktopIcon; 4] = [
-    DesktopIcon { name: "My Computer", icon_type: IconType::MyComputer },
-    DesktopIcon { name: "Recycle Bin", icon_type: IconType::RecycleBin },
-    DesktopIcon { name: "My Documents", icon_type: IconType::MyDocuments },
-    DesktopIcon { name: "Network Places", icon_type: IconType::NetworkPlaces },
-];
+/// Desktop icon instance with position
+#[derive(Clone, Copy)]
+struct DesktopIconInstance {
+    /// Icon is valid/active
+    valid: bool,
+    /// Icon name
+    name: &'static str,
+    /// Icon type (determines appearance)
+    icon_type: IconType,
+    /// Grid position (column, row) - NOT pixel position
+    grid_x: i32,
+    grid_y: i32,
+}
 
-/// Currently selected desktop icon (None = no selection)
-static SELECTED_ICON: SpinLock<Option<usize>> = SpinLock::new(None);
+impl DesktopIconInstance {
+    const fn empty() -> Self {
+        Self {
+            valid: false,
+            name: "",
+            icon_type: IconType::MyComputer,
+            grid_x: 0,
+            grid_y: 0,
+        }
+    }
+
+    /// Get pixel position from grid position
+    fn get_pixel_pos(&self) -> (i32, i32) {
+        let px = ICON_MARGIN_X + self.grid_x * ICON_GRID_X + (ICON_GRID_X - ICON_SIZE) / 2;
+        let py = ICON_MARGIN_Y + self.grid_y * ICON_GRID_Y;
+        (px, py)
+    }
+
+    /// Get bounding rectangle for hit testing
+    fn get_bounds(&self) -> Rect {
+        let (px, py) = self.get_pixel_pos();
+        // Include icon + label area
+        Rect::new(
+            px - 10,
+            py - 2,
+            px + ICON_SIZE + 10,
+            py + ICON_SIZE + 20,
+        )
+    }
+}
+
+/// Desktop icons state
+struct DesktopIconsState {
+    /// All desktop icons
+    icons: [DesktopIconInstance; MAX_DESKTOP_ICONS],
+    /// Number of active icons
+    count: usize,
+    /// Currently selected icon index (None = no selection)
+    selected: Option<usize>,
+    /// Icon being dragged (None = not dragging)
+    dragging: Option<usize>,
+    /// Drag start position (mouse)
+    drag_start_mouse: Point,
+    /// Drag start position (icon grid)
+    drag_start_grid: (i32, i32),
+}
+
+impl DesktopIconsState {
+    const fn new() -> Self {
+        Self {
+            icons: [const { DesktopIconInstance::empty() }; MAX_DESKTOP_ICONS],
+            count: 0,
+            selected: None,
+            dragging: None,
+            drag_start_mouse: Point::new(0, 0),
+            drag_start_grid: (0, 0),
+        }
+    }
+}
+
+static DESKTOP_ICONS: SpinLock<DesktopIconsState> = SpinLock::new(DesktopIconsState::new());
+
+/// Initialize desktop icons
+fn init_desktop_icons() {
+    let mut state = DESKTOP_ICONS.lock();
+
+    // Create default icons in vertical column on left side
+    let default_icons = [
+        ("My Computer", IconType::MyComputer, 0, 0),
+        ("My Documents", IconType::MyDocuments, 0, 1),
+        ("Recycle Bin", IconType::RecycleBin, 0, 2),
+        ("Network Places", IconType::NetworkPlaces, 0, 3),
+    ];
+
+    for (i, (name, icon_type, gx, gy)) in default_icons.iter().enumerate() {
+        state.icons[i] = DesktopIconInstance {
+            valid: true,
+            name,
+            icon_type: *icon_type,
+            grid_x: *gx,
+            grid_y: *gy,
+        };
+    }
+    state.count = default_icons.len();
+}
+
+/// Snap a pixel position to the nearest grid cell
+fn snap_to_grid(px: i32, py: i32) -> (i32, i32) {
+    // Calculate grid position from pixel position
+    let gx = ((px - ICON_MARGIN_X + ICON_GRID_X / 2) / ICON_GRID_X).max(0);
+    let gy = ((py - ICON_MARGIN_Y + ICON_GRID_Y / 2) / ICON_GRID_Y).max(0);
+
+    // Clamp to valid grid range
+    let (width, height) = super::super::gdi::surface::get_primary_dimensions();
+    let max_gx = ((width as i32 - ICON_MARGIN_X * 2) / ICON_GRID_X).max(0);
+    let max_gy = ((height as i32 - TASKBAR_HEIGHT - ICON_MARGIN_Y * 2) / ICON_GRID_Y).max(0);
+
+    (gx.min(max_gx), gy.min(max_gy))
+}
+
+/// Check if a grid position is occupied by another icon (caller must hold lock)
+fn is_grid_occupied_locked(state: &DesktopIconsState, gx: i32, gy: i32, exclude_idx: Option<usize>) -> bool {
+    for (i, icon) in state.icons.iter().enumerate() {
+        if !icon.valid {
+            continue;
+        }
+        if let Some(exclude) = exclude_idx {
+            if i == exclude {
+                continue;
+            }
+        }
+        if icon.grid_x == gx && icon.grid_y == gy {
+            return true;
+        }
+    }
+    false
+}
+
+/// Find nearest free grid position (caller must hold lock)
+fn find_free_grid_pos_locked(state: &DesktopIconsState, preferred_gx: i32, preferred_gy: i32, exclude_idx: Option<usize>) -> (i32, i32) {
+    // Try preferred position first
+    if !is_grid_occupied_locked(state, preferred_gx, preferred_gy, exclude_idx) {
+        return (preferred_gx, preferred_gy);
+    }
+
+    // Search in expanding squares around preferred position
+    let (width, height) = super::super::gdi::surface::get_primary_dimensions();
+    let max_gx = ((width as i32 - ICON_MARGIN_X * 2) / ICON_GRID_X).max(0);
+    let max_gy = ((height as i32 - TASKBAR_HEIGHT - ICON_MARGIN_Y * 2) / ICON_GRID_Y).max(0);
+
+    for radius in 1i32..20 {
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx.abs() != radius && dy.abs() != radius {
+                    continue; // Only check perimeter
+                }
+                let gx = preferred_gx + dx;
+                let gy = preferred_gy + dy;
+                if gx >= 0 && gx <= max_gx && gy >= 0 && gy <= max_gy {
+                    if !is_grid_occupied_locked(state, gx, gy, exclude_idx) {
+                        return (gx, gy);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback to original position
+    (preferred_gx, preferred_gy)
+}
 
 /// Select a desktop icon
 fn select_desktop_icon(idx: Option<usize>) {
-    let current = *SELECTED_ICON.lock();
+    let current = {
+        let state = DESKTOP_ICONS.lock();
+        state.selected
+    };
     if current != idx {
-        *SELECTED_ICON.lock() = idx;
+        DESKTOP_ICONS.lock().selected = idx;
         // Repaint desktop to show selection
         paint_desktop();
     }
@@ -1315,24 +1672,34 @@ fn paint_desktop_icons(hdc: HDC) {
         None => return,
     };
 
-    let selected = *SELECTED_ICON.lock();
-    let x = ICON_MARGIN;
-    let mut y = ICON_MARGIN;
+    let state = DESKTOP_ICONS.lock();
+    let selected = state.selected;
+    let dragging = state.dragging;
 
-    for (idx, icon) in DESKTOP_ICONS.iter().enumerate() {
+    for (idx, icon) in state.icons.iter().enumerate() {
+        if !icon.valid {
+            continue;
+        }
+
+        let (x, y) = icon.get_pixel_pos();
         let is_selected = selected == Some(idx);
+        let is_dragging = dragging == Some(idx);
 
-        // Draw selection highlight if selected
+        // Draw selection highlight if selected (use Windows XP selection blue)
         if is_selected {
-            // Draw highlight rectangle around icon and label
             let highlight_rect = Rect::new(
                 x - 4,
                 y - 2,
                 x + ICON_SIZE + 4,
                 y + ICON_SIZE + 20,
             );
-            // Blue selection background (semi-transparent effect via dithering)
+            // Windows XP selection highlight: dark blue with dithered pattern
             surf.fill_rect(&highlight_rect, ColorRef::rgb(0, 84, 227));
+        }
+
+        // Skip drawing if being dragged (will be drawn at cursor position)
+        if is_dragging {
+            continue;
         }
 
         // Draw icon
@@ -1342,9 +1709,6 @@ fn paint_desktop_icons(hdc: HDC) {
         let label_x = x + ICON_SIZE / 2;
         let label_y = y + ICON_SIZE + 4;
         draw_icon_label(&surf, label_x, label_y, icon.name, is_selected);
-
-        // Move to next position (vertical layout)
-        y += ICON_SPACING_Y;
     }
 }
 
@@ -1401,7 +1765,12 @@ fn draw_desktop_icon(surf: &super::super::gdi::surface::Surface, x: i32, y: i32,
 fn draw_icon_label(surf: &super::super::gdi::surface::Surface, center_x: i32, y: i32, text: &str, selected: bool) {
     // Calculate text width (rough estimate: 6 pixels per character)
     let text_width = (text.len() as i32) * 6;
-    let x = center_x - text_width / 2;
+    let mut x = center_x - text_width / 2;
+
+    // Prevent text from going off the left edge
+    if x < 2 {
+        x = 2;
+    }
 
     if selected {
         // Selected: white text on blue (no shadow needed, background already blue)
@@ -1467,7 +1836,7 @@ fn get_char_pattern(c: char) -> [u8; 7] {
 }
 
 // ============================================================================
-// Desktop Icon Hit Testing
+// Desktop Icon Hit Testing and Interaction
 // ============================================================================
 
 /// Get the desktop icon at a position, if any
@@ -1475,62 +1844,141 @@ fn get_icon_at_position(x: i32, y: i32) -> Option<usize> {
     // Check if position is in the desktop area (not on a window)
     let hwnd = window::window_from_point(Point::new(x, y));
     let desktop_hwnd = *DESKTOP_HWND.lock();
-    if hwnd.is_valid() && hwnd != desktop_hwnd {
+    let system_desktop = window::get_desktop_window();
+
+    // Allow clicks on desktop (either system desktop or explorer's desktop window)
+    // or if no window found at this position
+    if hwnd.is_valid() && hwnd != desktop_hwnd && hwnd != system_desktop {
+        // Click is on some other window, not desktop
         return None;
     }
 
-    // Calculate icon positions and check each one
-    let icon_x = ICON_MARGIN;
-    let mut icon_y = ICON_MARGIN;
+    // Check each icon's bounding rect
+    let state = DESKTOP_ICONS.lock();
 
-    // Each icon has a clickable area including the icon and label
-    let icon_height = ICON_SIZE + 20; // Icon + label
-
-    for (idx, _icon) in DESKTOP_ICONS.iter().enumerate() {
-        let icon_rect = Rect::new(
-            icon_x - 5,
-            icon_y - 5,
-            icon_x + ICON_SIZE + 5,
-            icon_y + icon_height,
-        );
-
-        if x >= icon_rect.left && x < icon_rect.right &&
-           y >= icon_rect.top && y < icon_rect.bottom {
-            return Some(idx);
+    for (idx, icon) in state.icons.iter().enumerate() {
+        if !icon.valid {
+            continue;
         }
 
-        // Move to next position (vertical layout)
-        icon_y += ICON_SPACING_Y;
+        let bounds = icon.get_bounds();
+        if x >= bounds.left && x < bounds.right &&
+           y >= bounds.top && y < bounds.bottom {
+            return Some(idx);
+        }
     }
 
     None
 }
 
-/// Handle double-click on a desktop icon
-fn handle_desktop_icon_double_click(icon_idx: usize) {
-    if icon_idx >= DESKTOP_ICONS.len() {
-        return;
+/// Start dragging a desktop icon
+fn start_icon_drag(icon_idx: usize, mouse_x: i32, mouse_y: i32) {
+    let mut state = DESKTOP_ICONS.lock();
+    if icon_idx < MAX_DESKTOP_ICONS && state.icons[icon_idx].valid {
+        state.dragging = Some(icon_idx);
+        state.selected = Some(icon_idx);
+        state.drag_start_mouse = Point::new(mouse_x, mouse_y);
+        state.drag_start_grid = (state.icons[icon_idx].grid_x, state.icons[icon_idx].grid_y);
+        crate::serial_println!("[EXPLORER] Started dragging icon {} from grid ({}, {})",
+            state.icons[icon_idx].name, state.drag_start_grid.0, state.drag_start_grid.1);
+    }
+}
+
+/// Update icon position during drag
+fn update_icon_drag(mouse_x: i32, mouse_y: i32) {
+    let dragging = {
+        let state = DESKTOP_ICONS.lock();
+        state.dragging
+    };
+
+    if let Some(idx) = dragging {
+        // Calculate new grid position based on mouse position
+        let (new_gx, new_gy) = snap_to_grid(mouse_x - ICON_SIZE / 2, mouse_y - ICON_SIZE / 2);
+
+        // Update icon position (will be finalized on drop)
+        let mut state = DESKTOP_ICONS.lock();
+        if state.icons[idx].valid {
+            let old_gx = state.icons[idx].grid_x;
+            let old_gy = state.icons[idx].grid_y;
+
+            // Only update and repaint if position changed
+            if new_gx != old_gx || new_gy != old_gy {
+                state.icons[idx].grid_x = new_gx;
+                state.icons[idx].grid_y = new_gy;
+                drop(state);
+                paint_desktop();
+            }
+        }
+    }
+}
+
+/// End icon drag and snap to grid
+fn end_icon_drag() {
+    let mut needs_repaint = false;
+
+    {
+        let mut state = DESKTOP_ICONS.lock();
+        if let Some(idx) = state.dragging {
+            if state.icons[idx].valid {
+                let gx = state.icons[idx].grid_x;
+                let gy = state.icons[idx].grid_y;
+
+                // Find a free position if current is occupied
+                let (final_gx, final_gy) = find_free_grid_pos_locked(&state, gx, gy, Some(idx));
+
+                state.icons[idx].grid_x = final_gx;
+                state.icons[idx].grid_y = final_gy;
+
+                crate::serial_println!("[EXPLORER] Dropped icon {} at grid ({}, {})",
+                    state.icons[idx].name, final_gx, final_gy);
+            }
+            state.dragging = None;
+            needs_repaint = true;
+        }
     }
 
-    let icon = &DESKTOP_ICONS[icon_idx];
-    crate::serial_println!("[EXPLORER] Double-clicked on: {}", icon.name);
+    // Repaint to show final position (outside lock)
+    if needs_repaint {
+        paint_desktop();
+    }
+}
 
-    match icon.icon_type {
-        IconType::MyComputer => {
-            // Open "My Computer" window - shows drives
-            create_my_computer_window();
+/// Check if we're currently dragging an icon
+fn is_icon_dragging() -> bool {
+    DESKTOP_ICONS.lock().dragging.is_some()
+}
+
+/// Handle double-click on a desktop icon
+fn handle_desktop_icon_double_click(icon_idx: usize) {
+    let icon_info = {
+        let state = DESKTOP_ICONS.lock();
+        if icon_idx < MAX_DESKTOP_ICONS && state.icons[icon_idx].valid {
+            Some((state.icons[icon_idx].name, state.icons[icon_idx].icon_type))
+        } else {
+            None
         }
-        IconType::RecycleBin => {
-            // Open Recycle Bin window
-            create_simple_window("Recycle Bin", "Recycle Bin is empty");
-        }
-        IconType::MyDocuments => {
-            // Open My Documents
-            create_simple_window("My Documents", "Your documents folder");
-        }
-        IconType::NetworkPlaces => {
-            // Open Network Places
-            create_simple_window("Network Places", "Network resources");
+    };
+
+    if let Some((name, icon_type)) = icon_info {
+        crate::serial_println!("[EXPLORER] Double-clicked on: {}", name);
+
+        match icon_type {
+            IconType::MyComputer => {
+                // Open "My Computer" window - shows drives
+                create_my_computer_window();
+            }
+            IconType::RecycleBin => {
+                // Open Recycle Bin window
+                create_simple_window("Recycle Bin", "Recycle Bin is empty");
+            }
+            IconType::MyDocuments => {
+                // Open My Documents
+                create_simple_window("My Documents", "Your documents folder");
+            }
+            IconType::NetworkPlaces => {
+                // Open Network Places
+                create_simple_window("Network Places", "Network resources");
+            }
         }
     }
 }
@@ -1681,6 +2129,7 @@ fn paint_start_button(hdc: HDC, taskbar_y: i32) {
     btn_rect.top += taskbar_y;
     btn_rect.bottom += taskbar_y;
 
+    // Draw simple Start button with text
     controls::draw_button(
         hdc,
         &btn_rect,
@@ -2201,11 +2650,42 @@ fn paint_start_menu() {
             );
             surf.fill_rect(&header_rect, ColorRef::rgb(0, 51, 153)); // Match sidebar
 
-            // Draw user icon (simple white square placeholder)
+            // Draw user icon
             let icon_x = menu_x + 6;
             let icon_y = menu_y + 6;
-            surf.fill_rect(&Rect::new(icon_x, icon_y, icon_x + 24, icon_y + 24), ColorRef::WHITE);
-            surf.fill_rect(&Rect::new(icon_x + 2, icon_y + 2, icon_x + 22, icon_y + 22), ColorRef::rgb(128, 128, 192));
+
+            // Draw simple user silhouette icon (24x24)
+            for row in 0..24 {
+                for col in 0..24 {
+                    let px = icon_x + col as i32;
+                    let py = icon_y + row as i32;
+
+                    // Simple person icon design
+                    let is_icon = if row >= 6 && row <= 10 {
+                        // Head (circle approximation)
+                        let dx = col as i32 - 12;
+                        let dy = row as i32 - 8;
+                        dx * dx + dy * dy <= 16
+                    } else if row >= 12 && row <= 22 {
+                        // Body (trapezoid)
+                        let top_width = 8;
+                        let bottom_width = 16;
+                        let body_height = 10;
+                        let row_offset = row - 12;
+                        let width_at_row = top_width + (bottom_width - top_width) * row_offset as i32 / body_height;
+                        let left_edge = 12 - width_at_row / 2;
+                        let right_edge = 12 + width_at_row / 2;
+                        col >= left_edge as usize && col <= right_edge as usize
+                    } else {
+                        false
+                    };
+
+                    if is_icon {
+                        // Light blue/cyan user icon
+                        surf.set_pixel(px, py, ColorRef::rgb(150, 200, 255));
+                    }
+                }
+            }
 
             // Draw username
             dc::set_text_color(hdc, ColorRef::WHITE);
@@ -2242,9 +2722,70 @@ fn paint_start_menu() {
                 }
             }
 
-            // Draw item text
+            // Draw menu item icon
+            if let Some(surf) = super::super::gdi::surface::get_surface(dc::get_dc_surface(hdc)) {
+                use super::desktop_icons::*;
+
+                // Select icon data based on menu item
+                let (width, height, data) = match i {
+                    0 => (PROGRAMS_WIDTH, PROGRAMS_HEIGHT, &PROGRAMS_DATA[..]),  // Programs
+                    1 => (DOCUMENTS_WIDTH, DOCUMENTS_HEIGHT, &DOCUMENTS_DATA[..]),  // Documents
+                    2 => (SETTINGS_WIDTH, SETTINGS_HEIGHT, &SETTINGS_DATA[..]),  // Settings
+                    3 => (SEARCH_WIDTH, SEARCH_HEIGHT, &SEARCH_DATA[..]),  // Search
+                    4 => (HELP_WIDTH, HELP_HEIGHT, &HELP_DATA[..]),  // Help
+                    5 => (RUN_WIDTH, RUN_HEIGHT, &RUN_DATA[..]),  // Run
+                    6 => (SHUTDOWN_WIDTH, SHUTDOWN_HEIGHT, &SHUTDOWN_DATA[..]),  // Shut Down
+                    7 => (LOGOFF_WIDTH, LOGOFF_HEIGHT, &LOGOFF_DATA[..]),  // Log Off
+                    _ => continue,  // Safety fallback
+                };
+
+                let icon_x = items_x + 2;
+                let icon_y = item_y + 2;
+
+                // Draw 16x16 icon (scaled down from 32x32)
+                for row in 0..16 {
+                    for col in 0..16 {
+                        // Sample from 32x32 data (every other pixel)
+                        let src_row = row * 2;
+                        let src_col = col * 2;
+                        let offset = (src_row * width + src_col) * 4;
+
+                        if offset + 3 < data.len() {
+                            let r = data[offset];
+                            let g = data[offset + 1];
+                            let b = data[offset + 2];
+                            let a = data[offset + 3];
+
+                            // Skip fully transparent pixels
+                            if a == 0 {
+                                continue;
+                            }
+
+                            let px = icon_x + col as i32;
+                            let py = icon_y + row as i32;
+
+                            if a == 255 {
+                                surf.set_pixel(px, py, ColorRef::rgb(r, g, b));
+                            } else {
+                                // Blend with menu background (light gray)
+                                let bg_r = 192u8;
+                                let bg_g = 192u8;
+                                let bg_b = 192u8;
+
+                                let blended_r = ((r as u16 * a as u16 + bg_r as u16 * (255 - a) as u16) / 255) as u8;
+                                let blended_g = ((g as u16 * a as u16 + bg_g as u16 * (255 - a) as u16) / 255) as u8;
+                                let blended_b = ((b as u16 * a as u16 + bg_b as u16 * (255 - a) as u16) / 255) as u8;
+
+                                surf.set_pixel(px, py, ColorRef::rgb(blended_r, blended_g, blended_b));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Draw item text (shifted right to make room for icon)
             dc::set_text_color(hdc, ColorRef::BLACK);
-            super::super::gdi::text_out(hdc, items_x + 4, item_y + 4, item.name);
+            super::super::gdi::text_out(hdc, items_x + 20, item_y + 4, item.name);
 
             // Draw submenu arrow if has submenu
             if item.has_submenu {

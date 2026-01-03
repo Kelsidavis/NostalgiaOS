@@ -116,6 +116,16 @@ def main():
         "MY_DOCUMENTS": "my_documents.ico",
         "RECYCLE_BIN": "recycle_bin.ico",
         "NETWORK_PLACES": "network_places.ico",
+        "WINDOWS_LOGO": "windows_logo.ico",
+        "PROGRAMS": "programs.ico",
+        "DOCUMENTS": "documents.ico",
+        "SETTINGS": "settings.ico",
+        "SEARCH": "search.ico",
+        "HELP": "help.ico",
+        "RUN": "run.ico",
+        "SHUTDOWN": "shutdown.ico",
+        "LOGOFF": "logoff.ico",
+        "USER": "user.ico",
     }
 
     rust_code = "// Auto-generated desktop icon data from Windows XP .ico files\n\n"
