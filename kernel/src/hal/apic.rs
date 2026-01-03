@@ -656,12 +656,9 @@ pub unsafe fn start_all_aps() {
     crate::serial_println!("[SMP] Starting Application Processors...");
 
     // Setup trampoline code in low memory
+    // Note: setup_trampoline() already writes the entry point address to 0x8158
+    // and the PML4 address to 0x8160, so we don't need to do that here
     ap_trampoline::setup_trampoline();
-
-    // Store ap_main entry point address for trampoline to use
-    let entry_point = ap_trampoline::get_ap_entry_point();
-    let entry_addr_ptr = (ap_trampoline::TRAMPOLINE_ADDR + 0x100) as *mut u64; // Offset to ap_entry_point_addr
-    core::ptr::write_volatile(entry_addr_ptr, entry_point);
 
     // Get processor count from ACPI
     let processor_count = super::acpi::get_processor_count();
