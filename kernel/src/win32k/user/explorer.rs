@@ -978,6 +978,15 @@ fn handle_taskbar_click(x: i32, y: i32) {
         return;
     }
 
+    // Check clock area
+    let (width, _) = super::super::gdi::surface::get_primary_dimensions();
+    let clock_x_start = width as i32 - 60;
+    if x >= clock_x_start {
+        drop(state);
+        show_date_tooltip();
+        return;
+    }
+
     // Check taskbar buttons
     for button in state.buttons.iter() {
         if !button.valid {
@@ -1663,6 +1672,119 @@ fn update_clock() {
     // Create DC and repaint clock area
     if let Ok(hdc) = dc::create_display_dc() {
         paint_clock(hdc, taskbar_y);
+        dc::delete_dc(hdc);
+    }
+}
+
+/// Date tooltip visibility
+static DATE_TOOLTIP_VISIBLE: AtomicBool = AtomicBool::new(false);
+
+/// Show date tooltip near clock
+fn show_date_tooltip() {
+    // Toggle tooltip
+    let was_visible = DATE_TOOLTIP_VISIBLE.swap(true, Ordering::SeqCst);
+
+    if was_visible {
+        // Hide it
+        DATE_TOOLTIP_VISIBLE.store(false, Ordering::SeqCst);
+        // Repaint to clear tooltip
+        paint_desktop();
+        paint_taskbar();
+        return;
+    }
+
+    // Show date tooltip
+    if let Ok(hdc) = dc::create_display_dc() {
+        let (width, height) = super::super::gdi::surface::get_primary_dimensions();
+        let taskbar_y = height as i32 - TASKBAR_HEIGHT;
+
+        // Get current date from RTC
+        let datetime = crate::hal::rtc::get_datetime();
+
+        // Format date string (e.g., "Friday, January 2, 2026")
+        let day_name = match datetime.day_of_week {
+            1 => "Sunday",
+            2 => "Monday",
+            3 => "Tuesday",
+            4 => "Wednesday",
+            5 => "Thursday",
+            6 => "Friday",
+            7 => "Saturday",
+            _ => "Unknown",
+        };
+        let month_name = match datetime.month {
+            1 => "January",
+            2 => "February",
+            3 => "March",
+            4 => "April",
+            5 => "May",
+            6 => "June",
+            7 => "July",
+            8 => "August",
+            9 => "September",
+            10 => "October",
+            11 => "November",
+            12 => "December",
+            _ => "Unknown",
+        };
+
+        // Calculate tooltip position and size
+        // Estimated width: day name (9) + month name (9) + day (2) + year (4) + punctuation = ~30 chars
+        let tooltip_width = 180;
+        let tooltip_height = 20;
+        let tooltip_x = width as i32 - tooltip_width - 5;
+        let tooltip_y = taskbar_y - tooltip_height - 2;
+
+        let tooltip_rect = Rect::new(
+            tooltip_x,
+            tooltip_y,
+            tooltip_x + tooltip_width,
+            tooltip_y + tooltip_height,
+        );
+
+        // Draw tooltip background
+        let bg_brush = brush::create_solid_brush(ColorRef::rgb(255, 255, 225)); // Pale yellow
+        super::super::gdi::fill_rect(hdc, &tooltip_rect, bg_brush);
+
+        // Draw border
+        super::super::gdi::draw_edge_sunken(hdc, &tooltip_rect);
+
+        // Draw text (day name, month, day number, year separately)
+        dc::set_text_color(hdc, ColorRef::BLACK);
+        dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+
+        // Draw: "Wednesday, January 2, 2026"
+        let mut text_x = tooltip_x + 8;
+        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, day_name);
+        text_x += (day_name.len() as i32) * 6;
+        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, ", ");
+        text_x += 12;
+        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, month_name);
+        text_x += (month_name.len() as i32) * 6;
+        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, " ");
+        text_x += 6;
+        // Draw day as two digits
+        let day_tens = datetime.day / 10;
+        let day_ones = datetime.day % 10;
+        if day_tens > 0 {
+            let d = [b'0' + day_tens];
+            super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, core::str::from_utf8(&d).unwrap_or(""));
+            text_x += 6;
+        }
+        let d = [b'0' + day_ones];
+        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, core::str::from_utf8(&d).unwrap_or(""));
+        text_x += 6;
+        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, ", ");
+        text_x += 12;
+        // Draw year
+        let year = datetime.year;
+        let y3 = (year / 1000) as u8;
+        let y2 = ((year / 100) % 10) as u8;
+        let y1 = ((year / 10) % 10) as u8;
+        let y0 = (year % 10) as u8;
+        let yc = [b'0' + y3, b'0' + y2, b'0' + y1, b'0' + y0];
+        super::super::gdi::text_out(hdc, text_x, tooltip_y + 4, core::str::from_utf8(&yc).unwrap_or(""));
+
         dc::delete_dc(hdc);
     }
 }
