@@ -17,6 +17,8 @@
 //!
 //! Based on Windows Server 2003 PnP implementation from base/ntos/io/pnpmgr/
 
+#![allow(ambiguous_glob_reexports)]
+
 mod devnode;
 mod enumerate;
 mod irp;

@@ -30,6 +30,8 @@
 //! }
 //! ```
 
+#![allow(ambiguous_glob_reexports)]
+
 pub mod atom;
 pub mod avl;
 pub mod base64;

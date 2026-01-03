@@ -38,6 +38,8 @@
 //! - `DependOnService`: Dependencies (REG_MULTI_SZ)
 //! - `DependOnGroup`: Group dependencies (REG_MULTI_SZ)
 
+#![allow(ambiguous_glob_reexports)]
+
 pub mod types;
 pub mod database;
 pub mod control;

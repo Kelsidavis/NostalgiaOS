@@ -22,6 +22,8 @@
 //! - `FAST_MUTEX`: Fast kernel mutex
 //! - `LOOKASIDE_LIST_EX`: Per-CPU lookaside list
 
+#![allow(ambiguous_glob_reexports)]
+
 pub mod callback;
 pub mod fast_mutex;
 pub mod keyed_event;
