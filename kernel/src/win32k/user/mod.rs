@@ -210,6 +210,7 @@ pub mod aspnetcfg;
 pub mod apppool;
 pub mod shellns;
 pub mod explorer;
+pub mod winlogon;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
@@ -945,6 +946,9 @@ pub fn init() {
 
     // Initialize Explorer shell (desktop, taskbar)
     explorer::init();
+
+    // Initialize Winlogon (session management)
+    winlogon::init();
 
     // Register built-in window classes
     register_builtin_classes();
