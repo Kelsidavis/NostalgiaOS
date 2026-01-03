@@ -450,7 +450,7 @@ pub fn hal_get_timer_interrupt_count() -> u64 {
 ///
 /// Determines TSC and APIC timer frequencies for accurate timing.
 pub fn hal_calibrate_timers() {
-    let _guard = unsafe { TIMER_LOCK.lock() };
+    let _guard = TIMER_LOCK.lock();
 
     unsafe {
         // Check for invariant TSC

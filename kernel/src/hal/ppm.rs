@@ -743,7 +743,7 @@ pub fn ppm_get_processor_info(processor: u32) -> Option<ProcessorPowerInfo> {
 
 /// Initialize PPM subsystem
 pub fn init() {
-    let _guard = unsafe { PPM_LOCK.lock() };
+    let _guard = PPM_LOCK.lock();
 
     unsafe {
         for (i, state) in PROCESSOR_POWER.iter_mut().enumerate() {

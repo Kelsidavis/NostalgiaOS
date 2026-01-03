@@ -241,7 +241,7 @@ impl KInterrupt {
         self.last_dispatch_time.store(start_tsc, Ordering::Relaxed);
 
         // Acquire spinlock and call ISR
-        let _guard = unsafe { self.spin_lock.lock() };
+        let _guard = self.spin_lock.lock();
 
         let handled = if let Some(isr) = self.service_routine {
             isr(self.service_context)

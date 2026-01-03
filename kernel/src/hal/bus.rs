@@ -621,7 +621,7 @@ pub fn hal_register_bus(bus_type: BusType, bus_number: u32, info: &BusInfo) -> b
         return false;
     }
 
-    let _guard = unsafe { BUS_LOCK.lock() };
+    let _guard = BUS_LOCK.lock();
 
     unsafe {
         BUS_REGISTRY[type_idx][bus_number as usize] = BusEntry {
@@ -769,7 +769,7 @@ pub fn hal_get_bus_stats() -> BusStats {
 
 /// Initialize bus subsystem
 pub fn init() {
-    let _guard = unsafe { BUS_LOCK.lock() };
+    let _guard = BUS_LOCK.lock();
 
     // Clear registry
     unsafe {

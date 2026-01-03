@@ -428,7 +428,7 @@ fn power_acpi_shutdown() -> ! {
 fn power_restart() -> ! {
     // Try keyboard controller reset
     #[cfg(target_arch = "x86_64")]
-    unsafe {
+    {
         // Wait for keyboard controller
         let mut timeout = 100000u32;
         while timeout > 0 {
@@ -455,9 +455,7 @@ fn power_restart() -> ! {
 fn power_keyboard_shutdown() {
     // Some systems support shutdown via keyboard controller
     #[cfg(target_arch = "x86_64")]
-    unsafe {
-        super::port::write_port_u8(0x64, 0xFE);
-    }
+    super::port::write_port_u8(0x64, 0xFE);
 }
 
 /// Triple fault to force reset

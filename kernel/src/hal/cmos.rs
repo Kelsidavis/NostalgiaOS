@@ -580,9 +580,7 @@ pub fn cmos_disable_nmi() {
 
     // Update CMOS address port to reflect new NMI state
     #[cfg(target_arch = "x86_64")]
-    unsafe {
-        super::port::write_port_u8(CMOS_ADDRESS, NMI_DISABLE_BIT);
-    }
+    super::port::write_port_u8(CMOS_ADDRESS, NMI_DISABLE_BIT);
 }
 
 /// Enable NMI
@@ -591,9 +589,7 @@ pub fn cmos_enable_nmi() {
 
     // Update CMOS address port to reflect new NMI state
     #[cfg(target_arch = "x86_64")]
-    unsafe {
-        super::port::write_port_u8(CMOS_ADDRESS, 0);
-    }
+    super::port::write_port_u8(CMOS_ADDRESS, 0);
 }
 
 /// Check if NMI is disabled

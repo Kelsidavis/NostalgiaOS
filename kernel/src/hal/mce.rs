@@ -540,7 +540,7 @@ pub fn mce_poll_errors(cpu: u32) -> ([McaBankStatus; MAX_MCA_BANKS], usize) {
 
 /// Log an error
 fn mce_log_error(cpu: u32, status: &McaBankStatus) {
-    let _guard = unsafe { MCE_LOCK.lock() };
+    let _guard = MCE_LOCK.lock();
 
     unsafe {
         let idx = ERROR_LOG_INDEX.fetch_add(1, Ordering::Relaxed) as usize % MAX_ERROR_LOG;
@@ -654,7 +654,7 @@ pub fn mce_get_error_log(max_entries: usize) -> ([ErrorLogEntry; 32], usize) {
 
 /// Clear error log
 pub fn mce_clear_error_log() {
-    let _guard = unsafe { MCE_LOCK.lock() };
+    let _guard = MCE_LOCK.lock();
 
     unsafe {
         for entry in ERROR_LOG.iter_mut() {

@@ -258,7 +258,7 @@ fn vga_update_cursor(x: u16, y: u16) {
     let pos = y as u16 * VGA_WIDTH as u16 + x as u16;
 
     #[cfg(target_arch = "x86_64")]
-    unsafe {
+    {
         super::port::write_port_u8(vga_ports::CRTC_INDEX, 0x0F);
         super::port::write_port_u8(vga_ports::CRTC_DATA, (pos & 0xFF) as u8);
         super::port::write_port_u8(vga_ports::CRTC_INDEX, 0x0E);
@@ -269,7 +269,7 @@ fn vga_update_cursor(x: u16, y: u16) {
 /// Enable/disable cursor
 fn vga_set_cursor_visible(visible: bool) {
     #[cfg(target_arch = "x86_64")]
-    unsafe {
+    {
         super::port::write_port_u8(vga_ports::CRTC_INDEX, 0x0A);
         if visible {
             super::port::write_port_u8(vga_ports::CRTC_DATA, 0x0E);

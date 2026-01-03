@@ -396,7 +396,7 @@ impl DmaAdapter {
             return None;
         }
 
-        let _guard = unsafe { self.lock.lock() };
+        let _guard = self.lock.lock();
 
         // Find contiguous free registers
         let mut start = 0usize;
@@ -426,7 +426,7 @@ impl DmaAdapter {
 
     /// Free map registers
     pub fn free_map_registers(&mut self, first_register: u32, count: u32) {
-        let _guard = unsafe { self.lock.lock() };
+        let _guard = self.lock.lock();
 
         for i in first_register..first_register + count {
             if (i as usize) < MAX_MAP_REGISTERS {
@@ -450,7 +450,7 @@ impl DmaAdapter {
             return None;
         }
 
-        let _guard = unsafe { self.lock.lock() };
+        let _guard = self.lock.lock();
 
         let reg = &mut self.map_registers[register_base as usize];
         if !reg.allocated {
@@ -562,7 +562,7 @@ pub fn hal_get_dma_adapter(desc: &DeviceDescription) -> Option<*mut DmaAdapter> 
         return None;
     }
 
-    let _guard = unsafe { DMA_LOCK.lock() };
+    let _guard = DMA_LOCK.lock();
 
     unsafe {
         for adapter in DMA_ADAPTERS.iter_mut() {
@@ -583,7 +583,7 @@ pub fn hal_put_dma_adapter(adapter: *mut DmaAdapter) {
         return;
     }
 
-    let _guard = unsafe { DMA_LOCK.lock() };
+    let _guard = DMA_LOCK.lock();
 
     unsafe {
         (*adapter).valid.store(false, Ordering::Release);
@@ -790,7 +790,7 @@ pub fn hal_get_adapter_stats(index: usize) -> Option<DmaAdapterStats> {
 
 /// Initialize DMA subsystem
 pub fn init() {
-    let _guard = unsafe { DMA_LOCK.lock() };
+    let _guard = DMA_LOCK.lock();
 
     unsafe {
         for (i, adapter) in DMA_ADAPTERS.iter_mut().enumerate() {
