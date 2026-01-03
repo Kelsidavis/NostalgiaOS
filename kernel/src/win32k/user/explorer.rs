@@ -98,6 +98,26 @@ static DRAG_START: SpinLock<Point> = SpinLock::new(Point::new(0, 0));
 /// Window position at drag start
 static DRAG_WINDOW_START: SpinLock<Point> = SpinLock::new(Point::new(0, 0));
 
+// ============================================================================
+// Window Resizing State
+// ============================================================================
+
+/// Window currently being resized (if any)
+static RESIZING_WINDOW: SpinLock<HWND> = SpinLock::new(HWND::NULL);
+
+/// Resize edge (HTLEFT, HTRIGHT, HTTOP, HTBOTTOM, or corners)
+static RESIZE_EDGE: SpinLock<isize> = SpinLock::new(0);
+
+/// Resize start position (screen coordinates)
+static RESIZE_START: SpinLock<Point> = SpinLock::new(Point::new(0, 0));
+
+/// Window rect at resize start
+static RESIZE_WINDOW_RECT: SpinLock<Rect> = SpinLock::new(Rect::new(0, 0, 0, 0));
+
+/// Minimum window size
+const MIN_WINDOW_WIDTH: i32 = 100;
+const MIN_WINDOW_HEIGHT: i32 = 50;
+
 /// Taskbar button entry
 #[derive(Debug, Clone, Copy)]
 struct TaskbarButtonEntry {
@@ -328,10 +348,17 @@ fn process_mouse_input(event: mouse::MouseEvent) {
 
     // Check if we're dragging a window
     let dragging_hwnd = *DRAGGING_WINDOW.lock();
+    let resizing_hwnd = *RESIZING_WINDOW.lock();
+
     if dragging_hwnd.is_valid() {
         // We're in drag mode - handle window movement
         if event.dx != 0 || event.dy != 0 {
             handle_window_drag(x, y);
+        }
+    } else if resizing_hwnd.is_valid() {
+        // We're in resize mode - handle window resizing
+        if event.dx != 0 || event.dy != 0 {
+            handle_window_resize(x, y);
         }
     } else {
         // Normal mouse movement
@@ -371,8 +398,9 @@ fn process_mouse_input(event: mouse::MouseEvent) {
                 // Button released
                 input::process_mouse_button(0, false, x, y);
 
-                // End any drag operation
+                // End any drag or resize operation
                 end_window_drag();
+                end_window_resize();
             }
         }
 
@@ -430,6 +458,26 @@ fn try_start_window_drag(x: i32, y: i32) {
             input::set_active_window(hwnd);
 
             // Repaint taskbar to show active state
+            paint_taskbar();
+        }
+        // Handle resize edges
+        message::hittest::HTLEFT | message::hittest::HTRIGHT |
+        message::hittest::HTTOP | message::hittest::HTBOTTOM |
+        message::hittest::HTTOPLEFT | message::hittest::HTTOPRIGHT |
+        message::hittest::HTBOTTOMLEFT | message::hittest::HTBOTTOMRIGHT => {
+            // Start resizing this window
+            crate::serial_println!("[EXPLORER] Starting resize for window {:#x}, edge={}", hwnd.raw(), hit);
+
+            if let Some(wnd) = window::get_window(hwnd) {
+                *RESIZING_WINDOW.lock() = hwnd;
+                *RESIZE_EDGE.lock() = hit;
+                *RESIZE_START.lock() = Point::new(x, y);
+                *RESIZE_WINDOW_RECT.lock() = wnd.rect;
+            }
+
+            // Bring window to front
+            window::set_foreground_window(hwnd);
+            input::set_active_window(hwnd);
             paint_taskbar();
         }
         _ => {}
@@ -494,6 +542,120 @@ fn end_window_drag() {
         super::paint::repaint_all();
         paint_taskbar();
     }
+}
+
+/// Handle window resize movement
+fn handle_window_resize(x: i32, y: i32) {
+    let hwnd = *RESIZING_WINDOW.lock();
+    if !hwnd.is_valid() {
+        return;
+    }
+
+    let edge = *RESIZE_EDGE.lock();
+    let resize_start = *RESIZE_START.lock();
+    let original_rect = *RESIZE_WINDOW_RECT.lock();
+
+    // Calculate delta from start
+    let dx = x - resize_start.x;
+    let dy = y - resize_start.y;
+
+    // Calculate new rect based on which edge is being dragged
+    let mut new_rect = original_rect;
+
+    match edge {
+        message::hittest::HTLEFT => {
+            new_rect.left = original_rect.left + dx;
+        }
+        message::hittest::HTRIGHT => {
+            new_rect.right = original_rect.right + dx;
+        }
+        message::hittest::HTTOP => {
+            new_rect.top = original_rect.top + dy;
+        }
+        message::hittest::HTBOTTOM => {
+            new_rect.bottom = original_rect.bottom + dy;
+        }
+        message::hittest::HTTOPLEFT => {
+            new_rect.left = original_rect.left + dx;
+            new_rect.top = original_rect.top + dy;
+        }
+        message::hittest::HTTOPRIGHT => {
+            new_rect.right = original_rect.right + dx;
+            new_rect.top = original_rect.top + dy;
+        }
+        message::hittest::HTBOTTOMLEFT => {
+            new_rect.left = original_rect.left + dx;
+            new_rect.bottom = original_rect.bottom + dy;
+        }
+        message::hittest::HTBOTTOMRIGHT => {
+            new_rect.right = original_rect.right + dx;
+            new_rect.bottom = original_rect.bottom + dy;
+        }
+        _ => return,
+    }
+
+    // Enforce minimum window size
+    if new_rect.width() < MIN_WINDOW_WIDTH {
+        if edge == message::hittest::HTLEFT ||
+           edge == message::hittest::HTTOPLEFT ||
+           edge == message::hittest::HTBOTTOMLEFT {
+            new_rect.left = new_rect.right - MIN_WINDOW_WIDTH;
+        } else {
+            new_rect.right = new_rect.left + MIN_WINDOW_WIDTH;
+        }
+    }
+    if new_rect.height() < MIN_WINDOW_HEIGHT {
+        if edge == message::hittest::HTTOP ||
+           edge == message::hittest::HTTOPLEFT ||
+           edge == message::hittest::HTTOPRIGHT {
+            new_rect.top = new_rect.bottom - MIN_WINDOW_HEIGHT;
+        } else {
+            new_rect.bottom = new_rect.top + MIN_WINDOW_HEIGHT;
+        }
+    }
+
+    // Apply new size
+    window::move_window(
+        hwnd,
+        new_rect.left,
+        new_rect.top,
+        new_rect.width(),
+        new_rect.height(),
+        true,
+    );
+
+    // Repaint everything
+    super::paint::repaint_all();
+    paint_taskbar();
+
+    // Redraw cursor on top
+    cursor::draw_cursor();
+}
+
+/// End window resize operation
+fn end_window_resize() {
+    let hwnd = {
+        let mut resizing = RESIZING_WINDOW.lock();
+        let h = *resizing;
+        *resizing = HWND::NULL;
+        h
+    };
+
+    if hwnd.is_valid() {
+        crate::serial_println!("[EXPLORER] Ended resize for window {:#x}", hwnd.raw());
+
+        // Clear resize edge
+        *RESIZE_EDGE.lock() = 0;
+
+        // Final repaint
+        super::paint::repaint_all();
+        paint_taskbar();
+    }
+}
+
+/// Check if we're currently resizing a window
+fn is_resizing() -> bool {
+    RESIZING_WINDOW.lock().is_valid()
 }
 
 /// Handle click on the taskbar
