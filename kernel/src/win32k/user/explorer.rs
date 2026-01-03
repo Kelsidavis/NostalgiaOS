@@ -607,7 +607,16 @@ fn process_paint_requests() {
 
     for hwnd in dirty_windows.iter() {
         if hwnd.is_valid() {
-            message::post_message(*hwnd, message::WM_PAINT, 0, 0);
+            // Paint the window frame
+            super::paint::draw_window_frame(*hwnd);
+
+            // Paint client content for test windows
+            paint_test_window_client(*hwnd);
+
+            // Clear the needs_paint flag
+            window::with_window_mut(*hwnd, |wnd| {
+                wnd.needs_paint = false;
+            });
         }
     }
 }
