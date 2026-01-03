@@ -30,7 +30,7 @@ pub const TASKBAR_HEIGHT: i32 = 30;
 pub const START_BUTTON_WIDTH: i32 = 60;
 
 /// Clock width
-pub const CLOCK_WIDTH: i32 = 60;
+pub const CLOCK_WIDTH: i32 = 75;
 
 /// System tray width
 pub const SYSTRAY_WIDTH: i32 = 100;
@@ -718,7 +718,8 @@ fn paint_clock(hdc: HDC, taskbar_y: i32) {
     let hour = datetime.hour;
     let minute = datetime.minute;
 
-    // Format time (12-hour format)
+    // Format time (12-hour format with AM/PM)
+    let is_pm = hour >= 12;
     let h12 = if hour == 0 { 12 } else if hour > 12 { hour - 12 } else { hour };
 
     // Build time string characters
@@ -727,17 +728,19 @@ fn paint_clock(hdc: HDC, taskbar_y: i32) {
     let c2 = b':';
     let c3 = b'0' + (minute / 10);
     let c4 = b'0' + (minute % 10);
+    let c5 = if is_pm { b'P' } else { b'A' };
+    let c6 = b'M';
 
     // Draw each character
     dc::set_text_color(hdc, ColorRef::BLACK);
     dc::set_bk_mode(hdc, dc::BkMode::Transparent);
 
-    let text_x = clock_rect.left + 8;
+    let text_x = clock_rect.left + 4;
     let text_y = clock_rect.top + 5;
-    let char_width = 8; // Approximate character width
+    let char_width = 7; // Approximate character width
 
     // Draw time characters individually
-    let chars = [c0, c1, c2, c3, c4];
+    let chars = [c0, c1, c2, c3, c4, b' ', c5, c6];
     for (i, &ch) in chars.iter().enumerate() {
         let s = [ch];
         if let Ok(text) = core::str::from_utf8(&s) {
