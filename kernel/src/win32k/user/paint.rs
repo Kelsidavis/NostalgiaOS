@@ -448,8 +448,8 @@ pub fn paint_desktop() {
 
 /// Repaint all visible windows
 pub fn repaint_all() {
-    // Paint desktop first
-    paint_desktop();
+    // Paint desktop first (use explorer's paint for consistency)
+    super::explorer::paint_desktop();
 
     // Get desktop window
     let desktop = window::get_desktop_window();

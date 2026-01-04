@@ -618,8 +618,7 @@ fn shell_thread_entry() {
         // Disable text framebuffer output - graphical desktop takes over
         framebuffer::disable();
 
-        // Clear and repaint the desktop properly
-        win32k::user::paint::paint_desktop();
+        // Paint desktop and taskbar (explorer handles everything)
         win32k::user::explorer::paint_desktop();
         win32k::user::explorer::paint_taskbar();
 
