@@ -631,27 +631,21 @@ fn paint_desktop_icons(hdc: HDC) {
         let is_selected = selected == Some(idx);
         let is_dragging = dragging == Some(idx);
 
-        // Selection highlight
-        if is_selected {
-            let highlight_rect = Rect::new(x - 4, y - 2, x + ICON_SIZE + 4, y + ICON_SIZE + 20);
-            surf.fill_rect(&highlight_rect, ColorRef::rgb(0, 84, 227));
-        }
-
         if is_dragging {
             continue;
         }
 
-        // Draw icon
-        draw_icon(&surf, x, y, icon.icon_type);
+        // Draw icon (with 50% highlight blend if selected)
+        draw_icon(&surf, x, y, icon.icon_type, is_selected);
 
-        // Draw label
+        // Draw label (with highlight background if selected)
         let label_x = x + ICON_SIZE / 2;
         let label_y = y + ICON_SIZE + 4;
         draw_icon_label(&surf, label_x, label_y, icon.name, is_selected);
     }
 }
 
-fn draw_icon(surf: &super::super::super::gdi::surface::Surface, x: i32, y: i32, icon_type: IconType) {
+fn draw_icon(surf: &super::super::super::gdi::surface::Surface, x: i32, y: i32, icon_type: IconType, selected: bool) {
     use super::super::desktop_icons::*;
 
     let (width, height, data) = match icon_type {
@@ -661,12 +655,23 @@ fn draw_icon(surf: &super::super::super::gdi::surface::Surface, x: i32, y: i32, 
         IconType::NetworkPlaces => (NETWORK_PLACES_WIDTH, NETWORK_PLACES_HEIGHT, &NETWORK_PLACES_DATA[..]),
     };
 
+    // Highlight color for selection (Windows blue)
+    let highlight_r = 49u8;
+    let highlight_g = 106u8;
+    let highlight_b = 197u8;
+
+    // Get desktop background color for alpha blending
+    let bg_color = super::super::desktop::get_desktop_color();
+    let bg_r = ((bg_color.0 >> 16) & 0xFF) as u8;
+    let bg_g = ((bg_color.0 >> 8) & 0xFF) as u8;
+    let bg_b = (bg_color.0 & 0xFF) as u8;
+
     for row in 0..height {
         for col in 0..width {
             let offset = (row * width + col) * 4;
-            let r = data[offset];
-            let g = data[offset + 1];
-            let b = data[offset + 2];
+            let mut r = data[offset];
+            let mut g = data[offset + 1];
+            let mut b = data[offset + 2];
             let a = data[offset + 3];
 
             if a == 0 {
@@ -676,35 +681,46 @@ fn draw_icon(surf: &super::super::super::gdi::surface::Surface, x: i32, y: i32, 
             let px = x + col as i32;
             let py = y + row as i32;
 
-            if a == 255 {
-                surf.set_pixel(px, py, ColorRef::rgb(r, g, b));
-            } else {
-                let bg_r = 0u8;
-                let bg_g = 128u8;
-                let bg_b = 128u8;
-                let blended_r = ((r as u16 * a as u16 + bg_r as u16 * (255 - a) as u16) / 255) as u8;
-                let blended_g = ((g as u16 * a as u16 + bg_g as u16 * (255 - a) as u16) / 255) as u8;
-                let blended_b = ((b as u16 * a as u16 + bg_b as u16 * (255 - a) as u16) / 255) as u8;
-                surf.set_pixel(px, py, ColorRef::rgb(blended_r, blended_g, blended_b));
+            // First blend with background if semi-transparent
+            if a < 255 {
+                r = ((r as u16 * a as u16 + bg_r as u16 * (255 - a) as u16) / 255) as u8;
+                g = ((g as u16 * a as u16 + bg_g as u16 * (255 - a) as u16) / 255) as u8;
+                b = ((b as u16 * a as u16 + bg_b as u16 * (255 - a) as u16) / 255) as u8;
             }
+
+            // If selected, apply 50% blend with highlight color (ILD_BLEND50)
+            if selected {
+                r = ((r as u16 + highlight_r as u16) / 2) as u8;
+                g = ((g as u16 + highlight_g as u16) / 2) as u8;
+                b = ((b as u16 + highlight_b as u16) / 2) as u8;
+            }
+
+            surf.set_pixel(px, py, ColorRef::rgb(r, g, b));
         }
     }
 }
 
 fn draw_icon_label(surf: &super::super::super::gdi::surface::Surface, center_x: i32, y: i32, text: &str, selected: bool) {
     let text_width = (text.len() as i32) * 6;
-    let mut x = (center_x - text_width / 2).max(2);
+    let text_height = 7;
+    let x = (center_x - text_width / 2).max(2);
 
     if selected {
+        // Draw highlight background behind text (Windows blue)
+        let highlight_color = ColorRef::rgb(49, 106, 197);
+        let bg_rect = Rect::new(x - 2, y - 1, x + text_width + 1, y + text_height + 2);
+        surf.fill_rect(&bg_rect, highlight_color);
+
+        // Draw white text on highlight background
         for (i, c) in text.chars().enumerate() {
             draw_char(surf, x + (i as i32) * 6, y, c, ColorRef::WHITE);
         }
     } else {
-        // Shadow
+        // Draw shadow first (offset by 1 pixel)
         for (i, c) in text.chars().enumerate() {
             draw_char(surf, x + (i as i32) * 6 + 1, y + 1, c, ColorRef::BLACK);
         }
-        // Text
+        // Draw white text on top
         for (i, c) in text.chars().enumerate() {
             draw_char(surf, x + (i as i32) * 6, y, c, ColorRef::WHITE);
         }
