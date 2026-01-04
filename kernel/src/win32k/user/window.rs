@@ -395,14 +395,18 @@ pub fn create_window(
     // Calculate client rect
     window.calculate_client_rect();
 
-    // Link to parent's child list
-    if window.parent.is_valid() {
-        link_window_to_parent(handle, window.parent);
-    }
+    // Store parent for linking after window is in table
+    let parent_to_link = window.parent;
 
+    // Store window in table FIRST (before linking)
     {
         let mut table = WINDOW_TABLE.lock();
         table.entries[index as usize].window = Some(window);
+    }
+
+    // Now link to parent's child list (window must be in table first)
+    if parent_to_link.is_valid() {
+        link_window_to_parent(handle, parent_to_link);
     }
 
     super::inc_window_count();

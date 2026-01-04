@@ -484,11 +484,20 @@ pub fn repaint_all() {
     // Also paint desktop icons
     super::explorer::deskhost::paint_icons_only();
 
-    // Get desktop window
-    let desktop = window::get_desktop_window();
-
-    // Paint all children
-    repaint_window_tree(desktop);
+    // Paint all visible windows directly from window table
+    // (The parent-child tree may not be correctly linked)
+    let count = window::get_window_count() as usize;
+    for i in 0..count {
+        if let Some(hwnd) = window::get_window_at_index(i) {
+            if let Some(wnd) = window::get_window(hwnd) {
+                // Skip minimized windows
+                if wnd.visible && !wnd.minimized {
+                    // Paint this window's frame and client area
+                    draw_window_frame(hwnd);
+                }
+            }
+        }
+    }
 }
 
 /// Recursively repaint window and children
