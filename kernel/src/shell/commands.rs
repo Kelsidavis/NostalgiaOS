@@ -607,16 +607,30 @@ pub fn cmd_mkdir(args: &[&str]) {
 
     let full_path = resolve_path(args[0]);
 
-    match fs::mkdir(full_path) {
-        Ok(()) => {
-            // Success - no output
+    // Extract parent path and directory name
+    // full_path is like "C:\foo\bar" - we need parent="C:\foo" and name="bar"
+    let bytes = full_path.as_bytes();
+    let last_sep = bytes.iter().rposition(|&b| b == b'\\' || b == b'/');
+
+    let (parent_path, dir_name) = match last_sep {
+        Some(pos) if pos > 0 => (&full_path[..pos], &full_path[pos + 1..]),
+        _ => {
+            // No separator or at root - use path as parent, can't create at root
+            outln!("Invalid path: {}", args[0]);
+            return;
         }
-        Err(fs::FsStatus::AlreadyExists) => {
-            outln!("A subdirectory or file {} already exists.", args[0]);
-        }
-        Err(e) => {
-            outln!("Error creating directory: {:?}", e);
-        }
+    };
+
+    if dir_name.is_empty() {
+        outln!("Invalid directory name");
+        return;
+    }
+
+    // Use io::vfs which has the RAM disk mounted
+    if crate::io::vfs::create_directory(parent_path, dir_name) {
+        // Success - no output (Windows style)
+    } else {
+        outln!("Unable to create directory: {}", args[0]);
     }
 }
 

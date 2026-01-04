@@ -1,7 +1,7 @@
 //! Virtual File System (VFS) Layer
 //!
 //! Provides a unified interface for file system access across different
-//! file system types. Currently supports FAT32.
+//! file system types. Currently supports FAT32 and RAM disk.
 //!
 //! # Features
 //! - Path-based file access (e.g., "C:\Windows\System32")
@@ -11,6 +11,95 @@
 
 use crate::ke::SpinLock;
 use super::fat32;
+
+// ============================================================================
+// RAM Disk File System
+// ============================================================================
+
+/// Maximum entries in RAM disk root
+const RAMFS_MAX_ENTRIES: usize = 64;
+
+/// RAM disk directory entry
+#[derive(Clone, Copy)]
+struct RamFsEntry {
+    /// Entry name
+    name: [u8; 64],
+    name_len: usize,
+    /// Is directory
+    is_directory: bool,
+    /// Used
+    active: bool,
+}
+
+impl RamFsEntry {
+    const fn empty() -> Self {
+        Self {
+            name: [0; 64],
+            name_len: 0,
+            is_directory: false,
+            active: false,
+        }
+    }
+}
+
+/// RAM disk filesystem state (simple flat directory for now)
+static RAMFS_ENTRIES: SpinLock<[RamFsEntry; RAMFS_MAX_ENTRIES]> =
+    SpinLock::new([const { RamFsEntry::empty() }; RAMFS_MAX_ENTRIES]);
+
+/// Create directory in RAM disk
+fn ramfs_create_directory(name: &str) -> bool {
+    let mut entries = RAMFS_ENTRIES.lock();
+
+    // Check if already exists
+    for entry in entries.iter() {
+        if entry.active && entry.name_len == name.len() {
+            let entry_name = core::str::from_utf8(&entry.name[..entry.name_len]).unwrap_or("");
+            if entry_name.eq_ignore_ascii_case(name) {
+                crate::serial_println!("[RAMFS] Directory already exists: {}", name);
+                return false;
+            }
+        }
+    }
+
+    // Find free slot
+    for entry in entries.iter_mut() {
+        if !entry.active {
+            let len = name.len().min(63);
+            entry.name[..len].copy_from_slice(&name.as_bytes()[..len]);
+            entry.name_len = len;
+            entry.is_directory = true;
+            entry.active = true;
+            crate::serial_println!("[RAMFS] Created directory: {}", name);
+            return true;
+        }
+    }
+
+    crate::serial_println!("[RAMFS] No free slots for directory: {}", name);
+    false
+}
+
+/// List RAM disk root directory
+fn ramfs_list_directory(entries_out: &mut [VfsEntry]) -> usize {
+    let entries = RAMFS_ENTRIES.lock();
+    let mut count = 0;
+
+    for entry in entries.iter() {
+        if count >= entries_out.len() {
+            break;
+        }
+        if entry.active {
+            let out = &mut entries_out[count];
+            out.name[..entry.name_len].copy_from_slice(&entry.name[..entry.name_len]);
+            out.name_len = entry.name_len;
+            out.is_directory = entry.is_directory;
+            out.size = 0;
+            out.icon_type = if entry.is_directory { VfsIconType::Folder } else { VfsIconType::File };
+            count += 1;
+        }
+    }
+
+    count
+}
 
 /// Maximum drives
 pub const MAX_DRIVES: usize = 26; // A-Z
@@ -403,8 +492,8 @@ pub fn read_directory(path: &str, entries: &mut [VfsEntry]) -> usize {
             result_count
         }
         DriveType::RamDisk => {
-            // RAM disk not implemented yet
-            0
+            // List RAM disk root directory
+            ramfs_list_directory(entries)
         }
         _ => 0,
     }
@@ -727,6 +816,14 @@ pub fn create_directory(path: &str, name: &str) -> bool {
     match drive.drive_type {
         DriveType::Fat32 => {
             fat32::create_directory(drive.fat32_slot, inner_path, name)
+        }
+        DriveType::RamDisk => {
+            // RAM disk only supports root directory for now
+            if !inner_path.is_empty() {
+                crate::serial_println!("[VFS] create_directory: RAM disk only supports root");
+                return false;
+            }
+            ramfs_create_directory(name)
         }
         _ => {
             crate::serial_println!("[VFS] create_directory: unsupported drive type");
