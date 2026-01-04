@@ -290,6 +290,7 @@ fn create_desktop_window() -> HWND {
     window.client_rect = window.rect;
     window.visible = true;
     window.valid = true;
+    window.is_desktop = true;  // Mark as desktop window so it's excluded from enumeration
 
     // Set class name
     let class_name = b"Desktop";
