@@ -165,6 +165,7 @@ pub fn create_desktop(rect: Rect) {
         rect.left, rect.top,
         rect.right - rect.left, rect.bottom - rect.top,
         super::super::super::HWND::NULL,
+        0, // menu
     );
 
     let mut host = DESKTOP_HOST.lock();
@@ -335,6 +336,7 @@ fn create_explorer_window(title: &str, _content: &str) {
         WindowStyleEx::empty(),
         200, 100, 400, 300,
         super::super::super::HWND::NULL,
+        0, // menu
     );
     window::show_window(hwnd, super::super::ShowCommand::Show);
 }

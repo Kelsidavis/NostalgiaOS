@@ -225,17 +225,25 @@ pub fn paint(hdc: HDC, taskbar_y: i32) {
         btn_rect.top += taskbar_y;
         btn_rect.bottom += taskbar_y;
 
-        // Get window title
-        let title = window::get_window(item.hwnd)
-            .map(|w| w.title)
-            .unwrap_or("");
+        // Get window title into local buffer
+        let mut title_buf = [0u8; 64];
+        let title_len = if let Some(wnd) = window::get_window(item.hwnd) {
+            let len = wnd.title_len.min(title_buf.len());
+            title_buf[..len].copy_from_slice(&wnd.title[..len]);
+            len
+        } else {
+            let default = b"Window";
+            title_buf[..default.len()].copy_from_slice(default);
+            default.len()
+        };
+        let title_str = core::str::from_utf8(&title_buf[..title_len]).unwrap_or("Window");
 
         // Truncate title to fit button
         let max_chars = ((btn_rect.right - btn_rect.left) / 7) as usize;
-        let display_title = if title.len() > max_chars {
-            &title[..max_chars.saturating_sub(2)]
+        let display_title: &str = if title_str.len() > max_chars {
+            &title_str[..max_chars.saturating_sub(2)]
         } else {
-            title
+            title_str
         };
 
         // Determine button state

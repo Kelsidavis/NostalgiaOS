@@ -232,7 +232,7 @@ pub fn paint() {
             surf.fill_rect(&header_rect, ColorRef::rgb(0, 51, 153)); // Match sidebar
 
             // Draw user icon
-            paint_user_icon(surf, menu_x + 6, menu_y + 6);
+            paint_user_icon(&surf, menu_x + 6, menu_y + 6);
 
             // Draw username
             dc::set_text_color(hdc, ColorRef::WHITE);

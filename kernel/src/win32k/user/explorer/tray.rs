@@ -143,6 +143,7 @@ pub fn create_tray(rect: Rect, screen_width: i32) {
         rect.left, rect.top,
         rect.right - rect.left, rect.bottom - rect.top,
         super::super::super::HWND::NULL,
+        0, // menu
     );
 
     // Store tray handle

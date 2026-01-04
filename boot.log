@@ -1,0 +1,991 @@
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU HARDDISK QM00001 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Primary,Master,0x0)
+========================================
+  Nostalgia OS UEFI Bootloader v0.1.0
+========================================
+[ INFO]: boot/uefi-loader/src/main.rs@093: ========================================
+[ INFO]: boot/uefi-loader/src/main.rs@094:   Nostalgia OS UEFI Bootloader v0.1.0
+[ INFO]: boot/uefi-loader/src/main.rs@095: ========================================
+[ INFO]: boot/uefi-loader/src/main.rs@096: 
+[ INFO]: boot/uefi-loader/src/main.rs@097: Firmware: Ubuntu distribution of EDK II v65536
+Firmware initialized
+[ INFO]: boot/uefi-loader/src/main.rs@103: 
+[ INFO]: boot/uefi-loader/src/main.rs@104: [1/5] Getting framebuffer info...
+[1/5] Getting framebuffer info...
+[ INFO]: boot/uefi-loader/src/main.rs@108:   Framebuffer: 1280x800 @ 0x80000000
+  Framebuffer: 1280x800 @ 0x80000000
+[ INFO]: boot/uefi-loader/src/main.rs@116: 
+[ INFO]: boot/uefi-loader/src/main.rs@117: [2/5] Loading kernel...
+[2/5] Loading kernel...
+[ INFO]: boot/uefi-loader/src/kernel.rs@049: Loading kernel from ESP...
+[ INFO]: boot/uefi-loader/src/kernel.rs@067: Kernel file size: 47551456 bytes
+[ INFO]: boot/uefi-loader/src/kernel.rs@096: Could not allocate at preferred address, using any available
+[ INFO]: boot/uefi-loader/src/kernel.rs@106: Aligned kernel from 0x5ec1000 to 0x6000000
+[ INFO]: boot/uefi-loader/src/kernel.rs@111: Kernel loaded at physical address: 0x6000000
+[ INFO]: boot/uefi-loader/src/main.rs@127:   Kernel loaded at phys=0x6000000, size=47551456 bytes
+  Kernel loaded at phys=0x6000000, size=47551456 bytes
+[ INFO]: boot/uefi-loader/src/main.rs@133: 
+[ INFO]: boot/uefi-loader/src/main.rs@134: [3/5] Setting up page tables...
+[3/5] Setting up page tables...
+[ INFO]: boot/uefi-loader/src/main.rs@151:   Identity mapped first 4GB
+  Identity mapped first 4GB
+[ INFO]: boot/uefi-loader/src/main.rs@167:   Mapped kernel: phys=0x6000000 -> virt=0xffffffff80000000
+  Mapped kernel: phys=0x6000000 -> virt=0xffffffff80000000
+[ INFO]: boot/uefi-loader/src/main.rs@173:   PML4 at 0xe667000
+  PML4 at 0xe667000
+[ INFO]: boot/uefi-loader/src/main.rs@177: 
+[ INFO]: boot/uefi-loader/src/main.rs@178: [4/5] Preparing boot info...
+[4/5] Preparing boot info...
+[ INFO]: boot/uefi-loader/src/main.rs@184:   RSDP found at 0xf77e014
+  RSDP found at 0xf77e014
+[ INFO]: boot/uefi-loader/src/main.rs@204: 
+[ INFO]: boot/uefi-loader/src/main.rs@205: [5/5] Exiting UEFI boot services...
+[5/5] Exiting UEFI boot services...
+[ INFO]: boot/uefi-loader/src/main.rs@207: 
+[ INFO]: boot/uefi-loader/src/main.rs@208: Jumping to kernel at 0x6000000 (virt: 0xffffffff80000000)
+Jumping to kernel at 0x6000000 (virt: 0xffffffff80000000)
+[ INFO]: boot/uefi-loader/src/main.rs@214: ========================================
+========================================
+K
+Kernel entry point reached!
+Boot info ptr: 0xde5b010
+Boot info magic: 0x4e4f5354414c4749
+Boot info validated OK
+Initializing framebuffer...
+Framebuffer initialized
+========================================
+  Nostalgia OS Kernel v0.1.0
+========================================
+[Phase 0] Early initialization...
+[SYSCALL] Initialized syscall support
+[SYSCALL] STAR=0x10000800000000, LSTAR=0xffffffff800003b4, SFMASK=0x4700
+[CONTEXT] Per-CPU syscall data initialized at 0xffffffff83411ce0
+[CONTEXT]   Kernel stack: 0xffffffff83415d20
+[Phase 0] Complete
+[Phase 1] Full initialization...
+[TIMER] Timer subsystem initialized
+[KE] Crash dump subsystem initialized (type: mini)
+[KE] Kernel executive initialized
+[KE] KPRCB and KPCR initialized for BSP
+[KE] APIC timer running at 1000 Hz
+[KE] Balance set manager initialized
+[MM] Initializing Memory Manager...
+[MM] PFN database initialized (simple)
+[MM]   768 pages (3072 KB) available
+[MM] PTE subsystem initialized
+[MM] VAD subsystem initialized (256 VADs available)
+[MM]   Size class 0: 32B x 256 = 8KB
+[MM]   Size class 1: 64B x 256 = 16KB
+[MM]   Size class 2: 128B x 256 = 32KB
+[MM]   Size class 3: 256B x 256 = 64KB
+[MM]   Size class 4: 512B x 256 = 128KB
+[MM]   Size class 5: 1024B x 256 = 256KB
+[MM]   Size class 6: 2048B x 256 = 512KB
+[MM]   Size class 7: 4096B x 256 = 1024KB
+[MM]   Size class 8: 8192B x 256 = 2048KB
+[MM]   Size class 9: 16384B x 256 = 4096KB
+[MM] Pool allocator initialized (10240 KB heap, 2560 blocks)
+[MM] Address space subsystem initialized
+[MM]   System PML4: 0xe667000
+[MM]   63 address spaces available
+[MM] Physical memory initialized
+[MM]   Total: 232 MB
+[MM]   Usable: 231 MB
+[MM]   64 memory regions
+[MM] Section subsystem initialized
+[MM] TLB shootdown initialized
+[MM] Write Watch subsystem initialized (64 regions, 16 bitmaps)
+[MM] AWE (Address Windowing Extensions) initialized
+[MM] Lock Virtual Memory subsystem initialized
+[MM] Memory Manager initialized
+[ACPI] Found RSDP at 0xf77e014, revision 2
+[ACPI] Using XSDT at 0xf77d0e8
+[ACPI] Found APIC table at 0xf779000
+[ACPI] MADT: Local APIC at 0xfee00000, has_8259=true
+[ACPI]   CPU 0: ACPI ID=0, APIC ID=0, enabled=true
+[ACPI]   I/O APIC 0: ID=0, addr=0xfec00000, GSI base=0
+[ACPI]   IRQ Override: source=0 -> GSI=2, flags=0x0
+[ACPI]   IRQ Override: source=5 -> GSI=5, flags=0xd
+[ACPI]   IRQ Override: source=9 -> GSI=9, flags=0xd
+[ACPI]   IRQ Override: source=10 -> GSI=10, flags=0xd
+[ACPI]   IRQ Override: source=11 -> GSI=11, flags=0xd
+[ACPI]   Local NMI: processor=255, LINT=1
+[ACPI] Found FACP table at 0xf77a000
+[ACPI] FADT: int_model=1, SCI=9, flags=0x80a5
+[ACPI]   PM1a_evt=0xb000, PM1a_ctrl=0xb004, PM_tmr=0xb008
+[ACPI] PM1a_evt=0xb000, PM1a_ctrl=0xb004, PM_tmr=0xb008
+[ACPI] SCI=9, SMI_cmd=0xb2
+[ACPI] Sleep states: S1=false, S2=false, S3=false, S4=false, S5=true
+[ACPI] Initialized: 1 processor(s), 1 I/O APIC(s)
+[RTC] Initialized: 2026-01-03 05:35:17
+[PO] ACPI capabilities detected:
+[PO]   S1=false, S2=false, S3=false, S4=false, S5=true
+[PO]   PM1a_ctrl=0xb004, SCI=9
+[ACPI] Already in ACPI mode
+[PO] Idle detection subsystem initialized (64 device slots)
+[PO] Shutdown support initialized
+[PO] Power request support initialized
+[PO] Power manager initialized
+[PERF] Initializing performance monitoring subsystem
+[PERF] Initializing CPU profiler
+[PERF] CPU profiler initialized (interval: 10000 us)
+[PERF] Initializing performance counters
+[PERF] Registered 5 performance objects
+[PERF] Initializing hook subsystem
+[PERF] Hook subsystem initialized (64 max hooks, 65536 byte buffer)
+[PERF] Performance monitoring initialized
+[ARB] Initializing resource arbiter subsystem
+[ARB] Initialized 5 resource arbiters
+[ARB] Range list management initialized
+[ARB] Ordering list management initialized
+[ARB] Resource arbiter subsystem initialized
+[RAW] VCB pool initialized (32 slots)
+[RAW] Dispatch initialized
+[RAW] RAW file system initialized
+[NLS] National Language Support initialized (ACP=1252, OCP=437)
+[OB] Initializing Object Manager...
+[OB] Object types initialized
+[OB] Namespace initialized
+[OB]   \ObjectTypes
+[OB]   \BaseNamedObjects
+[OB]   \Device
+[OB] System handle table initialized
+[OB] Created symbolic link: \?? -> \DosDevices
+[OB] Created symbolic link: \GLOBAL?? -> \DosDevices
+[OB] Created symbolic link: \DosDevices\NUL -> \Device\Null
+[OB] Created symbolic link: \DosDevices\CON -> \Device\Console
+[OB] Created symbolic link: \DosDevices\AUX -> \Device\Serial0
+[OB] Created symbolic link: \DosDevices\PRN -> \Device\Parallel0
+[OB] Created symbolic link: \DosDevices\PhysicalDrive0 -> \Device\Harddisk0\Partition0
+[OB] Symbolic link subsystem initialized
+[OB] Object Manager initialized
+[PS] Initializing Process Manager...
+[PS] CID table initialized
+[PS] System process initialized (PID 0)
+[PS] Quota management initialized
+[PS] Process Manager initialized
+[IO] Initializing I/O Manager...
+[IO] IRP subsystem initialized (128 IRPs available)
+[IO] Device subsystem initialized (64 devices available)
+[IO] Driver subsystem initialized (32 drivers available)
+[IO] File object subsystem initialized (256 files available)
+[BLOCK] Block device subsystem initialized (16 max devices)
+[IO] Completion port subsystem initialized
+[IO] Named pipe subsystem initialized
+[PNP] Initializing Plug and Play manager...
+[PNP] Plug and Play manager initialized
+[IO] Cancel-Safe Queue support initialized
+[MUP] Initializing Multiple UNC Provider...
+[MUP] Registered provider 'LanmanWorkstation' (order=1)
+[MUP] MUP initialized
+[IO] I/O Manager initialized
+[CC] Lazy writer initialized
+[CC] Prefetcher initialized
+[CC] Cache Manager initialized
+[IO] Initializing storage subsystem...
+[ATA] ATA/IDE driver initializing...
+[ATA] Detecting IDE devices...
+[BLOCK] Registered hda (512 MB)
+[ATA] Primary.Master: QEMU HARDDISK (512 MB, LBA48: yes)
+[BLOCK] Registered sr1 (0 MB)
+[ATA] Secondary.Master: QEMU DVD-ROM (0 MB, LBA48: no)
+[ATA] Detected 2 IDE device(s)
+[ATA] ATA/IDE driver initialized (2 devices)
+[RAMDISK] RAM disk driver initialized
+[RAMDISK]   Max disks: 4
+[RAMDISK]   Max size per disk: 4096 KB
+[DISK] Disk subsystem initializing...
+[DISK] Scanning 2 disk(s) for partitions...
+[DISK] Disk 0: MBR part 0 type=0xc start=2048 size=1046528
+[DISK] Volume 1: Disk 0 Part 0 - FAT32 (511 MB)
+[DISK] Disk 1: Failed to read MBR
+[DISK] Found 1 volume(s)
+[DISK] Disk subsystem initialized (1 volumes)
+[VOLMGR] Volume Manager initialized (max 64 volumes)
+[IO] Storage subsystem initialized
+[SE] Initializing Security Reference Monitor...
+[SE] SID subsystem initialized (128 SIDs available)
+[SE] Privilege subsystem initialized (36 privileges defined)
+[SE] ACL subsystem initialized
+[SE] Security descriptor subsystem initialized (64 SDs available)
+[SE] Token subsystem initialized (64 tokens available)
+[SE] Access check subsystem initialized
+[SE] Audit subsystem initialized
+[KSECDD] Initializing Kernel Security Device Driver...
+[KSECDD] KSECDD initialized
+[SCHANNEL] Initializing Secure Channel...
+[SCHANNEL] Schannel initialized
+[LSA] Initializing Local Security Authority...
+[LSA] Registered 3 authentication packages
+[LSA] Local Security Authority initialized
+[SAM] Initializing Security Account Manager...
+[SAM] Created 2 builtin users
+[SAM] Created 3 builtin groups
+[SAM] Created 6 builtin aliases
+[SAM] Security Account Manager initialized
+[NTLM] Initializing NTLM authentication...
+[NTLM] NTLM authentication initialized
+[GPO] Initializing Group Policy infrastructure...
+[GPO] Created GPO 1 'Local Computer Policy' (scope=Local)
+[GPO] Created Local Computer Policy (GPO 1)
+[GPO] Group Policy initialized
+[SE] Security Reference Monitor initialized
+[CM] Initializing Configuration Manager...
+[CM] Value subsystem initialized
+[CM] Key subsystem initialized (256 keys available)
+[CM] Cell subsystem initialized
+[CM] Hive subsystem initialized (16 hives available)
+[CM] Operations subsystem initialized
+[CM] Initialized hive: SYSTEM (index 0)
+[CM] Initialized hive: SOFTWARE (index 1)
+[CM] Initialized hive: HARDWARE (index 2)
+[CM] Initialized hive: SAM (index 3)
+[CM] Initialized hive: SECURITY (index 4)
+[CM] Initialized hive: .DEFAULT (index 5)
+[CM] Configuration Manager initialized
+[CM]   6 hives loaded
+[CM]   28 keys allocated
+[FS] File system subsystem initializing...
+[FS] Path utilities initialized
+[FS] VFS initialized (8 max file systems, 128 max files)
+[FS] Mount point manager initializing...
+[FS] Mount point manager initialized
+[FS] FAT32 driver initializing...
+[FS] FAT32 BPB subsystem initialized
+[FS] FAT32 directory subsystem initialized
+[FS] FAT32 file operations initialized
+[FS] FAT32 driver registered with VFS (index=0)
+[FS] FAT32 driver initialized
+[FS] NTFS driver initializing...
+[FS] NTFS boot sector parser initialized
+[FS] NTFS MFT parser initialized
+[FS] NTFS attribute parser initialized
+[FS] NTFS file operations initialized
+[FS] NTFS driver registered with VFS (index=1)
+[FS] NTFS driver initialized
+[NPFS] Initializing Named Pipe File System...
+[NPFS] NPFS initialized
+[MSFS] Initializing Mailslot File System...
+[MSFS] MSFS initialized
+[DFS] Initializing Distributed File System...
+[DFS] DFS initialized
+[CLFS] Initializing Common Log File System...
+[CLFS] CLFS initialized
+[RDBSS] Initializing Redirected Drive Buffering Subsystem...
+[RDBSS] RDBSS initialized
+[EFS] Initializing Encrypting File System...
+[EFS] Encrypting File System initialized
+[FS] Volume integration initializing...
+[FS] Mountable volumes:
+  Volume 1: Disk 0 Part 0 - FAT32 (511 MB) *
+[FS] Auto-mounting volumes...
+[FAT32] Mounted fs_index=0 clusters=130551 cluster_size=4096
+[FS] Mounted C:\ -> \Device\HarddiskVolume1
+[FS] Mounted Volume 1 as C:\ (FAT32, 511 MB)
+[FS] Auto-mounted 1 volume(s)
+[FS] Volume integration initialized
+[FS] File system subsystem initialized (2 fs, 1 mounts)
+[KTM] Initializing Kernel Transaction Manager...
+[KTM] KTM initialized
+[LPC] Initializing Local Procedure Call subsystem...
+[LPC] Port subsystem initialized (max 64 ports)
+[LPC] Message subsystem initialized (max 512 bytes/message)
+[ALPC] Advanced LPC subsystem initialized
+[LPC] LPC/ALPC subsystem initialized
+[RPC] Remote Procedure Call subsystem initialized
+[RPC]   Version: 5.0
+[RPC]   Max interfaces: 256
+[RPC]   Max bindings: 512
+[KD] Breakpoint subsystem initialized
+[KD] Print buffer initialized (32KB)
+[KD] Debugger data blocks initialized
+[KD] Kernel debugger enabled
+[KD] Kernel debugger initialized (phase 0)
+[EX] Profile subsystem initialized
+[EX] Atom table subsystem initialized
+[EX] Hard error subsystem initialized
+[WER] Initializing Windows Error Reporting...
+[WER] WER initialized (max 64 reports)
+[EX] Non-blocking queue subsystem initialized
+[EX] Probe subsystem initialized
+[RTL] Environment subsystem initialized
+[RTL] Splay tree subsystem initialized
+[RTL] Version subsystem initialized (Windows Server 2003 compatible)
+[RTL] Unicode prefix table subsystem initialized
+[RTL] Range list subsystem initialized
+[RTL] Generic table subsystem initialized
+[RTL] Remove lock subsystem initialized
+[SVC] Initializing Service Control Manager...
+[SVC] Initializing service database...
+[SVC]   5 services registered
+[BITS] Initializing Background Intelligent Transfer Service...
+[BITS] BITS initialized (max 4 concurrent transfers)
+[SCHEDULER] Initializing Task Scheduler Service...
+[SCHEDULER] Task Scheduler initialized (max 64 tasks)
+[WU] Initializing Windows Update Agent Service...
+[WU] Windows Update initialized (mode: AutoDownloadNotifyInstall)
+[SPOOLER] Initializing Print Spooler Service...
+[SPOOLER] Print Spooler initialized
+[VSS] Initializing Volume Shadow Copy Service...
+[VSS] Registered provider 'Microsoft Software Shadow Copy Provider 1.0'
+[VSS] Registered writer 'System Writer'
+[VSS] Registered writer 'Registry Writer'
+[VSS] Registered writer 'COM+ REGDB Writer'
+[VSS] Registered writer 'WMI Writer'
+[VSS] Registered writer 'MSSearch Service Writer'
+[VSS] Registered writer 'NTDS Writer'
+[VSS] Registered writer 'DHCP Writer'
+[VSS] Registered writer 'WINS Writer'
+[VSS] Registered writer 'Certificate Authority Writer'
+[VSS] Registered writer 'IIS Metabase Writer'
+[VSS] Registered writer 'IIS Config Writer'
+[VSS] Volume Shadow Copy Service initialized
+[VSS]   Providers: 1
+[VSS]   Writers: 11
+[CRYPTSVC] Initializing Cryptographic Services...
+[CRYPTSVC] Opened store 'ROOT' (LocalMachine)
+[CRYPTSVC] Opened store 'CA' (LocalMachine)
+[CRYPTSVC] Opened store 'MY' (LocalMachine)
+[CRYPTSVC] Opened store 'DISALLOWED' (LocalMachine)
+[CRYPTSVC] Added certificate: CN=Microsoft Root Certificate Authority, DC=microsoft, DC=com
+[CRYPTSVC] Added certificate: CN=VeriSign Class 3 Public Primary Certification Authority - G5
+[CRYPTSVC] Added certificate: CN=DigiCert Global Root CA, OU=www.digicert.com, O=DigiCert Inc
+[CRYPTSVC] Added catalog 'nt5.cat'
+[CRYPTSVC] Added catalog 'nt5inf.cat'
+[CRYPTSVC] Added catalog 'oem.cat'
+[CRYPTSVC] Cryptographic Services initialized
+[CRYPTSVC]   Certificate stores: 5
+[CRYPTSVC]   Root certificates: 3
+[CRYPTSVC]   Catalogs: 3
+[EVENTLOG] Initializing Event Log Service...
+[EVENTLOG] Created log 'Application'
+[EVENTLOG] Created log 'Security'
+[EVENTLOG] Created log 'System'
+[EVENTLOG] Created log 'Setup'
+[EVENTLOG] Event Log Service initialized
+[EVENTLOG]   Logs: 4
+[EVENTLOG]   Sources: 10
+[REMREG] Initializing Remote Registry Service...
+[REMREG] Remote Registry Service initialized
+[REMREG]   Port: 445
+[REMREG]   Authentication: required
+[MSDTC] Initializing Distributed Transaction Coordinator...
+[MSDTC] Registered resource manager 'SQL Server'
+[MSDTC] Registered resource manager 'MSMQ'
+[MSDTC] Registered resource manager 'File System'
+[MSDTC] Distributed Transaction Coordinator initialized
+[MSDTC]   Resource managers: 3
+[MSDTC]   Network DTC: enabled
+[DNSCLIENT] Initializing DNS Client Service...
+[DNSCLIENT] Added DNS server 8.8.8.8
+[DNSCLIENT] Added DNS server 8.8.4.4
+[DNSCLIENT] DNS Client Service initialized
+[DNSCLIENT]   DNS servers: 2
+[DNSCLIENT]   Hosts entries: 2
+[DNSCLIENT]   Caching: enabled
+[WMI] Initializing Windows Management Instrumentation...
+[WMI] Created namespace 'root'
+[WMI] Created namespace 'root\default'
+[WMI] Created namespace 'root\cimv2'
+[WMI] Created namespace 'root\security'
+[WMI] Registered provider 'CIMWin32'
+[WMI] Registered provider 'WDMProvider'
+[WMI] Registered provider 'SecurityProvider'
+[WMI] Windows Management Instrumentation initialized
+[WMI]   Namespaces: 5
+[WMI]   Providers: 3
+[WMI]   Classes: 3
+[W32TIME] Initializing Windows Time Service...
+[W32TIME] Added time source 'time.windows.com'
+[W32TIME] Added time source 'pool.ntp.org'
+[W32TIME] Added time source 'time.nist.gov'
+[W32TIME] Synchronized with 'time.windows.com'
+[W32TIME] Windows Time Service initialized
+[W32TIME]   Time sources: 3
+[W32TIME]   Mode: NTP Client
+[SECLOGON] Secondary Logon service initialized
+[LANMANWKS] Workstation service initialized
+[LANMANSRV] Server service initialized
+[TAPISRV] Telephony service initialized
+[APPEXP] Application Experience service initialized
+[SHELLHW] Shell Hardware Detection service initialized
+[PNPSVC] Plug and Play service initialized
+[THEMES] Themes service initialized
+[WERSVC] Windows Error Reporting service initialized
+[TERMSRV] Terminal Services initialized
+[RPCSS] RPC Service initialized
+[DHCPC] DHCP Client service initialized
+[NLA] Network Location Awareness service initialized
+[COMSYSAPP] COM+ System Application service initialized
+[BROWSER] Computer Browser service initialized
+[MESSENGER] Messenger service initialized
+[ALERTER] Alerter service initialized
+[CLIPBOOK] ClipBook service initialized
+[NETLOGON] Netlogon service initialized
+[WINS] WINS Client service initialized
+[RASMAN] Remote Access Service initialized
+[DFS] Distributed File System service initialized
+[NTFRS] File Replication Service initialized
+[IPSEC] IPSec Policy Agent initialized
+[SCARDSVR] Smart Card service initialized
+[UPS] UPS service initialized
+[SVC] Starting system services...
+[SVC]   0 system services started
+[SVC] Service Control Manager initialized
+[LDR] Loader subsystem initialized
+[LDR]   Max DLLs: 8
+[LDR]   Max DLL size: 64 KB
+[LDR]   Kernel exports: 60
+[NET] Initializing network subsystem...
+[ARP] ARP module initialized
+[ICMP] ICMP module initialized
+[UDP] UDP module initialized
+[TCP] TCP subsystem initialized (64 sockets)
+[DNS] DNS client initialized (server: 8.8.8.8)
+[DHCP] DHCP client initialized
+[HTTP] HTTP client initialized
+[TELNET] Telnet server initialized
+[HTTPD] HTTP server initialized
+[NTP] NTP client initialized
+[WOL] Wake-on-LAN module initialized
+[TFTP] TFTP client initialized
+[FTP] FTP client initialized
+[SYSLOG] Syslog client initialized
+[SMTP] SMTP client initialized
+[POP3] POP3 client initialized
+[SNMP] SNMP client initialized
+[ECHO] Echo/chargen services initialized
+[QOTD] Quote of the Day service initialized (16 quotes)
+[TIME] Time protocol service initialized
+[DISCARD] Discard service initialized
+[DAYTIME] Daytime service initialized
+[FINGER] Finger service initialized
+[WHOIS] WHOIS client initialized
+[IDENT] Ident service initialized
+[TDI] Transport Driver Interface initialized
+[TDI]   Max addresses: 256
+[TDI]   Max connections: 1024
+[NDIS] Network Driver Interface Specification initialized
+[NDIS]   Version: 5.1
+[NDIS]   Max adapters: 32
+[NDIS]   Max bindings: 64
+[AFD] Initializing Ancillary Function Driver...
+[AFD] AFD initialized
+[WSK] Initializing Winsock Kernel...
+[WSK] WSK initialized
+[HTTP.sys] Initializing kernel-mode HTTP server...
+[HTTP.sys] HTTP.sys initialized
+[NETBT] Initializing NetBIOS over TCP/IP...
+[NETBT] NETBT initialized
+[IPSEC] Initializing IP Security...
+[IPSEC] IPSEC initialized
+[SMB] Initializing Server Message Block protocol...
+[SMB] Created 3 default shares
+[SMB] Server Message Block initialized
+[WINRM] Initializing Windows Remote Management...
+[WINRM] Windows Remote Management initialized
+[FIREWALL] Initializing Windows Firewall...
+[FIREWALL] Windows Firewall initialized (4 rules)
+[NET] Initializing loopback device...
+[NET] Device lo0 configured: IP=127.0.0.1, Mask=255.0.0.0, GW=None
+[NET] Registering device 0: lo0 (02:00:00:00:00:01)
+[NET] Loopback device registered as device 0
+[VIRTIO-NET] Scanning for VirtIO network devices...
+[VIRTIO-NET] No VirtIO network devices found
+[NET] VirtIO-NET not available: No VirtIO network devices found
+[NET] Network subsystem initialized
+[VDM] Control subsystem initialized
+[VDM] I/O port emulation initialized
+[VDM] Interrupt handling initialized
+[VDM] Virtual DOS Machine subsystem initialized
+[CSR] Session management initialized
+[CSR] Process management initialized
+[CSR] Console management initialized
+[CSR] Registered 2 built-in server DLLs
+[CSR] Server DLL management initialized
+[CSR] Created session 0
+[CSR] Client/Server Runtime subsystem initialized
+[Win32k] Initializing graphical subsystem...
+[GDI] Initializing Graphics Device Interface...
+[GDI/DC] Device Context manager initialized
+[GDI/Surface] Primary surface: 1280x800 @ 0x80000000
+[GDI/Surface] Surface manager initialized
+[GDI/Brush] Brush manager initialized
+[GDI/Pen] Pen manager initialized
+[GDI/Region] Region manager initialized
+[GDI/Font] Font manager initialized
+[PALETTE] Initializing Palette Manager...
+[PALETTE] Palette Manager initialized
+[GDI] Path subsystem initialized
+[GDI] Transform subsystem initialized
+[GDI] DIB subsystem initialized
+[GDI] ICM subsystem initialized
+[GDI] EMF subsystem initialized
+[GDI/Brush] Created 8 stock brushes
+[GDI/Pen] Created 4 stock pens
+[GDI/Font] Created 3 stock fonts
+[GDI] Stock objects created
+[GDI] Graphics Device Interface initialized
+[USER] Initializing Window Manager...
+[USER/Desktop] Desktop system initialized (1280x800)
+[USER/Class] Class manager initialized
+[USER/Window] Window manager initialized, desktop=0x1000001
+[USER/Message] Message system initialized
+[USER/Input] Input system initialized
+[USER/Paint] Paint system initialized
+[USER/Cursor] Cursor initialized at (640, 400)
+[USER/Controls] Controls subsystem initialized
+[USER/Timer] Timer subsystem initialized
+[USER/Menu] Menu subsystem initialized
+[USER/Dialog] Dialog subsystem initialized
+[USER/Icon] Icon subsystem initialized
+[USER/Clipboard] Clipboard subsystem initialized
+[USER/Metrics] System metrics initialized
+[USER/Accelerator] Accelerator subsystem initialized
+[USER/Caret] Caret subsystem initialized
+[USER/ListBox] ListBox subsystem initialized
+[USER/ComboBox] ComboBox subsystem initialized
+[USER/Hooks] Hooks subsystem initialized
+[USER/Edit] Edit control subsystem initialized
+[RESOURCE] Initializing Resource Manager...
+[RESOURCE] Resource Manager initialized
+[TOOLBAR] Initializing Toolbar Control...
+[TOOLBAR] Toolbar Control initialized
+[STATUSBAR] Initializing StatusBar Control...
+[STATUSBAR] StatusBar Control initialized
+[TRACKBAR] Initializing Trackbar Control...
+[TRACKBAR] Trackbar Control initialized
+[PROGRESSBAR] Initializing Progress Bar control...
+[PROGRESSBAR] Progress Bar control initialized
+[UPDOWN] Initializing UpDown control...
+[UPDOWN] UpDown control initialized
+[TAB] Initializing Tab control...
+[TAB] Tab control initialized
+[HEADER] Initializing Header control...
+[HEADER] Header control initialized
+[LISTVIEW] Initializing ListView control...
+[LISTVIEW] ListView control initialized
+[TREEVIEW] Initializing TreeView control...
+[TREEVIEW] TreeView control initialized
+[TOOLTIP] Initializing Tooltip control...
+[TOOLTIP] Tooltip control initialized
+[USER] HotKey control initialized
+[USER] Animate control initialized
+[USER] MonthCal control initialized
+[USER] DateTimePick control initialized
+[USER] Pager control initialized
+[USER] IPAddress control initialized
+[USER] Rebar control initialized
+[USER] ComboBoxEx control initialized
+[USER] SysLink control initialized
+[USER] ImageList initialized
+[USER] PropertySheet initialized
+[USER] Wizard control initialized
+[USER] DragList initialized
+[USER] NativeFont initialized
+[USER] RichEdit initialized
+[USER] FlatScrollBar initialized
+[USER] MRUList initialized
+[USER] CustomDraw initialized
+[USER] Subclass helpers initialized
+[USER] TaskDialog initialized
+[USER] SplitButton initialized
+[USER] BufferedPaint initialized
+[USER] DPA/DSA arrays initialized
+[USER] String helpers initialized
+[USER] Format helpers initialized
+[USER] Common dialogs initialized
+[USER] Registry helpers initialized
+[USER] Shell path helpers initialized
+[USER] Notification area initialized
+[USER] Window enumeration initialized
+[USER] Drag-drop support initialized
+[USER] Version info helpers initialized
+[USER] Accessibility support initialized
+[USER] Shell execute helpers initialized
+[USER] IME support initialized
+[USER] Multilingual support initialized
+[USER] DDE support initialized
+[USER] Help system initialized
+[USER] Theme support initialized
+[USER] OLE automation helpers initialized
+[USER] Printing support initialized
+[USER] GDI helpers initialized
+[USER] Credential UI initialized
+[USER] Power management UI initialized
+[NETWORK] Initializing network dialogs...
+[NETWORK] Network dialogs initialized
+[ERROR] Initializing error reporting...
+[ERROR] Error reporting initialized
+[CONSOLE] Initializing console subsystem...
+[CONSOLE] Console subsystem initialized
+[SECURITY UI] Initializing security UI...
+[SECURITY UI] Security UI initialized
+[FONTMGR] Initializing font management...
+[FONTMGR] Font management initialized
+[APPCOMPAT] Initializing application compatibility...
+[APPCOMPAT] Application compatibility initialized
+[PROFILE] Initializing user profile subsystem...
+[PROFILE] User profile subsystem initialized
+[ENVIRON] Initializing environment variables...
+[ENVIRON] Environment variables initialized
+[SHELLNOTIFY] Initializing shell notifications...
+[SHELLNOTIFY] Shell notifications initialized
+[SYSINFO] Initializing system information...
+[SYSINFO] System information initialized
+[TASKSCHD] Initializing task scheduler UI...
+[TASKSCHD] Task scheduler UI initialized
+[REGMON] Initializing registry monitoring...
+[REGMON] Registry monitoring initialized
+[RUNDLG] Initializing run dialog...
+[RUNDLG] Run dialog initialized
+[SESSION] Initializing session management...
+[SESSION] Session management initialized
+[FILEDLG] Initializing file dialogs...
+[FILEDLG] File dialogs initialized
+[COLORDLG] Initializing color dialog...
+[COLORDLG] Color dialog initialized
+[FONTDLG] Initializing font dialog...
+[FONTDLG] Font dialog initialized
+[FINDDLG] Initializing find/replace dialog...
+[FINDDLG] Find/replace dialog initialized
+[PRINTDLG] Initializing print dialog...
+[PRINTDLG] Print dialog initialized
+[PAGESETUP] Initializing page setup dialog...
+[PAGESETUP] Page setup dialog initialized
+[PROGRESS] Initializing progress dialog...
+[PROGRESS] Progress dialog initialized
+[SPLASH] Initializing splash screen...
+[SPLASH] Splash screen initialized
+[TASKBAR] Initializing taskbar...
+[TASKBAR] Taskbar initialized
+[BROWSEFOLDER] Initializing browse folder dialog...
+[BROWSEFOLDER] Browse folder dialog initialized
+[ABOUTBOX] Initializing about box...
+[ABOUTBOX] About box initialized
+[FILEPROPS] Initializing file properties dialog...
+[FILEPROPS] File properties dialog initialized
+[SCREENSAVER] Initializing screen saver...
+[SCREENSAVER] Screen saver initialized
+[BALLOON] Initializing balloon tooltips...
+[BALLOON] Balloon tooltips initialized
+[COMMANDBAR] Initializing command bar...
+[COMMANDBAR] Command bar initialized
+[DISPLAYSETTINGS] Initializing display settings...
+[DISPLAYSETTINGS] Display settings initialized
+[VOLUME] Initializing volume control...
+[VOLUME] Volume control initialized
+[DATETIME] Initializing date/time...
+[DATETIME] Date/time initialized
+[REGIONAL] Initializing regional settings...
+[REGIONAL] Regional settings initialized
+[KEYBOARD] Initializing keyboard settings...
+[KEYBOARD] Keyboard settings initialized
+[MOUSE] Mouse settings initialized
+[ACCESS] Accessibility options initialized
+[SOUNDS] Sound schemes initialized
+[INETCPL] Internet options initialized
+[USERSCPL] User accounts initialized
+[PRINTERS] Printers control panel initialized
+[SYSPROPS] System properties initialized
+[FONTSCPL] Fonts control panel initialized
+[APPWIZ] Add/Remove Programs initialized
+[ADMINTOOLS] Administrative tools initialized
+[POWEROPTS] Power options initialized
+[SCHEDTASKS] Scheduled tasks initialized
+[FOLDEROPTS] Folder options initialized
+[NETCONNECT] Network connections initialized
+[WIN32K] Windows Firewall initialized
+[WIN32K] Wireless settings initialized
+[WIN32K] Device Manager initialized
+[WIN32K] Services initialized
+[WIN32K] Event Viewer initialized
+[WIN32K] Disk Management initialized
+[WIN32K] Security Center initialized
+[WIN32K] Automatic Updates initialized
+[WIN32K] Remote Desktop initialized
+[WIN32K] System Restore initialized
+[WIN32K] ODBC Administrator initialized
+[WIN32K] Computer Management initialized
+[WIN32K] Local Security Policy initialized
+[WIN32K] Performance Monitor initialized
+[WIN32K] Task Manager initialized
+[WIN32K] Registry Editor initialized
+[WIN32K] Certificate Manager initialized
+[WIN32K] Component Services initialized
+[WIN32K] Group Policy Editor initialized
+[WIN32K] Backup Utility initialized
+[WIN32K] Local Users and Groups initialized
+[WIN32K] Shared Folders initialized
+[WIN32K] IIS Manager initialized
+[WIN32K] DNS Manager initialized
+[WIN32K] DHCP Manager initialized
+[WIN32K] RRAS Manager initialized
+[WIN32K] Terminal Services Manager initialized
+[WIN32K] WINS Manager initialized
+[WIN32K] Indexing Service Manager initialized
+[WIN32K] DFS Manager initialized
+[WIN32K] MSMQ Manager initialized
+[SHELL] Namespace initialized with 8 items
+[EXPLORER] Initializing Windows Explorer shell...
+[EXPLORER] Shell initialized: desktop=0x1000002, taskbar=0x1000003
+[WINLOGON] Initializing Windows Logon...
+[WINLOGON] Auto-logon: NOSTALGIAOS\Administrator
+[WINLOGON] Winlogon initialized
+[USER] Registered built-in window classes
+[USER] Window Manager initialized
+[Win32k] Graphical subsystem initialized
+[GFX-TEST] Testing Win32k graphical subsystem...
+[GFX-TEST] Win32k initialized: true
+[GFX-TEST] GDI DCs: 0, Brushes: 8, Pens: 4
+[GFX-TEST] USER Windows: 3, Classes: 8
+[GFX-TEST] Painting desktop background...
+[GFX-TEST] Creating display DC for demo...
+[GFX-TEST] Display DC created: 0x1000001
+[GFX-TEST] DC deleted
+[GFX-TEST] Creating test window...
+[GFX-TEST] Window created: 0x1000004
+[GFX-TEST] Window rect: (500,150) - (780,350)
+[GFX-TEST] Graphical subsystem demo complete
+
+[FS-TEST] Testing file read from C:\TEST.TXT...
+[FS-TEST] C: drive is mounted (fs_index=0)
+[FS-TEST] Failed to open file: NotFound
+[FS-TEST] Test complete
+
+[FS-CREATE] Testing file creation on C:\NEWFILE.TXT...
+[FAT32] Created file 'NEWFILE.TXT' cluster=11630 entry=3
+[FS-CREATE] File created successfully (handle=0)
+[FS-CREATE] Wrote 31 bytes to new file
+[FS-CREATE] Verified: "Created by Nostalgia OS kernel!"
+[FS-CREATE] File closed
+[FS-CREATE] Test complete
+[FS-DELETE] Testing file deletion...
+[FS-DELETE] NEWFILE.TXT exists, closing...
+[FAT32] Deleted file 'NEWFILE.TXT' cluster=11630
+[FS-DELETE] File deleted successfully
+[FS-DELETE] Verified: File no longer exists (NotFound)
+[FS-DELETE] Test complete
+[FS-MKDIR] Testing directory creation on C:\TESTDIR...
+[FAT32] Created directory 'TESTDIR' cluster=23241 entry=3
+[FS-MKDIR] Directory created successfully
+[FS-MKDIR] Verifying directory exists...
+[FS-MKDIR] Found TESTDIR in root directory
+[FS-MKDIR] Creating file inside TESTDIR...
+[FAT32] Created file 'HELLO.TXT' cluster=23242 entry=2
+[FS-MKDIR] Wrote 24 bytes to TESTDIR\HELLO.TXT
+[FS-MKDIR] Test complete
+[FS-RMDIR] Testing directory removal...
+[FS-RMDIR] Deleting HELLO.TXT from TESTDIR...
+[FAT32] Deleted file 'HELLO.TXT' cluster=23242
+[FS-RMDIR] HELLO.TXT deleted
+[FS-RMDIR] Removing C:\TESTDIR...
+[FAT32] Removed directory 'TESTDIR' cluster=23241
+[FS-RMDIR] Directory removed successfully
+[FS-RMDIR] Verifying directory no longer exists...
+[FS-RMDIR] Verified: TESTDIR no longer exists
+[FS-RMDIR] Test complete
+[FS-RENAME] Testing file and directory rename...
+[FS-RENAME] Creating test file C:\OLDNAME.TXT...
+[FAT32] Created file 'OLDNAME.TXT' cluster=23243 entry=3
+[FS-RENAME] Created OLDNAME.TXT
+[FS-RENAME] Test 1: Renaming OLDNAME.TXT to NEWNAME.TXT...
+[FAT32] Renamed 'OLDNAME.TXT' to 'NEWNAME.TXT' in same directory
+[FS-RENAME] Rename successful
+[FS-RENAME] Verified: OLDNAME.TXT no longer exists
+[FS-RENAME] NEWNAME.TXT content: "Rename test file content"
+[FS-RENAME] Test 2: Creating directory and moving file...
+[FAT32] Created directory 'MOVEDIR' cluster=23244 entry=4
+[FS-RENAME] Created MOVEDIR
+[FS-RENAME] Moving NEWNAME.TXT to MOVEDIR\MOVED.TXT...
+[FAT32] Moved 'NEWNAME.TXT' to 'MOVED.TXT' (cross-directory)
+[FS-RENAME] Move successful
+[FS-RENAME] Verified: File found in MOVEDIR
+[FS-RENAME] Verified: File removed from root
+[FAT32] Deleted file 'MOVED.TXT' cluster=23243
+[FAT32] Removed directory 'MOVEDIR' cluster=23244
+[FS-RENAME] Test complete
+[FS-TRUNCATE] Testing file truncation...
+[FS-TRUNCATE] Creating test file with 100 bytes...
+[FAT32] Created file 'TRUNC.TXT' cluster=23245 entry=3
+[FS-TRUNCATE] Wrote 100 bytes
+[FS-TRUNCATE] Test 1: Shrinking file to 50 bytes...
+[FAT32] Truncated file from 100 to 50 bytes
+[FS-TRUNCATE] Truncate to 50 bytes successful
+[FS-TRUNCATE] Read 50 bytes after shrink
+[FS-TRUNCATE] Size verified: 50 bytes
+[FS-TRUNCATE] Test 2: Extending file to 200 bytes...
+[FAT32] Extended file from 50 to 200 bytes
+[FS-TRUNCATE] Extend to 200 bytes successful
+[FS-TRUNCATE] File end position: 200
+[FS-TRUNCATE] Size verified: 200 bytes
+[FS-TRUNCATE] Test 3: Truncating file to 0 bytes...
+[FAT32] Truncated file to 0 bytes (freed all clusters)
+[FS-TRUNCATE] Truncate to 0 bytes successful
+[FS-TRUNCATE] Verified: File is empty
+[FAT32] Deleted file 'TRUNC.TXT' cluster=0
+[FS-TRUNCATE] Test complete
+[FS-STAT] Testing file stat/fstat...
+[FS-STAT] Creating test file...
+[FAT32] Created file 'STAT.TXT' cluster=23246 entry=3
+[FS-STAT] Wrote 34 bytes
+[FS-STAT] Testing fstat on open file...
+[FS-STAT] fstat successful:
+[FS-STAT]   Size: 34 bytes
+[FS-STAT]   Type: Regular
+[FS-STAT]   Attributes: 0x20
+[FS-STAT]   Block size: 4096 bytes
+[FS-STAT]   Blocks: 8
+[FS-STAT] Size verified: 34 bytes
+[FS-STAT] Testing stat by path...
+[FS-STAT] stat successful:
+[FS-STAT]   Size: 34 bytes
+[FS-STAT]   Type: Regular
+[FS-STAT] Size verified after reopen
+[FAT32] Deleted file 'STAT.TXT' cluster=23246
+[FS-STAT] Test complete
+[FS-SYNC] Testing file sync...
+[FAT32] Created file 'SYNC.TXT' cluster=23247 entry=3
+[FS-SYNC] Wrote 24 bytes
+[FS-SYNC] Calling sync...
+[FAT32] Synced file (cluster=23247, size=24)
+[FS-SYNC] Sync successful
+[FS-SYNC] Wrote 23 more bytes
+[FS-SYNC] Calling sync again...
+[FAT32] Synced file (cluster=23247, size=47)
+[FS-SYNC] Second sync successful
+[FS-SYNC] Final size: 47 bytes (expected 47)
+[FS-SYNC] Size verified
+[FAT32] Deleted file 'SYNC.TXT' cluster=23247
+[FS-SYNC] Test complete
+[FS-READDIR] Testing directory listing...
+[FS-READDIR] Creating test files...
+[FAT32] Created file 'FILE1.TXT' cluster=23248 entry=3
+[FAT32] Created file 'FILE2.TXT' cluster=23249 entry=4
+[FAT32] Created file 'FILE3.TXT' cluster=23250 entry=5
+[FAT32] Created directory 'TESTDIR2' cluster=23251 entry=6
+[FS-READDIR] Created TESTDIR2
+[FS-READDIR] Listing C:\ contents:
+[FS-READDIR]   <DIR>        0 bytes  EFI
+[FS-READDIR]            11435 bytes  NVVARS
+[FS-READDIR]               14 bytes  FILE1.TXT
+[FS-READDIR]               14 bytes  FILE2.TXT
+[FS-READDIR]               14 bytes  FILE3.TXT
+[FS-READDIR]   <DIR>        0 bytes  TESTDIR2
+[FS-READDIR] End of directory (6 entries)
+[FS-READDIR] Cleaning up...
+[FAT32] Deleted file 'FILE1.TXT' cluster=23248
+[FAT32] Deleted file 'FILE2.TXT' cluster=23249
+[FAT32] Deleted file 'FILE3.TXT' cluster=23250
+[FAT32] Removed directory 'TESTDIR2' cluster=23251
+[FS-READDIR] Test complete
+[FS-COPY] Testing file copy...
+[FS-COPY] Creating source file...
+[FAT32] Created file 'SOURCE.TXT' cluster=23252 entry=3
+[FS-COPY] Wrote 94 bytes to source
+[FS-COPY] Copying SOURCE.TXT to DEST.TXT...
+[FAT32] Created file 'DEST.TXT' cluster=23253 entry=4
+[FAT32] Synced file (cluster=23253, size=94)
+[FS-COPY] Copied 94 bytes
+[FS-COPY] Size verified
+[FS-COPY] Verifying destination contents...
+[FS-COPY] Read 94 bytes from destination
+[FS-COPY] Content verified - copy successful!
+[FS-COPY] Testing copy to subdirectory...
+[FAT32] Created directory 'COPYDIR' cluster=23254 entry=5
+[FAT32] Created file 'COPIED.TXT' cluster=23255 entry=2
+[FAT32] Synced file (cluster=23255, size=94)
+[FS-COPY] Copied 94 bytes to subdirectory
+[FS-COPY] Cleaning up...
+[FAT32] Deleted file 'SOURCE.TXT' cluster=23252
+[FAT32] Deleted file 'DEST.TXT' cluster=23253
+[FAT32] Deleted file 'COPIED.TXT' cluster=23255
+[FAT32] Removed directory 'COPYDIR' cluster=23254
+[FS-COPY] Test complete
+[SYSCALL-TEST] Testing syscall dispatcher...
+[SYSCALL-TEST] NtGetCurrentProcessId returned: 0
+[SYSCALL-TEST] NtGetCurrentThreadId returned: 0
+[SYSCALL-TEST] NtDebugPrint returned: 3221225477
+[SYSCALL] Invalid syscall number: 999
+[SYSCALL-TEST] Invalid syscall 999 returned: 3221225500
+[SUSPEND-TEST] Testing suspend/resume syscalls...
+[SUSPEND-TEST] NtSuspendThread(invalid) = 0xc0000008
+[SUSPEND-TEST] NtResumeThread(invalid) = 0xc0000008
+[SUSPEND-TEST] NtSuspendProcess(invalid) = 0xc0000008
+[SUSPEND-TEST] NtResumeProcess(invalid) = 0xc0000008
+[SUSPEND-TEST] NtSuspendProcess(system) = 0xc0000008
+[SUSPEND-TEST] NtResumeProcess(system) = 0xc0000008
+[SUSPEND-TEST] Suspend/resume tests complete!
+[SYSCALL-TEST] All syscall tests passed!
+[USER-TEST] Testing user mode execution...
+[MM-USER] Initializing user mode page tables...
+[MM-USER] User page tables initialized (CR3=0x93af000)
+[USER-TEST] User CR3: 0x93af000
+[USER-TEST] Kernel CR3: 0xe667000
+[MM-USER] Copied 32 bytes to user code area at 0x400000
+[USER-TEST] User code at: 0x400000
+[USER-TEST] User stack top: 0x800000
+[USER-TEST] User mode page tables ready for ring 3 execution
+[USER-TEST] Entering ring 3...
+[SYSCALL] NtTerminateThread(exit_code=0)
+[SYSCALL] User mode test completed with exit code: 0
+[USER-TEST] Test complete
+  Creating test threads...
+[KE] Creating timer test threads...
+[KE] Timer test initialized
+[KE]   One-shot, Periodic, and DPC-linked timers
+[KE] Created thread 1 at priority 8
+[KE] Timer worker thread 1 created
+[KE] Created thread 2 at priority 8
+[KE] Timer worker thread 2 created
+[KE] Created thread 3 at priority 8
+[KE] Timer worker thread 3 created
+[KE] Created thread 4 at priority 8
+[KE] Timer monitor thread created
+[KE] Timer test threads created
+[KE]   Worker 1: One-shot timers (500ms)
+[KE]   Worker 2: Periodic timer (1000ms)
+[KE]   Worker 3: Timer with DPC (750ms)
+[KE] Created thread 5 at priority 8
+[KE] APC test thread created
+[KE] Creating multi-object wait test threads...
+[WAIT] Multi-object wait test initialized
+[KE] Created thread 6 at priority 10
+[KE] Signal thread created
+[KE] Created thread 7 at priority 8
+[KE] WaitAny thread created
+[KE] Created thread 8 at priority 8
+[KE] WaitAll thread created
+[KE] Created thread 9 at priority 8
+[KE] WaitSingle thread created
+[KE] Created thread 10 at priority 6
+[KE] Wait monitor thread created
+[KE] Multi-object wait test threads created
+[PIC] 8259 PIC initialized (keyboard IRQ enabled)
+[KB] PS/2 keyboard initialized
+[MOUSE] Initializing PS/2 mouse...
+[MOUSE] IntelliMouse detected (scroll wheel)
+[MOUSE] PS/2 mouse initialized
+[PIC] Mouse IRQ12 enabled
+[KE] Created thread 11 at priority 12
+[SHELL] Shell thread created at priority 12
+[KE] Starting scheduler...
+[KE] Ready summary: 0x1540
+[KE] Current thread: 0x0
+[KE] Idle thread: 0x0
+[KE] Enabling interrupts...
+[KE] Interrupts enabled!
+[KE] Scheduler running
+[Phase 1] Complete
+[SMP] Starting multiprocessor support...
+[SMP] Starting Application Processors...
+[AP] Setting up AP trampoline at 0x8000
+[AP] Trampoline code: 135 bytes at 0x8000
+[AP] GDT at 0x8100, 5 entries
+[AP] Entry point: 0xffffffff8018000f
+[AP] PML4 at: 0xe667000
+[SMP] ACPI reported 1 total processors
+[SMP] No additional processors to start (single CPU system)
+[SMP] Active CPUs: 1
+Kernel initialization complete!
+Entering idle loop...
