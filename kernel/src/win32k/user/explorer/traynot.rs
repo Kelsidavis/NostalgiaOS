@@ -24,11 +24,11 @@ use super::tray::TASKBAR_HEIGHT;
 /// Clock width
 const CLOCK_WIDTH: i32 = 75;
 
-/// System tray icon area width
-const SYSTRAY_WIDTH: i32 = 100;
+/// System tray icon area width (no icons currently, so minimal)
+const SYSTRAY_WIDTH: i32 = 0;
 
 /// Total notification area width
-const NOTIFY_WIDTH: i32 = CLOCK_WIDTH + SYSTRAY_WIDTH;
+const NOTIFY_WIDTH: i32 = CLOCK_WIDTH + 4; // Just clock + small margin
 
 /// Date tooltip visible flag
 static DATE_TOOLTIP_VISIBLE: AtomicBool = AtomicBool::new(false);
@@ -235,7 +235,8 @@ fn show_date_tooltip_impl() {
         let date_str = core::str::from_utf8(&date_buf[..date_len]).unwrap_or("Unknown");
 
         // Calculate tooltip size based on text length
-        let tooltip_width = (date_len as i32 * 7) + 16;
+        // Use 8 pixels per character (more accurate for system font) + extra padding
+        let tooltip_width = (date_len as i32 * 8) + 24;
         let tooltip_height = 24;
 
         // Position tooltip above the clock
@@ -297,17 +298,12 @@ pub fn paint(hdc: HDC, taskbar_y: i32) {
 }
 
 /// Paint the system tray icons area
-fn paint_systray(hdc: HDC, taskbar_y: i32) {
-    let notify = TRAY_NOTIFY.lock();
-    let mut rect = notify.systray_rect;
-    rect.top += taskbar_y;
-    rect.bottom += taskbar_y;
-    drop(notify);
-
-    // Draw sunken area for systray
-    let bg_brush = brush::create_solid_brush(ColorRef::BUTTON_FACE);
-    super::super::super::gdi::fill_rect(hdc, &rect, bg_brush);
-    super::super::super::gdi::draw_edge_sunken(hdc, &rect);
+fn paint_systray(_hdc: HDC, _taskbar_y: i32) {
+    // Systray area is empty (no icons), so don't paint anything
+    // When we add systray icons, we'll paint them here
+    if SYSTRAY_WIDTH <= 0 {
+        return;
+    }
 }
 
 /// Paint the clock
