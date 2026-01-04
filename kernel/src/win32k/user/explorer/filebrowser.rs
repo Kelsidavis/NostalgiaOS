@@ -1743,6 +1743,16 @@ impl FileBrowser {
 
         // Get path info before we start mutating self
         let path_len = self.path_len;
+
+        // Debug: show what we're refreshing
+        if path_len > 0 {
+            if let Ok(path_str) = core::str::from_utf8(&self.path[..path_len]) {
+                crate::serial_println!("[BROWSER] refresh: path='{}' len={}", path_str, path_len);
+            }
+        } else {
+            crate::serial_println!("[BROWSER] refresh: path='(My Computer)' len=0");
+        }
+
         let count = if path_len == 0 {
             // Show drives (My Computer)
             vfs::read_directory("", &mut vfs_entries)

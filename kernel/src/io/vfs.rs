@@ -282,11 +282,13 @@ pub fn list_drives(entries: &mut [VfsEntry]) -> usize {
                 entry.size = drive.total_mb * 1024 * 1024;
                 entry.icon_type = VfsIconType::Drive;
 
+                crate::serial_println!("[VFS] list_drives: found {}:", letter);
                 count += 1;
             }
         }
     }
 
+    crate::serial_println!("[VFS] list_drives: returning {} drives", count);
     count
 }
 

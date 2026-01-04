@@ -214,6 +214,7 @@ impl FolderTree {
         // Get drives using the vfs function
         let mut drive_entries = [const { VfsEntry::empty() }; 26];
         let drive_count = vfs::list_drives(&mut drive_entries);
+        crate::serial_println!("[TREE] populate_drives: got {} drives from VFS", drive_count);
 
         for i in 0..drive_count {
             let entry = &drive_entries[i];
