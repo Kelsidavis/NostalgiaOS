@@ -671,6 +671,8 @@ fn is_end_of_chain(entry: u32) -> bool {
 /// Write FAT entry for a cluster (writes to both FAT copies)
 fn write_fat_entry(vol: &Fat32Volume, cluster: u32, value: u32) -> bool {
     if cluster < 2 || cluster >= vol.bpb.total_clusters() + 2 {
+        crate::serial_println!("[FAT32] write_fat_entry: cluster {} out of range (2..{})",
+            cluster, vol.bpb.total_clusters() + 2);
         return false;
     }
 
@@ -687,7 +689,10 @@ fn write_fat_entry(vol: &Fat32Volume, cluster: u32, value: u32) -> bool {
 
         // Read sector
         let mut buf = [0u8; SECTOR_SIZE];
-        if volume_read(vol.volume_number, sector, 1, &mut buf) != super::block::BlockStatus::Success {
+        let read_status = volume_read(vol.volume_number, sector, 1, &mut buf);
+        if read_status != super::block::BlockStatus::Success {
+            crate::serial_println!("[FAT32] write_fat_entry: volume_read failed, vol={} sector={} status={:?}",
+                vol.volume_number, sector, read_status);
             return false;
         }
 
@@ -703,7 +708,10 @@ fn write_fat_entry(vol: &Fat32Volume, cluster: u32, value: u32) -> bool {
         buf[entry_offset..entry_offset + 4].copy_from_slice(&bytes);
 
         // Write sector back
-        if volume_write(vol.volume_number, sector, 1, &buf) != super::block::BlockStatus::Success {
+        let write_status = volume_write(vol.volume_number, sector, 1, &buf);
+        if write_status != super::block::BlockStatus::Success {
+            crate::serial_println!("[FAT32] write_fat_entry: volume_write failed, vol={} sector={} status={:?}",
+                vol.volume_number, sector, write_status);
             return false;
         }
     }
@@ -716,14 +724,18 @@ fn allocate_cluster(vol: &mut Fat32Volume) -> Option<u32> {
     let total_clusters = vol.bpb.total_clusters();
     let mut cluster = vol.next_free;
 
+    crate::serial_println!("[FAT32] allocate_cluster: total={} next_free={} volume={}",
+        total_clusters, cluster, vol.volume_number);
+
     // Search for a free cluster
-    for _ in 0..total_clusters {
+    for i in 0..total_clusters {
         if cluster >= total_clusters + 2 {
             cluster = 2; // Wrap around
         }
 
         if let Some(entry) = read_fat_entry(vol, cluster) {
             if entry == fat_entry::FREE {
+                crate::serial_println!("[FAT32] allocate_cluster: found free cluster {} after {} iterations", cluster, i);
                 // Found free cluster - mark as end of chain
                 if write_fat_entry(vol, cluster, fat_entry::END_OF_CHAIN) {
                     // Update next_free hint
@@ -731,14 +743,22 @@ fn allocate_cluster(vol: &mut Fat32Volume) -> Option<u32> {
                     if vol.free_clusters != 0xFFFFFFFF {
                         vol.free_clusters = vol.free_clusters.saturating_sub(1);
                     }
+                    crate::serial_println!("[FAT32] allocate_cluster: success, cluster {}", cluster);
                     return Some(cluster);
+                } else {
+                    crate::serial_println!("[FAT32] allocate_cluster: write_fat_entry failed for cluster {}", cluster);
                 }
+            }
+        } else {
+            if i < 5 {
+                crate::serial_println!("[FAT32] allocate_cluster: read_fat_entry failed for cluster {}", cluster);
             }
         }
 
         cluster += 1;
     }
 
+    crate::serial_println!("[FAT32] allocate_cluster: no free clusters found");
     None // No free clusters
 }
 
@@ -748,8 +768,14 @@ fn zero_cluster(vol: &Fat32Volume, cluster: u32) -> bool {
     let sectors_per_cluster = vol.bpb.sectors_per_cluster as u64;
     let zero_buf = [0u8; SECTOR_SIZE];
 
+    crate::serial_println!("[FAT32] zero_cluster: cluster {} -> sector {}, {} sectors",
+        cluster, sector, sectors_per_cluster);
+
     for i in 0..sectors_per_cluster {
-        if volume_write(vol.volume_number, sector + i, 1, &zero_buf) != super::block::BlockStatus::Success {
+        let write_status = volume_write(vol.volume_number, sector + i, 1, &zero_buf);
+        if write_status != super::block::BlockStatus::Success {
+            crate::serial_println!("[FAT32] zero_cluster: write failed at sector {}, status={:?}",
+                sector + i, write_status);
             return false;
         }
     }
@@ -1148,6 +1174,8 @@ pub fn resolve_path(slot: usize, path: &str) -> Option<DirEntryInfo> {
 pub fn create_directory(slot: usize, parent_path: &str, name: &str) -> bool {
     let _guard = FAT_LOCK.lock();
 
+    crate::serial_println!("[FAT32] create_directory: slot={} parent='{}' name='{}'", slot, parent_path, name);
+
     // Get volume (we need mutable access)
     let vol = match unsafe { FAT_VOLUMES.get_mut(slot) } {
         Some(v) if v.mounted => v,
@@ -1156,6 +1184,10 @@ pub fn create_directory(slot: usize, parent_path: &str, name: &str) -> bool {
             return false;
         }
     };
+
+    let root_cluster = vol.bpb.root_dir_first_cluster;
+    crate::serial_println!("[FAT32] create_directory: volume_number={} label='{}' root_cluster={}",
+        vol.volume_number, vol.label_str(), root_cluster);
 
     // Resolve parent path to get parent cluster
     let parent_cluster = if parent_path.is_empty() || parent_path == "/" || parent_path == "\\" {
@@ -1258,9 +1290,14 @@ pub fn create_directory(slot: usize, parent_path: &str, name: &str) -> bool {
         }
     }
 
+    crate::serial_println!("[FAT32] create_directory: passed existence check, allocating cluster...");
+
     // Allocate cluster for new directory
     let new_cluster = match allocate_cluster(vol) {
-        Some(c) => c,
+        Some(c) => {
+            crate::serial_println!("[FAT32] create_directory: allocated cluster {}", c);
+            c
+        }
         None => {
             crate::serial_println!("[FAT32] create_directory: no free clusters");
             return false;
@@ -1268,18 +1305,21 @@ pub fn create_directory(slot: usize, parent_path: &str, name: &str) -> bool {
     };
 
     // Zero the new cluster
+    crate::serial_println!("[FAT32] create_directory: zeroing cluster {}...", new_cluster);
     if !zero_cluster(vol, new_cluster) {
         crate::serial_println!("[FAT32] create_directory: failed to zero cluster");
         return false;
     }
 
     // Create . and .. entries
+    crate::serial_println!("[FAT32] create_directory: creating dot entries...");
     if !create_dot_entries(vol, new_cluster, parent_cluster) {
         crate::serial_println!("[FAT32] create_directory: failed to create dot entries");
         return false;
     }
 
     // Create directory entry in parent
+    crate::serial_println!("[FAT32] create_directory: creating entry in parent cluster {}...", parent_cluster);
     if !create_directory_entry_internal(vol, parent_cluster, name, true, new_cluster, 0) {
         crate::serial_println!("[FAT32] create_directory: failed to create directory entry");
         return false;

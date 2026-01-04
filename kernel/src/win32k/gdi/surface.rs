@@ -14,9 +14,12 @@
 //! Based on Windows Server 2003:
 //! - `windows/core/ntgdi/gre/surfobj.cxx`
 
+extern crate alloc;
+
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use crate::ke::spinlock::SpinLock;
 use super::super::{GdiHandle, ColorRef, Rect};
+use alloc::alloc::{alloc_zeroed, Layout};
 
 // ============================================================================
 // Constants
@@ -349,6 +352,10 @@ static PRIMARY_STRIDE: AtomicU32 = AtomicU32::new(0);
 static PRIMARY_BPP: AtomicU32 = AtomicU32::new(0);
 static SURFACE_INITIALIZED: AtomicBool = AtomicBool::new(false);
 
+// Double buffering - back buffer address
+static BACK_BUFFER: AtomicU64 = AtomicU64::new(0);
+static BACK_BUFFER_HANDLE: AtomicU32 = AtomicU32::new(0);
+
 // ============================================================================
 // Initialization
 // ============================================================================
@@ -363,7 +370,7 @@ pub fn init() {
         PRIMARY_STRIDE.store(boot_info.framebuffer_stride, Ordering::Relaxed);
         PRIMARY_BPP.store(boot_info.framebuffer_bpp, Ordering::Relaxed);
 
-        // Create primary surface entry
+        // Create primary surface entry (front buffer - actual screen)
         let primary = Surface {
             surf_type: SurfaceType::Primary,
             format: PixelFormat::Rgb32, // Assume 32-bit from GOP
@@ -380,6 +387,40 @@ pub fn init() {
         let mut table = SURFACE_TABLE.lock();
         table.entries[1].surface = Some(primary);
 
+        // Allocate back buffer for double buffering
+        let buffer_size = (boot_info.framebuffer_stride * boot_info.framebuffer_height) as usize;
+        let layout = Layout::from_size_align(buffer_size, 4096).unwrap_or(Layout::new::<u8>());
+        let back_buf_ptr = unsafe { alloc_zeroed(layout) };
+
+        if !back_buf_ptr.is_null() {
+            let back_buf_addr = back_buf_ptr as u64;
+            BACK_BUFFER.store(back_buf_addr, Ordering::Relaxed);
+
+            // Create back buffer surface entry
+            let back_buffer = Surface {
+                surf_type: SurfaceType::DeviceBitmap,
+                format: PixelFormat::Rgb32,
+                width: boot_info.framebuffer_width,
+                height: boot_info.framebuffer_height,
+                stride: boot_info.framebuffer_stride,
+                bpp: boot_info.framebuffer_bpp as u8,
+                bits: back_buf_addr,
+                size: buffer_size as u64,
+                ref_count: 1,
+                valid: true,
+            };
+
+            // Use index 2 for back buffer
+            table.entries[2].surface = Some(back_buffer);
+            BACK_BUFFER_HANDLE.store(2, Ordering::Relaxed);
+
+            crate::serial_println!("[GDI/Surface] Back buffer: {}x{} @ {:#x} ({} bytes)",
+                boot_info.framebuffer_width, boot_info.framebuffer_height,
+                back_buf_addr, buffer_size);
+        } else {
+            crate::serial_println!("[GDI/Surface] WARNING: Failed to allocate back buffer, using direct rendering");
+        }
+
         crate::serial_println!("[GDI/Surface] Primary surface: {}x{} @ {:#x}",
             boot_info.framebuffer_width, boot_info.framebuffer_height,
             boot_info.framebuffer_addr);
@@ -389,12 +430,51 @@ pub fn init() {
     crate::serial_println!("[GDI/Surface] Surface manager initialized");
 }
 
-/// Get the primary display surface
+/// Get the display surface (returns back buffer if double buffering is enabled)
 pub fn get_display_surface() -> SurfaceHandle {
+    if SURFACE_INITIALIZED.load(Ordering::Acquire) {
+        // Return back buffer if available, otherwise primary
+        let back_handle = BACK_BUFFER_HANDLE.load(Ordering::Relaxed);
+        if back_handle != 0 {
+            SurfaceHandle::new(back_handle as u16)
+        } else {
+            SurfaceHandle::PRIMARY
+        }
+    } else {
+        SurfaceHandle::NULL
+    }
+}
+
+/// Get the primary (front) surface directly - used for cursor drawing
+/// This bypasses the back buffer so cursor appears on top after swap
+pub fn get_primary_surface() -> SurfaceHandle {
     if SURFACE_INITIALIZED.load(Ordering::Acquire) {
         SurfaceHandle::PRIMARY
     } else {
         SurfaceHandle::NULL
+    }
+}
+
+/// Swap buffers - copy back buffer to front buffer (primary display)
+/// This is the key function for double buffering to eliminate flicker
+pub fn swap_buffers() {
+    let back_addr = BACK_BUFFER.load(Ordering::Relaxed);
+    if back_addr == 0 {
+        return; // No back buffer, nothing to do
+    }
+
+    let front_addr = PRIMARY_FRAMEBUFFER.load(Ordering::Relaxed);
+    let stride = PRIMARY_STRIDE.load(Ordering::Relaxed);
+    let height = PRIMARY_HEIGHT.load(Ordering::Relaxed);
+    let size = (stride * height) as usize;
+
+    // Fast memory copy from back buffer to front buffer
+    unsafe {
+        core::ptr::copy_nonoverlapping(
+            back_addr as *const u8,
+            front_addr as *mut u8,
+            size,
+        );
     }
 }
 

@@ -597,9 +597,9 @@ pub fn create_shell() -> HWND {
         window::set_foreground_window(hwnd);
         super::input::set_active_window(hwnd);
 
-        // Paint immediately
+        // Paint immediately - repaint_all draws the frame, paint_shell draws content
         drop(shells);
-        paint_shell(hwnd);
+        super::paint::repaint_all();
     }
 
     hwnd

@@ -228,6 +228,9 @@ fn process_keyboard_input(scancode: u8) {
     let pressed = (scancode & 0x80) == 0;
     let code = scancode & 0x7F;
 
+    // Always update input system state first (so shift/ctrl/alt tracking works)
+    input::process_key_event(code, pressed);
+
     // Check if active window is a shell
     let active_hwnd = input::get_active_window();
     if active_hwnd.is_valid() && super::super::shell::is_shell(active_hwnd) {
@@ -241,9 +244,6 @@ fn process_keyboard_input(scancode: u8) {
         }
         return;
     }
-
-    // Forward to input system
-    input::process_key_event(code, pressed);
 }
 
 /// Check if shift is currently held down

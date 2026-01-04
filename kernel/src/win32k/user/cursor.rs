@@ -428,7 +428,8 @@ pub fn hide_cursor_internal() {
         return;
     }
 
-    let surface_handle = surface::get_display_surface();
+    // Use primary surface directly so cursor appears on top after buffer swap
+    let surface_handle = surface::get_primary_surface();
     let surf = match surface::get_surface(surface_handle) {
         Some(s) => s,
         None => return,
@@ -461,7 +462,8 @@ pub fn draw_cursor() {
         return;
     }
 
-    let surface_handle = surface::get_display_surface();
+    // Use primary surface directly so cursor appears on top after buffer swap
+    let surface_handle = surface::get_primary_surface();
     let surf = match surface::get_surface(surface_handle) {
         Some(s) => s,
         None => return,

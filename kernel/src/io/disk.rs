@@ -572,11 +572,16 @@ pub fn volume_read(volume_number: u8, offset_sectors: u64, count: u32, buf: &mut
 pub fn volume_write(volume_number: u8, offset_sectors: u64, count: u32, buf: &[u8]) -> BlockStatus {
     let vol = match get_volume(volume_number) {
         Some(v) => v,
-        None => return BlockStatus::NotFound,
+        None => {
+            crate::serial_println!("[DISK] volume_write: volume {} not found", volume_number);
+            return BlockStatus::NotFound;
+        }
     };
 
     // Check bounds
     if offset_sectors + count as u64 > vol.total_sectors {
+        crate::serial_println!("[DISK] volume_write: out of bounds, offset={} count={} total={}",
+            offset_sectors, count, vol.total_sectors);
         return BlockStatus::InvalidParameter;
     }
 
@@ -584,7 +589,12 @@ pub fn volume_write(volume_number: u8, offset_sectors: u64, count: u32, buf: &[u
     let lba = vol.start_lba + offset_sectors;
 
     // Write to physical disk
-    write_sectors(vol.disk_index, lba, count, buf)
+    let status = write_sectors(vol.disk_index, lba, count, buf);
+    if status != BlockStatus::Success {
+        crate::serial_println!("[DISK] volume_write: write_sectors failed, disk={} lba={} count={} status={:?}",
+            vol.disk_index, lba, count, status);
+    }
+    status
 }
 
 /// Read single sector from volume

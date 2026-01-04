@@ -522,29 +522,39 @@ pub fn read_sectors(index: u8, lba: u64, count: u32, buf: &mut [u8]) -> BlockSta
 pub fn write_sectors(index: u8, lba: u64, count: u32, buf: &[u8]) -> BlockStatus {
     let dev = match get_block_device(index) {
         Some(d) => d,
-        None => return BlockStatus::NotFound,
+        None => {
+            crate::serial_println!("[BLOCK] write_sectors: device {} not found", index);
+            return BlockStatus::NotFound;
+        }
     };
 
     // Check write protection
     if dev.is_readonly() {
+        crate::serial_println!("[BLOCK] write_sectors: device {} is readonly", index);
         return BlockStatus::WriteProtected;
     }
 
     // Validate buffer size
     let required_size = count as usize * dev.geometry.sector_size as usize;
     if buf.len() < required_size {
+        crate::serial_println!("[BLOCK] write_sectors: buffer too small, need {} have {}", required_size, buf.len());
         return BlockStatus::InvalidParameter;
     }
 
     // Check bounds
     if lba + count as u64 > dev.geometry.total_sectors {
+        crate::serial_println!("[BLOCK] write_sectors: out of bounds, lba={} count={} total={}",
+            lba, count, dev.geometry.total_sectors);
         return BlockStatus::InvalidParameter;
     }
 
     // Call driver write function
     let write_fn = match dev.ops.write {
         Some(f) => f,
-        None => return BlockStatus::IoError,
+        None => {
+            crate::serial_println!("[BLOCK] write_sectors: no write function for device {}", index);
+            return BlockStatus::IoError;
+        }
     };
 
     let status = unsafe { write_fn(index, lba, count, buf.as_ptr()) };
@@ -554,6 +564,7 @@ pub fn write_sectors(index: u8, lba: u64, count: u32, buf: &[u8]) -> BlockStatus
         dev.sectors_written.fetch_add(count as u64, Ordering::Relaxed);
     } else {
         dev.errors.fetch_add(1, Ordering::Relaxed);
+        crate::serial_println!("[BLOCK] write_sectors: driver returned {:?}", status);
     }
 
     status

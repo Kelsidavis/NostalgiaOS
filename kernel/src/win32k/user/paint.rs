@@ -1329,6 +1329,9 @@ pub fn repaint_all() {
 
     // Draw context menu on top of everything
     super::context_menu::draw_context_menu();
+
+    // Swap buffers to display the composed frame (double buffering)
+    super::super::gdi::surface::swap_buffers();
 }
 
 /// Recursively repaint window and children
