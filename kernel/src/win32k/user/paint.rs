@@ -484,19 +484,35 @@ pub fn repaint_all() {
     // Also paint desktop icons
     super::explorer::deskhost::paint_icons_only();
 
-    // Paint all visible windows directly from window table
-    // (The parent-child tree may not be correctly linked)
+    // Collect all visible windows with their z-orders
+    // Max 32 windows for now
+    let mut windows: [(HWND, u32); 32] = [(HWND::NULL, 0); 32];
+    let mut window_count = 0usize;
+
     let count = window::get_window_count() as usize;
     for i in 0..count {
         if let Some(hwnd) = window::get_window_at_index(i) {
             if let Some(wnd) = window::get_window(hwnd) {
-                // Skip minimized windows
-                if wnd.visible && !wnd.minimized {
-                    // Paint this window's frame and client area
-                    draw_window_frame(hwnd);
+                if wnd.visible && !wnd.minimized && window_count < 32 {
+                    windows[window_count] = (hwnd, wnd.z_order);
+                    window_count += 1;
                 }
             }
         }
+    }
+
+    // Sort by z-order (lowest first, so topmost window is painted last)
+    for i in 0..window_count {
+        for j in (i + 1)..window_count {
+            if windows[j].1 < windows[i].1 {
+                windows.swap(i, j);
+            }
+        }
+    }
+
+    // Paint windows in z-order
+    for i in 0..window_count {
+        draw_window_frame(windows[i].0);
     }
 }
 
