@@ -101,6 +101,61 @@ fn ramfs_list_directory(entries_out: &mut [VfsEntry]) -> usize {
     count
 }
 
+/// Rename entry in RAM disk
+fn ramfs_rename(old_name: &str, new_name: &str) -> bool {
+    let mut entries = RAMFS_ENTRIES.lock();
+
+    // Check if new name already exists
+    for entry in entries.iter() {
+        if entry.active && entry.name_len == new_name.len() {
+            let entry_name = core::str::from_utf8(&entry.name[..entry.name_len]).unwrap_or("");
+            if entry_name.eq_ignore_ascii_case(new_name) {
+                crate::serial_println!("[RAMFS] Rename failed: target already exists: {}", new_name);
+                return false;
+            }
+        }
+    }
+
+    // Find old entry and rename it
+    for entry in entries.iter_mut() {
+        if entry.active && entry.name_len == old_name.len() {
+            let entry_name = core::str::from_utf8(&entry.name[..entry.name_len]).unwrap_or("");
+            if entry_name.eq_ignore_ascii_case(old_name) {
+                let len = new_name.len().min(63);
+                entry.name = [0; 64];
+                entry.name[..len].copy_from_slice(&new_name.as_bytes()[..len]);
+                entry.name_len = len;
+                crate::serial_println!("[RAMFS] Renamed: {} -> {}", old_name, new_name);
+                return true;
+            }
+        }
+    }
+
+    crate::serial_println!("[RAMFS] Rename failed: source not found: {}", old_name);
+    false
+}
+
+/// Delete entry in RAM disk
+fn ramfs_delete(name: &str) -> bool {
+    let mut entries = RAMFS_ENTRIES.lock();
+
+    for entry in entries.iter_mut() {
+        if entry.active && entry.name_len == name.len() {
+            let entry_name = core::str::from_utf8(&entry.name[..entry.name_len]).unwrap_or("");
+            if entry_name.eq_ignore_ascii_case(name) {
+                entry.active = false;
+                entry.name = [0; 64];
+                entry.name_len = 0;
+                crate::serial_println!("[RAMFS] Deleted: {}", name);
+                return true;
+            }
+        }
+    }
+
+    crate::serial_println!("[RAMFS] Delete failed: not found: {}", name);
+    false
+}
+
 /// Maximum drives
 pub const MAX_DRIVES: usize = 26; // A-Z
 
@@ -961,6 +1016,19 @@ pub fn create_file(path: &str, name: &str) -> bool {
 /// Delete a file at the specified path
 /// Path format: "C:/folder/file.txt" or "C:\folder\file.txt"
 pub fn delete_file(path: &str) -> bool {
+    // Check if this is a RAM disk operation
+    let (drive_letter, subpath) = parse_path(path);
+
+    if let Some(letter) = drive_letter {
+        if let Some(idx) = drive_index(letter) {
+            let drive = unsafe { &DRIVES[idx] };
+            if drive.drive_type == DriveType::RamDisk {
+                return ramfs_delete(subpath);
+            }
+        }
+    }
+
+    // Fall back to fs::delete for everything else (FAT32, etc.)
     use crate::fs;
 
     // Convert forward slashes to backslashes for fs module
@@ -989,6 +1057,23 @@ pub fn delete_file(path: &str) -> bool {
 /// Rename a file or directory
 /// old_path and new_path format: "C:/folder/old.txt" or "C:\folder\new.txt"
 pub fn rename_file(old_path: &str, new_path: &str) -> bool {
+    // Check if this is a RAM disk operation
+    let (old_drive, old_subpath) = parse_path(old_path);
+    let (new_drive, new_subpath) = parse_path(new_path);
+
+    // Check for RAM disk - both paths must be on same RAM disk drive
+    if let (Some(old_letter), Some(new_letter)) = (old_drive, new_drive) {
+        if old_letter.to_ascii_uppercase() == new_letter.to_ascii_uppercase() {
+            if let Some(idx) = drive_index(old_letter) {
+                let drive = unsafe { &DRIVES[idx] };
+                if drive.drive_type == DriveType::RamDisk {
+                    return ramfs_rename(old_subpath, new_subpath);
+                }
+            }
+        }
+    }
+
+    // Fall back to fs::rename for everything else (FAT32, etc.)
     use crate::fs;
 
     // Convert forward slashes to backslashes for fs module

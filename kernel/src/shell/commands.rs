@@ -735,14 +735,11 @@ pub fn cmd_del(args: &[&str]) {
             // Build full path for this file
             let file_path = build_path(full_dir, name);
 
-            match fs::delete(file_path) {
-                Ok(()) => {
-                    deleted_count += 1;
-                }
-                Err(e) => {
-                    outln!("Error deleting {}: {:?}", name, e);
-                    error_count += 1;
-                }
+            if crate::io::vfs::delete_file(&file_path) {
+                deleted_count += 1;
+            } else {
+                outln!("Error deleting: {}", name);
+                error_count += 1;
             }
         }
 
@@ -753,16 +750,10 @@ pub fn cmd_del(args: &[&str]) {
         // No wildcards - single file delete
         let full_path = resolve_path(arg);
 
-        match fs::delete(full_path) {
-            Ok(()) => {
-                // Success - no output (DOS behavior)
-            }
-            Err(fs::FsStatus::NotFound) => {
-                outln!("Could not find the file specified.");
-            }
-            Err(e) => {
-                outln!("Error deleting file: {:?}", e);
-            }
+        if crate::io::vfs::delete_file(&full_path) {
+            // Success - no output (DOS behavior)
+        } else {
+            outln!("Could not delete: {}", arg);
         }
     }
 }
@@ -906,16 +897,10 @@ pub fn cmd_rename(args: &[&str]) {
     let old_path = resolve_path(args[0]);
     let new_path = resolve_path(args[1]);
 
-    match fs::rename(old_path, new_path) {
-        Ok(()) => {
-            // Success - no output
-        }
-        Err(fs::FsStatus::NotFound) => {
-            outln!("The system cannot find the file specified.");
-        }
-        Err(e) => {
-            outln!("Error renaming: {:?}", e);
-        }
+    if crate::io::vfs::rename_file(&old_path, &new_path) {
+        // Success - no output
+    } else {
+        outln!("Unable to rename: {}", args[0]);
     }
 }
 
