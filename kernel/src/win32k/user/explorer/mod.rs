@@ -39,6 +39,7 @@ pub mod process;
 pub mod filebrowser;
 pub mod foldertree;
 pub mod properties;
+pub mod toolbar_icons;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use crate::ke::spinlock::SpinLock;

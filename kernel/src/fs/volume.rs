@@ -140,6 +140,11 @@ pub fn mount_volume(
         flags,
     )?;
 
+    // Also register with io/vfs for file browser compatibility
+    if fs_type == FsType::Fat32 {
+        crate::io::vfs::mount_fat32(drive_letter, vfs_index as usize);
+    }
+
     Ok(())
 }
 

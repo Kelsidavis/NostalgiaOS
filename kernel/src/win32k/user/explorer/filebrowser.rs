@@ -2129,7 +2129,13 @@ impl FileBrowser {
     /// Get content area rectangle (excluding toolbar, address bar, status bar, and tree pane)
     pub fn get_content_rect(&self, hwnd: HWND) -> Rect {
         if let Some(win) = window::get_window(hwnd) {
-            let client = win.client_rect;
+            // Convert to screen coordinates
+            let metrics = win.get_frame_metrics();
+            let screen_client_left = win.rect.left + metrics.border_width;
+            let screen_client_top = win.rect.top + metrics.border_width + metrics.caption_height;
+            let screen_client_right = win.rect.right - metrics.border_width;
+            let screen_client_bottom = win.rect.bottom - metrics.border_width;
+
             // Account for tree pane on the left
             let tree_width = if self.tree_visible {
                 super::foldertree::TREE_PANE_WIDTH
@@ -2137,10 +2143,10 @@ impl FileBrowser {
                 0
             };
             Rect::new(
-                client.left + tree_width,
-                client.top + TOOLBAR_HEIGHT + ADDRESS_BAR_HEIGHT,
-                client.right,
-                client.bottom - STATUS_BAR_HEIGHT,
+                screen_client_left + tree_width,
+                screen_client_top + TOOLBAR_HEIGHT + ADDRESS_BAR_HEIGHT,
+                screen_client_right,
+                screen_client_bottom - STATUS_BAR_HEIGHT,
             )
         } else {
             Rect::new(0, 0, 400, 300)
@@ -2150,12 +2156,16 @@ impl FileBrowser {
     /// Get tree pane rectangle
     pub fn get_tree_rect(&self, hwnd: HWND) -> Rect {
         if let Some(win) = window::get_window(hwnd) {
-            let client = win.client_rect;
+            // Convert to screen coordinates by adding window position
+            let metrics = win.get_frame_metrics();
+            let screen_client_left = win.rect.left + metrics.border_width;
+            let screen_client_top = win.rect.top + metrics.border_width + metrics.caption_height;
+
             Rect::new(
-                client.left,
-                client.top + TOOLBAR_HEIGHT + ADDRESS_BAR_HEIGHT,
-                client.left + super::foldertree::TREE_PANE_WIDTH,
-                client.bottom - STATUS_BAR_HEIGHT,
+                screen_client_left,
+                screen_client_top + TOOLBAR_HEIGHT + ADDRESS_BAR_HEIGHT,
+                screen_client_left + super::foldertree::TREE_PANE_WIDTH,
+                win.rect.bottom - metrics.border_width - STATUS_BAR_HEIGHT,
             )
         } else {
             Rect::new(0, 0, 0, 0)
@@ -2715,6 +2725,9 @@ fn format_size_for_details(size: u64) -> [u8; 32] {
 }
 
 fn paint_toolbar_surf(surf: &surface::Surface, hdc: HDC, sx: i32, sy: i32, w: i32, lx: i32, ly: i32, browser: &FileBrowser) {
+    use super::toolbar_icons;
+    let _ = (hdc, lx, ly); // Used in search box code below
+
     // Background
     let toolbar_rect = Rect::new(sx, sy, sx + w, sy + TOOLBAR_HEIGHT);
     surf.fill_rect(&toolbar_rect, COLOR_TOOLBAR_BG);
@@ -2722,22 +2735,18 @@ fn paint_toolbar_surf(surf: &surface::Surface, hdc: HDC, sx: i32, sy: i32, w: i3
     // Bottom border
     surf.hline(sx, sx + w, sy + TOOLBAR_HEIGHT - 1, ColorRef::rgb(128, 128, 128));
 
-    // Draw buttons
-    let buttons = ["<", ">", "^", "R", "V", "?"];
+    // Draw 6 toolbar buttons with icons: Back, Forward, Up, Refresh, Folders, Search
     let mut bx = sx + 4;
     let by = sy + 2;
 
-    dc::set_text_color(hdc, ColorRef::rgb(0, 0, 0));
-    dc::set_bk_mode(hdc, BkMode::Transparent);
-
-    for (i, btn) in buttons.iter().enumerate() {
+    for i in 0..6 {
         let btn_rect = Rect::new(bx, by, bx + TOOLBAR_BTN_SIZE, by + TOOLBAR_BTN_SIZE);
 
         // Button background - highlight search button if active
         let bg_color = if i == 5 && browser.search_active {
             ColorRef::rgb(200, 220, 255) // Light blue when search is active
         } else {
-            ColorRef::rgb(230, 230, 230)
+            ColorRef::rgb(236, 233, 216) // XP-style button background
         };
         surf.fill_rect(&btn_rect, bg_color);
 
@@ -2747,10 +2756,20 @@ fn paint_toolbar_surf(surf: &surface::Surface, hdc: HDC, sx: i32, sy: i32, w: i3
         surf.hline(bx, bx + TOOLBAR_BTN_SIZE, by + TOOLBAR_BTN_SIZE - 1, ColorRef::rgb(128, 128, 128));
         surf.vline(bx + TOOLBAR_BTN_SIZE - 1, by, by + TOOLBAR_BTN_SIZE, ColorRef::rgb(128, 128, 128));
 
-        // Draw text centered (use logical coords for text)
-        let text_x = lx + 4 + (i as i32) * (TOOLBAR_BTN_SIZE + 2) + (TOOLBAR_BTN_SIZE - 8) / 2;
-        let text_y = ly + 2 + (TOOLBAR_BTN_SIZE - 12) / 2;
-        gdi::text_out(hdc, text_x, text_y, btn);
+        // Draw icon centered in button (icon is 16x16, button is TOOLBAR_BTN_SIZE x TOOLBAR_BTN_SIZE)
+        let icon_x = bx + (TOOLBAR_BTN_SIZE - 16) / 2;
+        let icon_y = by + (TOOLBAR_BTN_SIZE - 16) / 2;
+
+        // Check if button should be enabled
+        let enabled = match i {
+            0 => browser.history_pos > 0,                          // Back enabled if can go back
+            1 => browser.history_pos + 1 < browser.history_count,  // Forward enabled if can go forward
+            2 => browser.path_len > 0,                             // Up enabled if not at root
+            _ => true,
+        };
+
+        // Draw icon on surface (Surface has interior mutability for set_pixel)
+        toolbar_icons::draw_toolbar_icon(surf, icon_x, icon_y, i, enabled);
 
         bx += TOOLBAR_BTN_SIZE + 2;
     }
@@ -3904,8 +3923,47 @@ pub fn is_on_column_separator(hwnd: HWND, x: i32) -> Option<usize> {
     }).flatten()
 }
 
+/// Handle address bar click
+pub fn handle_address_bar_click(hwnd: HWND, x: i32, _y: i32) -> bool {
+    // Address bar layout:
+    // [Address: ] [path text] [dropdown button]
+    // The dropdown button is at the right edge
+
+    with_browser(hwnd, |browser| {
+        // Check if clicking dropdown button (last 20 pixels on the right side)
+        if let Some(win) = window::get_window(hwnd) {
+            let client_width = win.client_rect.right - win.client_rect.left;
+
+            // Tree pane width
+            let tree_width = if browser.tree_visible {
+                super::foldertree::TREE_PANE_WIDTH
+            } else {
+                0
+            };
+
+            let address_right = client_width - tree_width;
+            let dropdown_x = address_right - 20;
+
+            if x >= dropdown_x {
+                // Clicked dropdown button - toggle dropdown
+                browser.toggle_address_dropdown();
+                crate::serial_println!("[BROWSER] Address dropdown toggled: {}", browser.address_dropdown_visible);
+                return true;
+            }
+
+            // Click on address text area - could enable editing
+            // For now, just toggle dropdown as fallback
+            browser.toggle_address_dropdown();
+            crate::serial_println!("[BROWSER] Address bar clicked at x={}", x);
+            return true;
+        }
+        false
+    }).unwrap_or(false)
+}
+
 /// Handle toolbar button click
 pub fn handle_toolbar_click(hwnd: HWND, x: i32, y: i32) -> bool {
+    let _ = y; // Unused
     let btn_index = (x - 4) / (TOOLBAR_BTN_SIZE + 2);
 
     with_browser(hwnd, |browser| {
@@ -3952,6 +4010,13 @@ pub fn handle_content_click_ex(hwnd: HWND, x: i32, y: i32, double_click: bool, c
 
         let content_rect = browser.get_content_rect(hwnd);
 
+        // First check if click is within content area
+        if x < content_rect.left || x >= content_rect.right ||
+           y < content_rect.top || y >= content_rect.bottom {
+            // Click is outside content area (e.g., on title bar, toolbar, etc.)
+            return false;
+        }
+
         if let Some(index) = browser.hit_test(&content_rect, x, y) {
             browser.handle_selection_click(index, ctrl, shift);
 
@@ -3968,7 +4033,7 @@ pub fn handle_content_click_ex(hwnd: HWND, x: i32, y: i32, double_click: bool, c
             }
             true
         } else {
-            // Click on empty space - clear selection
+            // Click on empty space within content area - clear selection
             if !ctrl && !shift {
                 browser.clear_selection();
             }
@@ -3983,6 +4048,13 @@ pub fn handle_right_click(hwnd: HWND, x: i32, y: i32) -> bool {
 
     with_browser(hwnd, |browser| {
         let content_rect = browser.get_content_rect(hwnd);
+
+        // Check if click is within content area
+        if x < content_rect.left || x >= content_rect.right ||
+           y < content_rect.top || y >= content_rect.bottom {
+            // Click is outside content area
+            return false;
+        }
 
         // If clicking on an item that's not selected, select it first
         if let Some(index) = browser.hit_test(&content_rect, x, y) {

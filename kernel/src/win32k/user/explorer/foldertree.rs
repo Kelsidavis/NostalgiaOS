@@ -160,8 +160,8 @@ impl FolderTree {
         // Add Desktop (root)
         self.add_node(TreeNodeType::Desktop, "Desktop", "", 0, -1, true);
 
-        // Add My Computer under Desktop
-        let my_computer_idx = self.add_node(TreeNodeType::MyComputer, "My Computer", "MyComputer", 1, 0, true);
+        // Add My Computer under Desktop - empty path shows drives
+        let my_computer_idx = self.add_node(TreeNodeType::MyComputer, "My Computer", "", 1, 0, true);
 
         // Add drives under My Computer
         self.populate_drives(my_computer_idx as i32);

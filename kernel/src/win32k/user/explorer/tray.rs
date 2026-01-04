@@ -647,8 +647,19 @@ fn handle_left_button_down(x: i32, y: i32) {
                                 return;
                             }
                         } else {
-                            // Check for header click (in details view)
+                            // Check for address bar click
                             let address_bar_bottom = toolbar_bottom + super::filebrowser::ADDRESS_BAR_HEIGHT;
+
+                            if y >= toolbar_bottom && y < address_bar_bottom {
+                                // Address bar click
+                                let local_x = x - wnd.rect.left - metrics.border_width;
+                                if super::filebrowser::handle_address_bar_click(hwnd, local_x, y - toolbar_bottom) {
+                                    super::super::paint::repaint_all();
+                                    return;
+                                }
+                            }
+
+                            // Check for header click (in details view)
                             let header_bottom = address_bar_bottom + super::filebrowser::HEADER_HEIGHT;
 
                             if y >= address_bar_bottom && y < header_bottom {
