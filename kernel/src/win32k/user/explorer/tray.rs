@@ -18,6 +18,7 @@ use super::super::super::{HWND, HDC, Rect, Point, ColorRef};
 use super::super::super::gdi::{dc, brush};
 use super::super::{message, window, input, controls, cursor, WindowStyle, WindowStyleEx, ShowCommand};
 use super::{taskband, traynot, deskhost, startmenu};
+use super::super::context_menu;
 
 // ============================================================================
 // Constants
@@ -227,8 +228,78 @@ fn process_keyboard_input(scancode: u8) {
     let pressed = (scancode & 0x80) == 0;
     let code = scancode & 0x7F;
 
+    // Check if active window is a shell
+    let active_hwnd = input::get_active_window();
+    if active_hwnd.is_valid() && super::super::shell::is_shell(active_hwnd) {
+        if pressed {
+            // Convert scancode to character for shell
+            let ch = scancode_to_char(code, is_shift_down());
+            super::super::shell::shell_key(active_hwnd, code, ch);
+
+            // Repaint shell window
+            super::super::paint::repaint_all();
+        }
+        return;
+    }
+
     // Forward to input system
     input::process_key_event(code, pressed);
+}
+
+/// Check if shift is currently held down
+fn is_shift_down() -> bool {
+    // Use virtual key codes and check bit 15 (0x8000) for key down state
+    (input::get_key_state(super::super::input::vk::LSHIFT) & 0x8000u16 as i16 != 0) ||
+    (input::get_key_state(super::super::input::vk::RSHIFT) & 0x8000u16 as i16 != 0)
+}
+
+/// Convert scancode to ASCII character
+fn scancode_to_char(scancode: u8, shift: bool) -> char {
+    if shift {
+        match scancode {
+            0x02 => '!', 0x03 => '@', 0x04 => '#', 0x05 => '$',
+            0x06 => '%', 0x07 => '^', 0x08 => '&', 0x09 => '*',
+            0x0A => '(', 0x0B => ')',
+            0x0C => '_', 0x0D => '+',
+            0x10 => 'Q', 0x11 => 'W', 0x12 => 'E', 0x13 => 'R',
+            0x14 => 'T', 0x15 => 'Y', 0x16 => 'U', 0x17 => 'I',
+            0x18 => 'O', 0x19 => 'P',
+            0x1A => '{', 0x1B => '}',
+            0x1E => 'A', 0x1F => 'S', 0x20 => 'D', 0x21 => 'F',
+            0x22 => 'G', 0x23 => 'H', 0x24 => 'J', 0x25 => 'K',
+            0x26 => 'L',
+            0x27 => ':', 0x28 => '"',
+            0x29 => '~',
+            0x2B => '|',
+            0x2C => 'Z', 0x2D => 'X', 0x2E => 'C', 0x2F => 'V',
+            0x30 => 'B', 0x31 => 'N', 0x32 => 'M',
+            0x33 => '<', 0x34 => '>', 0x35 => '?',
+            0x39 => ' ',
+            _ => '\0',
+        }
+    } else {
+        match scancode {
+            0x02 => '1', 0x03 => '2', 0x04 => '3', 0x05 => '4',
+            0x06 => '5', 0x07 => '6', 0x08 => '7', 0x09 => '8',
+            0x0A => '9', 0x0B => '0',
+            0x0C => '-', 0x0D => '=',
+            0x10 => 'q', 0x11 => 'w', 0x12 => 'e', 0x13 => 'r',
+            0x14 => 't', 0x15 => 'y', 0x16 => 'u', 0x17 => 'i',
+            0x18 => 'o', 0x19 => 'p',
+            0x1A => '[', 0x1B => ']',
+            0x1E => 'a', 0x1F => 's', 0x20 => 'd', 0x21 => 'f',
+            0x22 => 'g', 0x23 => 'h', 0x24 => 'j', 0x25 => 'k',
+            0x26 => 'l',
+            0x27 => ';', 0x28 => '\'',
+            0x29 => '`',
+            0x2B => '\\',
+            0x2C => 'z', 0x2D => 'x', 0x2E => 'c', 0x2F => 'v',
+            0x30 => 'b', 0x31 => 'n', 0x32 => 'm',
+            0x33 => ',', 0x34 => '.', 0x35 => '/',
+            0x39 => ' ',
+            _ => '\0',
+        }
+    }
 }
 
 // ============================================================================
@@ -247,6 +318,13 @@ fn process_mouse_event(event: mouse::MouseEvent) {
     let dragging_hwnd = *DRAGGING_WINDOW.lock();
     let resizing_hwnd = *RESIZING_WINDOW.lock();
     let icon_dragging = deskhost::is_icon_dragging();
+
+    // Check if context menu is visible and handle mouse move
+    if context_menu::is_menu_visible() {
+        if event.dx != 0 || event.dy != 0 {
+            context_menu::on_mouse_move(x, y);
+        }
+    }
 
     if icon_dragging {
         // Dragging a desktop icon
@@ -316,6 +394,14 @@ fn handle_left_button_down(x: i32, y: i32) {
     input::process_mouse_button(0, true, x, y);
 
     // Check for context menus first
+    if context_menu::is_menu_visible() {
+        let menu_result = context_menu::on_click(x, y);
+        if menu_result != context_menu::menu_id::NONE {
+            handle_context_menu_action(menu_result);
+        }
+        return;
+    }
+
     if deskhost::is_icon_menu_visible() {
         deskhost::handle_icon_menu_click(x, y);
         return;
@@ -324,6 +410,29 @@ fn handle_left_button_down(x: i32, y: i32) {
     if deskhost::is_desktop_menu_visible() {
         deskhost::handle_desktop_menu_click(x, y);
         return;
+    }
+
+    // Check for navigation button clicks on explorer windows
+    let hwnd = window::window_from_point(Point::new(x, y));
+    if hwnd.is_valid() {
+        if super::super::paint::hit_test_back_button(hwnd, x, y) {
+            if window::can_go_back(hwnd) {
+                crate::serial_println!("[TRAY] Back button clicked");
+                window::navigate_back(hwnd);
+                super::super::paint::repaint_all();
+                paint_taskbar();
+            }
+            return;
+        }
+        if super::super::paint::hit_test_forward_button(hwnd, x, y) {
+            if window::can_go_forward(hwnd) {
+                crate::serial_println!("[TRAY] Forward button clicked");
+                window::navigate_forward(hwnd);
+                super::super::paint::repaint_all();
+                paint_taskbar();
+            }
+            return;
+        }
     }
 
     // Check for double-click
@@ -353,6 +462,15 @@ fn handle_left_button_down(x: i32, y: i32) {
         if let Some(icon_idx) = deskhost::get_icon_at_position(x, y) {
             deskhost::handle_icon_double_click(icon_idx);
         } else {
+            // Check if double-clicked on a window content icon
+            let hwnd = window::window_from_point(Point::new(x, y));
+            if hwnd.is_valid() {
+                if let Some(folder_name) = super::super::paint::get_content_icon_at_position(hwnd, x, y) {
+                    // Navigate the existing window to the clicked folder
+                    navigate_window_to_folder(hwnd, folder_name);
+                    return;
+                }
+            }
             try_caption_double_click(x, y);
         }
     } else {
@@ -404,13 +522,164 @@ fn handle_right_click(x: i32, y: i32) {
         deskhost::select_icon(Some(icon_idx));
         deskhost::show_icon_context_menu(x, y, icon_idx);
     } else {
-        // Right-click on desktop background
+        // Check if right-click is in an explorer window
         let hwnd = window::window_from_point(Point::new(x, y));
         let desktop_hwnd = deskhost::get_desktop_hwnd();
+
+        if hwnd.is_valid() && hwnd != desktop_hwnd && hwnd != window::get_desktop_window() {
+            // Check if it's an explorer window (CabinetWClass)
+            if let Some(wnd) = window::get_window(hwnd) {
+                if wnd.class_name_str() == "CabinetWClass" {
+                    // Get folder path from window user data
+                    let folder_path = wnd.user_data_str();
+                    context_menu::show_explorer_context_menu(hwnd, x, y, folder_path);
+                    return;
+                }
+            }
+        }
+
+        // Right-click on desktop background
         if !hwnd.is_valid() || hwnd == desktop_hwnd || hwnd == window::get_desktop_window() {
             deskhost::show_desktop_context_menu(x, y);
         }
     }
+}
+
+// ============================================================================
+// Context Menu Action Handling
+// ============================================================================
+
+fn handle_context_menu_action(action: u16) {
+    let folder_path = context_menu::get_menu_folder_path();
+
+    match action {
+        context_menu::menu_id::REFRESH => {
+            // Refresh the window content
+            crate::serial_println!("[TRAY] Refresh requested for: {}", folder_path);
+            super::super::paint::repaint_all();
+            paint_taskbar();
+        }
+        context_menu::menu_id::NEW_FOLDER => {
+            // Create a new folder
+            crate::serial_println!("[TRAY] New Folder requested in: {}", folder_path);
+            create_new_folder(folder_path);
+        }
+        context_menu::menu_id::NEW_TEXT_FILE => {
+            // Create a new text file
+            crate::serial_println!("[TRAY] New Text Document requested in: {}", folder_path);
+            create_new_text_file(folder_path);
+        }
+        context_menu::menu_id::PROPERTIES => {
+            // Show properties (not implemented yet)
+            crate::serial_println!("[TRAY] Properties requested for: {}", folder_path);
+        }
+        _ => {}
+    }
+}
+
+fn create_new_folder(folder_path: &str) {
+    use crate::io::vfs_create_directory;
+
+    // Generate a unique folder name
+    static mut FOLDER_COUNT: u32 = 0;
+    let count = unsafe {
+        FOLDER_COUNT += 1;
+        FOLDER_COUNT
+    };
+
+    // Build folder name - "New Folder" or "New Folder (2)" etc.
+    let mut name_buf = [0u8; 32];
+    let name = if count == 1 {
+        "New Folder"
+    } else {
+        // Format "NEWFOLD~N" for 8.3 compatibility
+        let mut pos = 0;
+        for b in b"NEWFOLD" {
+            if pos < 31 {
+                name_buf[pos] = *b;
+                pos += 1;
+            }
+        }
+        // Add number suffix
+        let num_str = if count < 10 {
+            name_buf[pos] = b'0' + count as u8;
+            pos += 1;
+        } else {
+            name_buf[pos] = b'0' + (count / 10) as u8;
+            pos += 1;
+            name_buf[pos] = b'0' + (count % 10) as u8;
+            pos += 1;
+        };
+        core::str::from_utf8(&name_buf[..pos]).unwrap_or("NEWFOLD")
+    };
+
+    crate::serial_println!("[TRAY] Creating folder '{}' in: {}", name, folder_path);
+
+    if vfs_create_directory(folder_path, name) {
+        crate::serial_println!("[TRAY] Successfully created folder '{}'", name);
+    } else {
+        crate::serial_println!("[TRAY] Failed to create folder '{}'", name);
+    }
+
+    // Refresh the display
+    super::super::paint::repaint_all();
+    paint_taskbar();
+}
+
+fn create_new_text_file(folder_path: &str) {
+    use crate::io::vfs_create_file;
+
+    // Generate a unique file name
+    static mut FILE_COUNT: u32 = 0;
+    let count = unsafe {
+        FILE_COUNT += 1;
+        FILE_COUNT
+    };
+
+    // Build file name - "New Text Document.txt" or with number
+    let mut name_buf = [0u8; 32];
+    let name = if count == 1 {
+        "NEWTXT.TXT"
+    } else {
+        // Format "NEWTX~N.TXT" for 8.3 compatibility
+        let mut pos = 0;
+        for b in b"NEWTX" {
+            if pos < 28 {
+                name_buf[pos] = *b;
+                pos += 1;
+            }
+        }
+        // Add number suffix
+        if count < 10 {
+            name_buf[pos] = b'0' + count as u8;
+            pos += 1;
+        } else {
+            name_buf[pos] = b'0' + (count / 10) as u8;
+            pos += 1;
+            name_buf[pos] = b'0' + (count % 10) as u8;
+            pos += 1;
+        }
+        // Add extension
+        for b in b".TXT" {
+            if pos < 31 {
+                name_buf[pos] = *b;
+                pos += 1;
+            }
+        }
+        core::str::from_utf8(&name_buf[..pos]).unwrap_or("NEWTXT.TXT")
+    };
+
+    crate::serial_println!("[TRAY] Creating file '{}' in: {}", name, folder_path);
+
+    if vfs_create_file(folder_path, name) {
+        crate::serial_println!("[TRAY] Successfully created file '{}'", name);
+    } else {
+        crate::serial_println!("[TRAY] Failed to create file '{}'", name);
+    }
+
+    // Refresh the display
+    super::super::paint::repaint_all();
+    paint_taskbar();
 }
 
 // ============================================================================
@@ -438,6 +707,84 @@ fn handle_taskbar_click(x: i32, y: i32) {
 
     // Check task buttons
     taskband::handle_click(x, y);
+}
+
+// ============================================================================
+// Explorer Window Creation
+// ============================================================================
+
+/// Navigate an explorer window to a subfolder
+fn navigate_window_to_folder(hwnd: super::super::super::HWND, folder_name: &str) {
+    // Get current folder path
+    let mut current_path_buf = [0u8; 128];
+    let current_len = window::get_window_user_data(hwnd, &mut current_path_buf);
+    let current_path = core::str::from_utf8(&current_path_buf[..current_len]).unwrap_or("");
+
+    // Build new path (current_path/folder_name)
+    let mut new_path = [0u8; 128];
+    let mut path_len = 0;
+
+    // Copy current path
+    for &b in current_path.as_bytes() {
+        if path_len < 127 {
+            new_path[path_len] = b;
+            path_len += 1;
+        }
+    }
+
+    // Add separator
+    if path_len > 0 && path_len < 127 {
+        new_path[path_len] = b'/';
+        path_len += 1;
+    }
+
+    // Add folder name
+    for &b in folder_name.as_bytes() {
+        if path_len < 127 {
+            new_path[path_len] = b;
+            path_len += 1;
+        }
+    }
+
+    let new_path_str = core::str::from_utf8(&new_path[..path_len]).unwrap_or("");
+
+    crate::serial_println!("[TRAY] Navigating to: {} (was: {})", new_path_str, current_path);
+
+    // Update window title and path
+    window::navigate_explorer_window(hwnd, new_path_str, folder_name);
+
+    // Repaint the window
+    super::super::paint::repaint_all();
+}
+
+fn open_explorer_window(folder_name: &str) {
+    let hwnd = window::create_window(
+        "CabinetWClass",
+        folder_name,
+        super::super::WindowStyle::OVERLAPPEDWINDOW | super::super::WindowStyle::VISIBLE,
+        super::super::WindowStyleEx::empty(),
+        250, 150, 400, 300,
+        super::super::super::HWND::NULL,
+        0, // menu
+    );
+
+    if hwnd.is_valid() {
+        crate::serial_println!("[TRAY] Created window: {} hwnd={:#x}", folder_name, hwnd.raw());
+
+        // Add to taskbar
+        taskband::add_task(hwnd);
+
+        // Make it the active window
+        window::set_foreground_window(hwnd);
+        input::set_active_window(hwnd);
+
+        // Show and paint
+        window::show_window(hwnd, super::super::ShowCommand::Show);
+
+        // Repaint everything
+        super::super::paint::repaint_all();
+        paint_taskbar();
+    }
 }
 
 // ============================================================================

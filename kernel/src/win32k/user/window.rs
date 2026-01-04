@@ -31,6 +31,12 @@ pub const CW_USEDEFAULT: i32 = 0x80000000u32 as i32;
 /// Maximum window title length
 pub const MAX_WINDOW_TITLE: usize = 128;
 
+/// Maximum navigation history entries
+pub const MAX_NAV_HISTORY: usize = 16;
+
+/// Maximum path length in history
+pub const MAX_NAV_PATH: usize = 128;
+
 // ============================================================================
 // Window Structure
 // ============================================================================
@@ -115,6 +121,24 @@ pub struct Window {
 
     /// Z-order value (higher = on top)
     pub z_order: u32,
+
+    /// User data (application-specific, e.g. folder path for explorer)
+    pub user_data: [u8; 128],
+
+    /// User data length
+    pub user_data_len: usize,
+
+    /// Navigation history (back stack) - array of paths
+    pub nav_history: [[u8; MAX_NAV_PATH]; MAX_NAV_HISTORY],
+
+    /// Navigation history lengths
+    pub nav_history_len: [usize; MAX_NAV_HISTORY],
+
+    /// Current position in history (index of current location)
+    pub nav_history_pos: usize,
+
+    /// Total entries in history
+    pub nav_history_count: usize,
 }
 
 impl Default for Window {
@@ -146,6 +170,12 @@ impl Default for Window {
             valid: false,
             is_desktop: false,
             z_order: 0,
+            user_data: [0; 128],
+            user_data_len: 0,
+            nav_history: [[0; MAX_NAV_PATH]; MAX_NAV_HISTORY],
+            nav_history_len: [0; MAX_NAV_HISTORY],
+            nav_history_pos: 0,
+            nav_history_count: 0,
         }
     }
 }
@@ -160,6 +190,27 @@ impl Window {
     /// Get title as string
     pub fn title_str(&self) -> &str {
         core::str::from_utf8(&self.title[..self.title_len]).unwrap_or("")
+    }
+
+    /// Get user data as string (e.g. folder path)
+    pub fn user_data_str(&self) -> &str {
+        core::str::from_utf8(&self.user_data[..self.user_data_len]).unwrap_or("")
+    }
+
+    /// Set user data from string
+    pub fn set_user_data(&mut self, data: &str) {
+        self.user_data_len = data.len().min(127);
+        for (i, &b) in data.as_bytes().iter().take(self.user_data_len).enumerate() {
+            self.user_data[i] = b;
+        }
+    }
+
+    /// Set title from string
+    pub fn set_title(&mut self, title: &str) {
+        self.title_len = title.len().min(MAX_WINDOW_TITLE - 1);
+        for (i, &b) in title.as_bytes().iter().take(self.title_len).enumerate() {
+            self.title[i] = b;
+        }
     }
 
     /// Check if window has caption
@@ -215,6 +266,76 @@ impl Window {
             self.rect.width() - metrics.border_width,
             self.rect.height() - metrics.border_width,
         );
+    }
+
+    /// Push current path to navigation history
+    pub fn push_nav_history(&mut self, path: &str) {
+        // If we're not at the end of history, truncate forward history
+        if self.nav_history_pos < self.nav_history_count {
+            self.nav_history_count = self.nav_history_pos;
+        }
+
+        // If history is full, shift everything down
+        if self.nav_history_count >= MAX_NAV_HISTORY {
+            for i in 0..(MAX_NAV_HISTORY - 1) {
+                self.nav_history[i] = self.nav_history[i + 1];
+                self.nav_history_len[i] = self.nav_history_len[i + 1];
+            }
+            self.nav_history_count = MAX_NAV_HISTORY - 1;
+            self.nav_history_pos = self.nav_history_count;
+        }
+
+        // Add new entry
+        let len = path.len().min(MAX_NAV_PATH - 1);
+        self.nav_history[self.nav_history_count][..len].copy_from_slice(&path.as_bytes()[..len]);
+        self.nav_history_len[self.nav_history_count] = len;
+        self.nav_history_count += 1;
+        self.nav_history_pos = self.nav_history_count;
+    }
+
+    /// Check if we can go back
+    pub fn can_go_back(&self) -> bool {
+        self.nav_history_pos > 1
+    }
+
+    /// Check if we can go forward
+    pub fn can_go_forward(&self) -> bool {
+        self.nav_history_pos < self.nav_history_count
+    }
+
+    /// Go back in history, returns the path to navigate to
+    pub fn go_back(&mut self) -> Option<&str> {
+        if self.nav_history_pos > 1 {
+            self.nav_history_pos -= 1;
+            let idx = self.nav_history_pos - 1;
+            let len = self.nav_history_len[idx];
+            core::str::from_utf8(&self.nav_history[idx][..len]).ok()
+        } else {
+            None
+        }
+    }
+
+    /// Go forward in history, returns the path to navigate to
+    pub fn go_forward(&mut self) -> Option<&str> {
+        if self.nav_history_pos < self.nav_history_count {
+            let idx = self.nav_history_pos;
+            self.nav_history_pos += 1;
+            let len = self.nav_history_len[idx];
+            core::str::from_utf8(&self.nav_history[idx][..len]).ok()
+        } else {
+            None
+        }
+    }
+
+    /// Get current history entry
+    pub fn current_nav_path(&self) -> Option<&str> {
+        if self.nav_history_pos > 0 && self.nav_history_pos <= self.nav_history_count {
+            let idx = self.nav_history_pos - 1;
+            let len = self.nav_history_len[idx];
+            core::str::from_utf8(&self.nav_history[idx][..len]).ok()
+        } else {
+            None
+        }
     }
 }
 
@@ -687,6 +808,104 @@ pub fn get_window_text(hwnd: HWND, buffer: &mut [u8]) -> usize {
     } else {
         0
     }
+}
+
+/// Set window user data (e.g. folder path for explorer)
+pub fn set_window_user_data(hwnd: HWND, data: &str) -> bool {
+    with_window_mut(hwnd, |wnd| {
+        wnd.set_user_data(data);
+    }).is_some()
+}
+
+/// Get window user data, copying to provided buffer
+pub fn get_window_user_data(hwnd: HWND, buffer: &mut [u8]) -> usize {
+    if let Some(wnd) = get_window(hwnd) {
+        let len = wnd.user_data_len.min(buffer.len());
+        buffer[..len].copy_from_slice(&wnd.user_data[..len]);
+        len
+    } else {
+        0
+    }
+}
+
+/// Navigate explorer window to new folder (updates title and user data)
+pub fn navigate_explorer_window(hwnd: HWND, folder_path: &str, title: &str) -> bool {
+    with_window_mut(hwnd, |wnd| {
+        wnd.set_title(title);
+        wnd.set_user_data(folder_path);
+        wnd.push_nav_history(folder_path);
+        wnd.needs_paint = true;
+    }).is_some()
+}
+
+/// Navigate back in explorer window history
+pub fn navigate_back(hwnd: HWND) -> bool {
+    let path = with_window_mut(hwnd, |wnd| {
+        wnd.go_back().map(|s| {
+            let mut buf = [0u8; 128];
+            let len = s.len().min(127);
+            buf[..len].copy_from_slice(&s.as_bytes()[..len]);
+            (buf, len)
+        })
+    }).flatten();
+
+    if let Some((path_buf, path_len)) = path {
+        let path_str = core::str::from_utf8(&path_buf[..path_len]).unwrap_or("");
+        // Extract title from path (last component)
+        let title = path_str.rsplit(|c| c == '/' || c == '\\')
+            .next()
+            .unwrap_or(path_str);
+        let title = if title.is_empty() { path_str } else { title };
+
+        with_window_mut(hwnd, |wnd| {
+            wnd.set_title(title);
+            wnd.set_user_data(path_str);
+            wnd.needs_paint = true;
+        });
+        true
+    } else {
+        false
+    }
+}
+
+/// Navigate forward in explorer window history
+pub fn navigate_forward(hwnd: HWND) -> bool {
+    let path = with_window_mut(hwnd, |wnd| {
+        wnd.go_forward().map(|s| {
+            let mut buf = [0u8; 128];
+            let len = s.len().min(127);
+            buf[..len].copy_from_slice(&s.as_bytes()[..len]);
+            (buf, len)
+        })
+    }).flatten();
+
+    if let Some((path_buf, path_len)) = path {
+        let path_str = core::str::from_utf8(&path_buf[..path_len]).unwrap_or("");
+        // Extract title from path (last component)
+        let title = path_str.rsplit(|c| c == '/' || c == '\\')
+            .next()
+            .unwrap_or(path_str);
+        let title = if title.is_empty() { path_str } else { title };
+
+        with_window_mut(hwnd, |wnd| {
+            wnd.set_title(title);
+            wnd.set_user_data(path_str);
+            wnd.needs_paint = true;
+        });
+        true
+    } else {
+        false
+    }
+}
+
+/// Check if window can go back
+pub fn can_go_back(hwnd: HWND) -> bool {
+    get_window(hwnd).map(|w| w.can_go_back()).unwrap_or(false)
+}
+
+/// Check if window can go forward
+pub fn can_go_forward(hwnd: HWND) -> bool {
+    get_window(hwnd).map(|w| w.can_go_forward()).unwrap_or(false)
 }
 
 /// Check if window is visible

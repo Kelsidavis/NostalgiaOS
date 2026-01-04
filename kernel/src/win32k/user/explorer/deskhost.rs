@@ -318,22 +318,22 @@ pub fn handle_icon_double_click(icon_idx: usize) {
 
         match icon_type {
             IconType::MyComputer => {
-                create_explorer_window("My Computer", "C:\\ D:\\ E:\\");
+                create_explorer_window("My Computer", "MyComputer");
             }
             IconType::RecycleBin => {
-                create_explorer_window("Recycle Bin", "Empty");
+                create_explorer_window("Recycle Bin", "RecycleBin");
             }
             IconType::MyDocuments => {
-                create_explorer_window("My Documents", "Your documents");
+                create_explorer_window("My Documents", "MyDocuments");
             }
             IconType::NetworkPlaces => {
-                create_explorer_window("Network Places", "Network resources");
+                create_explorer_window("Network Places", "NetworkPlaces");
             }
         }
     }
 }
 
-fn create_explorer_window(title: &str, _content: &str) {
+fn create_explorer_window(title: &str, folder_path: &str) {
     let hwnd = window::create_window(
         "CabinetWClass",
         title,
@@ -345,7 +345,13 @@ fn create_explorer_window(title: &str, _content: &str) {
     );
 
     if hwnd.is_valid() {
-        crate::serial_println!("[DESKTOP] Created window: {} hwnd={:#x}", title, hwnd.raw());
+        crate::serial_println!("[DESKTOP] Created window: {} path={} hwnd={:#x}", title, folder_path, hwnd.raw());
+
+        // Store folder path in window user data and push to history
+        window::set_window_user_data(hwnd, folder_path);
+        window::with_window_mut(hwnd, |w| {
+            w.push_nav_history(folder_path);
+        });
 
         // Add to taskbar
         super::taskband::add_task(hwnd);
@@ -651,13 +657,6 @@ fn paint_desktop_icons(hdc: HDC) {
 }
 
 fn draw_icon(surf: &super::super::super::gdi::surface::Surface, x: i32, y: i32, icon_type: IconType, selected: bool) {
-    // For MyDocuments, draw a simple folder icon programmatically
-    // (the pre-generated icon data seems corrupted)
-    if icon_type == IconType::MyDocuments {
-        draw_folder_icon_simple(surf, x, y, selected);
-        return;
-    }
-
     use super::super::desktop_icons::*;
 
     let (width, height, data) = match icon_type {
@@ -709,78 +708,6 @@ fn draw_icon(surf: &super::super::super::gdi::surface::Surface, x: i32, y: i32, 
 
             surf.set_pixel(px, py, ColorRef::rgb(r, g, b));
         }
-    }
-}
-
-/// Draw a simple folder icon for My Documents (32x32)
-fn draw_folder_icon_simple(surf: &super::super::super::gdi::surface::Surface, x: i32, y: i32, selected: bool) {
-    // Folder colors
-    let folder_light = if selected {
-        ColorRef::rgb(152, 181, 226)  // Blended with highlight
-    } else {
-        ColorRef::rgb(255, 220, 100)  // Bright yellow
-    };
-    let folder_dark = if selected {
-        ColorRef::rgb(124, 153, 198)
-    } else {
-        ColorRef::rgb(200, 170, 60)   // Darker yellow/gold
-    };
-    let folder_tab = if selected {
-        ColorRef::rgb(140, 168, 213)
-    } else {
-        ColorRef::rgb(230, 190, 80)   // Tab color
-    };
-    let outline = ColorRef::rgb(100, 80, 40);  // Dark brown outline
-
-    // Draw folder tab (top part, offset to left)
-    for dy in 2..6 {
-        for dx in 2..14 {
-            surf.set_pixel(x + dx, y + dy, folder_tab);
-        }
-    }
-    // Tab outline
-    surf.hline(x + 2, x + 14, y + 2, outline);
-    surf.vline(x + 2, y + 2, y + 6, outline);
-
-    // Draw folder body
-    for dy in 6..28 {
-        for dx in 0..30 {
-            surf.set_pixel(x + dx, y + dy, folder_light);
-        }
-    }
-
-    // Draw folder body outline (3D effect)
-    surf.hline(x, x + 30, y + 6, outline);           // Top
-    surf.hline(x, x + 30, y + 27, outline);          // Bottom
-    surf.vline(x, y + 6, y + 28, outline);           // Left
-    surf.vline(x + 29, y + 6, y + 28, outline);      // Right
-
-    // Draw inner shadow for depth
-    surf.hline(x + 1, x + 29, y + 7, folder_dark);
-    surf.vline(x + 1, y + 7, y + 27, folder_dark);
-
-    // Draw a document/paper in the folder (white with lines)
-    let paper_x = x + 8;
-    let paper_y = y + 10;
-    let paper_color = ColorRef::WHITE;
-    let line_color = ColorRef::rgb(180, 180, 180);
-
-    // Paper background
-    for dy in 0..14 {
-        for dx in 0..14 {
-            surf.set_pixel(paper_x + dx, paper_y + dy, paper_color);
-        }
-    }
-
-    // Paper outline
-    surf.hline(paper_x, paper_x + 14, paper_y, ColorRef::rgb(100, 100, 100));
-    surf.hline(paper_x, paper_x + 14, paper_y + 13, ColorRef::rgb(100, 100, 100));
-    surf.vline(paper_x, paper_y, paper_y + 14, ColorRef::rgb(100, 100, 100));
-    surf.vline(paper_x + 13, paper_y, paper_y + 14, ColorRef::rgb(100, 100, 100));
-
-    // Text lines on paper
-    for dy in [3, 6, 9].iter() {
-        surf.hline(paper_x + 2, paper_x + 11, paper_y + dy, line_color);
     }
 }
 

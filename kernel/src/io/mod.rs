@@ -39,6 +39,8 @@ pub mod pnp;
 pub mod csq;
 pub mod volmgr;
 pub mod mup;
+pub mod fat32;
+pub mod vfs;
 
 // Re-export main structures and types
 pub use irp::{
@@ -294,6 +296,52 @@ pub use volmgr::{
     DEFAULT_STRIPE_SIZE,
 };
 
+pub use fat32::{
+    Fat32Volume,
+    Fat32Stats,
+    Fat32VolumeInfo,
+    DirEntryInfo,
+    FileHandle,
+    mount as fat32_mount,
+    unmount as fat32_unmount,
+    read_directory as fat32_read_directory,
+    read_root_directory as fat32_read_root_directory,
+    resolve_path as fat32_resolve_path,
+    open_file as fat32_open_file,
+    close_file as fat32_close_file,
+    read_file as fat32_read_file,
+    seek_file as fat32_seek_file,
+    create_directory as fat32_create_directory,
+    create_file as fat32_create_file,
+    get_stats as fat32_get_stats,
+    get_volume_info as fat32_get_volume_info,
+    get_mounted_volume as fat32_get_mounted_volume,
+    auto_mount as fat32_auto_mount,
+    MAX_FAT_VOLUMES,
+    MAX_OPEN_FILES,
+};
+
+pub use vfs::{
+    DriveType,
+    DriveInfo,
+    VfsEntry,
+    VfsIconType,
+    SpecialFolder,
+    drive_index,
+    drive_letter,
+    mount_fat32 as vfs_mount_fat32,
+    unmount as vfs_unmount,
+    get_drive as vfs_get_drive,
+    list_drives as vfs_list_drives,
+    read_directory as vfs_read_directory,
+    read_special_folder as vfs_read_special_folder,
+    parse_path as vfs_parse_path,
+    drive_count as vfs_drive_count,
+    create_directory as vfs_create_directory,
+    create_file as vfs_create_file,
+    MAX_DRIVES,
+};
+
 /// Initialize the I/O Manager
 ///
 /// This initializes all I/O subsystems in the correct order:
@@ -356,6 +404,15 @@ pub fn init_storage() {
 
     // Initialize volume manager (dynamic disks, RAID)
     volmgr::init();
+
+    // Initialize FAT32 file system driver
+    fat32::init();
+
+    // Auto-mount FAT32 volumes
+    fat32::auto_mount();
+
+    // Initialize VFS and assign drive letters
+    vfs::init();
 
     crate::serial_println!("[IO] Storage subsystem initialized");
 }

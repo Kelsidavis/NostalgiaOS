@@ -404,6 +404,13 @@ impl ColorRef {
     pub const BUTTON_SHADOW: ColorRef = ColorRef::rgb(128, 128, 128);
     pub const BUTTON_HIGHLIGHT: ColorRef = ColorRef::rgb(255, 255, 255);
     pub const DESKTOP: ColorRef = ColorRef::rgb(58, 110, 165);         // Classic desktop blue
+
+    // Menu colors
+    pub const MENU: ColorRef = ColorRef::rgb(255, 255, 255);           // White menu background
+    pub const MENU_TEXT: ColorRef = ColorRef::rgb(0, 0, 0);            // Black menu text
+    pub const HIGHLIGHT: ColorRef = ColorRef::rgb(10, 36, 106);        // Navy blue highlight
+    pub const HIGHLIGHT_TEXT: ColorRef = ColorRef::rgb(255, 255, 255); // White text on highlight
+    pub const GRAY_TEXT: ColorRef = ColorRef::rgb(128, 128, 128);      // Disabled text
 }
 
 // ============================================================================

@@ -213,6 +213,8 @@ pub mod explorer;
 pub mod desktop_icons;
 pub mod windows_logo;
 pub mod winlogon;
+pub mod context_menu;
+pub mod shell;
 
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use crate::ke::spinlock::SpinLock;
