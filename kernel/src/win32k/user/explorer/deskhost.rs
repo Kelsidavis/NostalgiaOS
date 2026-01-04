@@ -574,12 +574,21 @@ pub fn paint_desktop() {
     }
 }
 
+/// Paint only the desktop icons (used by repaint_all)
+pub fn paint_icons_only() {
+    if let Ok(hdc) = dc::create_display_dc() {
+        paint_desktop_icons(hdc);
+        dc::delete_dc(hdc);
+    }
+}
+
 fn paint_desktop_background(hdc: HDC) {
     let (width, height) = super::super::super::gdi::surface::get_primary_dimensions();
-    let desktop_rect = Rect::new(0, 0, width as i32, height as i32 - TASKBAR_HEIGHT);
+    let desktop_rect = Rect::new(0, 0, width as i32, height as i32 - super::tray::TASKBAR_HEIGHT);
 
-    // Classic Windows teal background
-    let bg_brush = brush::create_solid_brush(ColorRef::rgb(0, 128, 128));
+    // Use system desktop color
+    let color = super::super::desktop::get_desktop_color();
+    let bg_brush = brush::create_solid_brush(color);
     super::super::super::gdi::fill_rect(hdc, &desktop_rect, bg_brush);
 }
 
