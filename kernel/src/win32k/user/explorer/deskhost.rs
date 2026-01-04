@@ -338,7 +338,26 @@ fn create_explorer_window(title: &str, _content: &str) {
         super::super::super::HWND::NULL,
         0, // menu
     );
-    window::show_window(hwnd, super::super::ShowCommand::Show);
+
+    if hwnd.is_valid() {
+        crate::serial_println!("[DESKTOP] Created window: {} hwnd={:#x}", title, hwnd.raw());
+
+        // Add to taskbar
+        super::taskband::add_task(hwnd);
+
+        // Make it the active window
+        window::set_foreground_window(hwnd);
+        super::super::input::set_active_window(hwnd);
+
+        // Show and paint
+        window::show_window(hwnd, super::super::ShowCommand::Show);
+
+        // Repaint everything
+        super::super::paint::repaint_all();
+        super::paint_taskbar();
+    } else {
+        crate::serial_println!("[DESKTOP] Failed to create window: {}", title);
+    }
 }
 
 // ============================================================================
