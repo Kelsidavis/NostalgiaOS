@@ -418,11 +418,11 @@ fn handle_taskbar_click(x: i32, y: i32) {
     }
     drop(tray);
 
-    // Check clock area
+    // Check clock area (use actual CLOCK_WIDTH)
     let (width, _) = super::super::super::gdi::surface::get_primary_dimensions();
-    let clock_x_start = width as i32 - 60;
+    let clock_x_start = width as i32 - 75 - 2; // CLOCK_WIDTH + margin
     if x >= clock_x_start {
-        traynot::show_date_tooltip();
+        traynot::toggle_date_tooltip();
         return;
     }
 

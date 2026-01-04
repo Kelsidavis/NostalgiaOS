@@ -202,9 +202,29 @@ fn get_date_string() -> ([u8; 32], usize) {
 // Date Tooltip
 // ============================================================================
 
+/// Toggle the date tooltip (when clicking on clock)
+pub fn toggle_date_tooltip() {
+    let was_visible = DATE_TOOLTIP_VISIBLE.swap(true, Ordering::SeqCst);
+
+    if was_visible {
+        // Hide it
+        DATE_TOOLTIP_VISIBLE.store(false, Ordering::SeqCst);
+        // Invalidate cursor background so it doesn't restore tooltip pixels
+        super::super::cursor::invalidate_cursor_background();
+        // Repaint to clear tooltip
+        super::paint_desktop();
+        super::paint_taskbar();
+        // Redraw cursor with fresh background
+        super::super::cursor::draw_cursor();
+        return;
+    }
+
+    // Show the tooltip
+    show_date_tooltip_impl();
+}
+
 /// Show the date tooltip (when clicking on clock)
-pub fn show_date_tooltip() {
-    DATE_TOOLTIP_VISIBLE.store(true, Ordering::SeqCst);
+fn show_date_tooltip_impl() {
 
     if let Ok(hdc) = dc::create_display_dc() {
         let (width, height) = super::super::super::gdi::surface::get_primary_dimensions();
