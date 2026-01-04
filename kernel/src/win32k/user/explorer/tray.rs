@@ -720,29 +720,43 @@ fn navigate_window_to_folder(hwnd: super::super::super::HWND, folder_name: &str)
     let current_len = window::get_window_user_data(hwnd, &mut current_path_buf);
     let current_path = core::str::from_utf8(&current_path_buf[..current_len]).unwrap_or("");
 
-    // Build new path (current_path/folder_name)
+    // Build new path
     let mut new_path = [0u8; 128];
     let mut path_len = 0;
 
-    // Copy current path
-    for &b in current_path.as_bytes() {
-        if path_len < 127 {
-            new_path[path_len] = b;
+    // Check if navigating from MyComputer to a drive
+    // Drive names look like "Local Disk (D:)" or "Data (D:)" - extract drive letter
+    let drive_letter = extract_drive_letter(folder_name);
+
+    if current_path == "MyComputer" && drive_letter.is_some() {
+        // Navigating to a drive from My Computer - use proper path like "D:\"
+        let letter = drive_letter.unwrap();
+        new_path[0] = letter as u8;
+        new_path[1] = b':';
+        new_path[2] = b'\\';
+        path_len = 3;
+    } else {
+        // Normal subfolder navigation - append folder name to current path
+        // Copy current path
+        for &b in current_path.as_bytes() {
+            if path_len < 127 {
+                new_path[path_len] = b;
+                path_len += 1;
+            }
+        }
+
+        // Add separator
+        if path_len > 0 && path_len < 127 {
+            new_path[path_len] = b'/';
             path_len += 1;
         }
-    }
 
-    // Add separator
-    if path_len > 0 && path_len < 127 {
-        new_path[path_len] = b'/';
-        path_len += 1;
-    }
-
-    // Add folder name
-    for &b in folder_name.as_bytes() {
-        if path_len < 127 {
-            new_path[path_len] = b;
-            path_len += 1;
+        // Add folder name
+        for &b in folder_name.as_bytes() {
+            if path_len < 127 {
+                new_path[path_len] = b;
+                path_len += 1;
+            }
         }
     }
 
@@ -755,6 +769,25 @@ fn navigate_window_to_folder(hwnd: super::super::super::HWND, folder_name: &str)
 
     // Repaint the window
     super::super::paint::repaint_all();
+}
+
+/// Extract drive letter from display names like "Local Disk (D:)" or "Data (D:)"
+fn extract_drive_letter(name: &str) -> Option<char> {
+    // Look for pattern "(X:)" at the end of the name
+    let bytes = name.as_bytes();
+    let len = bytes.len();
+
+    // Need at least "(X:)" = 4 chars
+    if len >= 4 {
+        // Check for closing ")" and ":"
+        if bytes[len - 1] == b')' && bytes[len - 2] == b':' {
+            let letter = bytes[len - 3];
+            if bytes[len - 4] == b'(' && letter.is_ascii_alphabetic() {
+                return Some(letter.to_ascii_uppercase() as char);
+            }
+        }
+    }
+    None
 }
 
 fn open_explorer_window(folder_name: &str) {

@@ -298,6 +298,27 @@ pub fn on_mouse_move(screen_x: i32, screen_y: i32) {
     unsafe {
         if !CONTEXT_MENU.visible { return; }
         let menu_rect = get_menu_rect();
+
+        // Check if mouse is in submenu area first
+        if CONTEXT_MENU.submenu_visible {
+            let mut py = menu_rect.top + MENU_PADDING;
+            for i in 0..CONTEXT_MENU.submenu_parent_index {
+                py += if CONTEXT_MENU.items[i as usize].is_separator { SEPARATOR_HEIGHT } else { ITEM_HEIGHT };
+            }
+            let sx = menu_rect.right - 2;
+            let sy = py;
+            let items = [("Folder", menu_id::NEW_FOLDER), ("", menu_id::SEPARATOR), ("Text Document", menu_id::NEW_TEXT_FILE)];
+            let sw = 140;
+            let mut sh = MENU_PADDING * 2;
+            for (_, id) in items.iter() { sh += if *id == menu_id::SEPARATOR { SEPARATOR_HEIGHT } else { ITEM_HEIGHT }; }
+            let sr = Rect::new(sx, sy, sx + sw, sy + sh);
+
+            // If mouse is in submenu, keep it visible and don't process main menu
+            if screen_x >= sr.left && screen_x < sr.right && screen_y >= sr.top && screen_y < sr.bottom {
+                return;
+            }
+        }
+
         if screen_x >= menu_rect.left && screen_x < menu_rect.right && screen_y >= menu_rect.top && screen_y < menu_rect.bottom {
             let mut y = menu_rect.top + MENU_PADDING;
             let mut new_hi = -1i32;
@@ -324,6 +345,7 @@ pub fn on_click(screen_x: i32, screen_y: i32) -> u16 {
     unsafe {
         if !CONTEXT_MENU.visible { return menu_id::NONE; }
         let menu_rect = get_menu_rect();
+        crate::serial_println!("[MENU] on_click at ({}, {}), submenu_visible={}", screen_x, screen_y, CONTEXT_MENU.submenu_visible);
         if CONTEXT_MENU.submenu_visible {
             let mut py = menu_rect.top + MENU_PADDING;
             for i in 0..CONTEXT_MENU.submenu_parent_index {
@@ -335,11 +357,18 @@ pub fn on_click(screen_x: i32, screen_y: i32) -> u16 {
             let mut sh = MENU_PADDING * 2;
             for (_, id) in items.iter() { sh += if *id == menu_id::SEPARATOR { SEPARATOR_HEIGHT } else { ITEM_HEIGHT }; }
             let sr = Rect::new(sx, sy, sx + sw, sy + sh);
+            crate::serial_println!("[MENU] submenu rect: ({},{}) to ({},{})", sr.left, sr.top, sr.right, sr.bottom);
             if screen_x >= sr.left && screen_x < sr.right && screen_y >= sr.top && screen_y < sr.bottom {
+                crate::serial_println!("[MENU] click is inside submenu");
                 let mut y = sr.top + MENU_PADDING;
-                for (_, id) in items.iter() {
+                for (name, id) in items.iter() {
                     let ih = if *id == menu_id::SEPARATOR { SEPARATOR_HEIGHT } else { ITEM_HEIGHT };
-                    if *id != menu_id::SEPARATOR && screen_y >= y && screen_y < y + ih { hide_context_menu(); return *id; }
+                    crate::serial_println!("[MENU] checking item '{}' id={} y={} ih={}", name, id, y, ih);
+                    if *id != menu_id::SEPARATOR && screen_y >= y && screen_y < y + ih {
+                        crate::serial_println!("[MENU] matched item id={}", id);
+                        hide_context_menu();
+                        return *id;
+                    }
                     y += ih;
                 }
             }

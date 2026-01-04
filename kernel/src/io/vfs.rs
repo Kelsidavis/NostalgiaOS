@@ -701,6 +701,89 @@ pub fn create_directory(path: &str, name: &str) -> bool {
     }
 }
 
+/// Open a file for reading
+/// Returns file handle index, or None if file doesn't exist
+pub fn open_file(path: &str) -> Option<usize> {
+    let (drive_letter, subpath) = parse_path(path);
+
+    let drive_letter = drive_letter?;
+    let drive_idx = drive_index(drive_letter)?;
+
+    let drive = unsafe { &DRIVES[drive_idx] };
+    if drive.drive_type == DriveType::None {
+        return None;
+    }
+
+    match drive.drive_type {
+        DriveType::Fat32 => {
+            fat32::open_file(drive.fat32_slot, subpath)
+        }
+        _ => None,
+    }
+}
+
+/// Read from an open file
+pub fn read_file(handle: usize, buf: &mut [u8]) -> usize {
+    fat32::read_file(handle, buf)
+}
+
+/// Close an open file
+pub fn close_file(handle: usize) {
+    fat32::close_file(handle);
+}
+
+/// Get file size from path
+pub fn get_file_size(path: &str) -> Option<u64> {
+    let (drive_letter, subpath) = parse_path(path);
+
+    let drive_letter = drive_letter?;
+    let drive_idx = drive_index(drive_letter)?;
+
+    let drive = unsafe { &DRIVES[drive_idx] };
+    if drive.drive_type == DriveType::None {
+        return None;
+    }
+
+    match drive.drive_type {
+        DriveType::Fat32 => {
+            let entry = fat32::resolve_path(drive.fat32_slot, subpath)?;
+            if entry.is_directory {
+                None
+            } else {
+                Some(entry.size)
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Check if a file exists
+pub fn file_exists(path: &str) -> bool {
+    let (drive_letter, subpath) = parse_path(path);
+
+    let drive_letter = match drive_letter {
+        Some(l) => l,
+        None => return false,
+    };
+
+    let drive_idx = match drive_index(drive_letter) {
+        Some(i) => i,
+        None => return false,
+    };
+
+    let drive = unsafe { &DRIVES[drive_idx] };
+    if drive.drive_type == DriveType::None {
+        return false;
+    }
+
+    match drive.drive_type {
+        DriveType::Fat32 => {
+            fat32::resolve_path(drive.fat32_slot, subpath).is_some()
+        }
+        _ => false,
+    }
+}
+
 /// Create a new file at the specified path
 /// Path format: "C:/folder/path" or "C:\folder\path"
 pub fn create_file(path: &str, name: &str) -> bool {

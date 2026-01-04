@@ -6,7 +6,10 @@ use crate::ke::SpinLock;
 use super::super::{HWND, Rect, ColorRef};
 use super::super::gdi::{dc, surface};
 use super::window;
-use crate::io::{vfs_read_directory, vfs_create_directory, vfs_create_file, VfsEntry};
+use crate::io::{
+    vfs_read_directory, vfs_create_directory, vfs_create_file, VfsEntry,
+    vfs_open_file, vfs_read_file, vfs_close_file, vfs_get_file_size, vfs_file_exists,
+};
 
 // ============================================================================
 // Constants
@@ -231,10 +234,13 @@ impl Shell {
             "path" => self.cmd_path(args),
             "set" => self.cmd_set(args),
             _ => {
-                self.puts("'");
-                self.puts(cmd);
-                self.puts("' is not recognized as an internal or external command,\r\n");
-                self.puts("operable program or batch file.\r\n");
+                // Try to execute as an external program
+                if !self.try_execute_program(cmd_str) {
+                    self.puts("'");
+                    self.puts(cmd);
+                    self.puts("' is not recognized as an internal or external command,\r\n");
+                    self.puts("operable program or batch file.\r\n");
+                }
             }
         }
     }
@@ -515,6 +521,220 @@ impl Shell {
             self.puts("PROMPT=$P$G\r\n");
             self.puts("SystemRoot=C:\\Windows\r\n");
         }
+    }
+
+    /// Try to execute an external program
+    fn try_execute_program(&mut self, cmd_line: &str) -> bool {
+        // Split command into program and arguments
+        let (program, _args) = match cmd_line.find(' ') {
+            Some(i) => (&cmd_line[..i], &cmd_line[i + 1..]),
+            None => (cmd_line, ""),
+        };
+
+        // Build path to search for executable
+        let mut exe_path = [0u8; MAX_PATH];
+        let mut exe_path_len;
+
+        // Search order:
+        // 1. As typed (if it has path or extension)
+        // 2. In current directory with .exe extension
+        // 3. In current directory with .com extension
+        // 4. In current directory with .bat extension
+        // 5. In PATH directories (C:\Windows, C:\Windows\System32)
+
+        let extensions = [".exe", ".com", ".bat", ""];
+        let search_dirs = [
+            "", // Current directory
+            "C:/Windows/",
+            "C:/Windows/System32/",
+        ];
+
+        let mut found_path: Option<&str> = None;
+
+        // Check if program already has full path
+        if program.contains(':') || program.contains('/') || program.contains('\\') {
+            // Absolute or relative path - check directly
+            let prog_vfs = program.replace('\\', "/");
+            if vfs_file_exists(&prog_vfs) {
+                for (i, b) in prog_vfs.bytes().enumerate() {
+                    if i < MAX_PATH {
+                        exe_path[i] = b;
+                    }
+                }
+                exe_path_len = prog_vfs.len().min(MAX_PATH);
+                found_path = Some(core::str::from_utf8(&exe_path[..exe_path_len]).unwrap_or(""));
+            } else {
+                // Try adding extensions
+                for ext in extensions.iter() {
+                    if ext.is_empty() { continue; }
+                    let mut full = prog_vfs.clone();
+                    full.push_str(ext);
+                    if vfs_file_exists(&full) {
+                        for (i, b) in full.bytes().enumerate() {
+                            if i < MAX_PATH {
+                                exe_path[i] = b;
+                            }
+                        }
+                        exe_path_len = full.len().min(MAX_PATH);
+                        found_path = Some(core::str::from_utf8(&exe_path[..exe_path_len]).unwrap_or(""));
+                        break;
+                    }
+                }
+            }
+        } else {
+            // Search in directories
+            'search: for dir in search_dirs.iter() {
+                for ext in extensions.iter() {
+                    let mut test_path = String::new();
+
+                    if dir.is_empty() {
+                        // Current directory
+                        let cwd = self.cwd_str().replace('\\', "/");
+                        test_path.push_str(&cwd);
+                        if !cwd.ends_with('/') {
+                            test_path.push('/');
+                        }
+                    } else {
+                        test_path.push_str(dir);
+                    }
+
+                    test_path.push_str(program);
+                    test_path.push_str(ext);
+
+                    if vfs_file_exists(&test_path) {
+                        for (i, b) in test_path.bytes().enumerate() {
+                            if i < MAX_PATH {
+                                exe_path[i] = b;
+                            }
+                        }
+                        exe_path_len = test_path.len().min(MAX_PATH);
+                        found_path = Some(core::str::from_utf8(&exe_path[..exe_path_len]).unwrap_or(""));
+                        break 'search;
+                    }
+                }
+            }
+        }
+
+        let exe_path_str = match found_path {
+            Some(p) => p,
+            None => return false, // Program not found
+        };
+
+        crate::serial_println!("[SHELL] Found executable: {}", exe_path_str);
+
+        // Get file size
+        let file_size = match vfs_get_file_size(exe_path_str) {
+            Some(s) => s as usize,  // u64 -> usize
+            None => {
+                self.puts("Error: Cannot read file size\r\n");
+                return true;
+            }
+        };
+
+        if file_size == 0 {
+            self.puts("Error: File is empty\r\n");
+            return true;
+        }
+
+        // Limit to reasonable size (e.g., 1MB for now)
+        if file_size > 1024 * 1024 {
+            self.puts("Error: Executable too large\r\n");
+            return true;
+        }
+
+        // Open the file
+        let handle = match vfs_open_file(exe_path_str) {
+            Some(h) => h,
+            None => {
+                self.puts("Error: Cannot open file\r\n");
+                return true;
+            }
+        };
+
+        // Allocate buffer and read file
+        // Use a static buffer (max 1MB)
+        static mut EXE_BUFFER: [u8; 1048576] = [0; 1048576];
+        let read_size = file_size.min(1048576);
+
+        let bytes_read = unsafe {
+            vfs_read_file(handle, &mut EXE_BUFFER[..read_size])
+        };
+
+        vfs_close_file(handle);
+
+        if bytes_read < 64 {
+            self.puts("Error: Failed to read executable\r\n");
+            return true;
+        }
+
+        crate::serial_println!("[SHELL] Read {} bytes from {}", bytes_read, exe_path_str);
+
+        // Parse and execute the PE file
+        unsafe {
+            let file_base = EXE_BUFFER.as_ptr();
+
+            // Parse PE headers
+            match crate::ldr::parse_pe(file_base) {
+                Ok(pe_info) => {
+                    crate::serial_println!("[SHELL] PE Info: entry_rva={:#x} image_base={:#x} size={:#x} subsystem={}",
+                        pe_info.entry_point_rva, pe_info.image_base, pe_info.size_of_image, pe_info.subsystem);
+
+                    // Check if it's a valid executable
+                    if !pe_info.is_64bit {
+                        self.puts("Error: 32-bit executables not supported\r\n");
+                        return true;
+                    }
+
+                    // Load the executable
+                    match crate::ldr::load_executable(file_base, bytes_read, program.as_bytes()) {
+                        Ok(load_result) => {
+                            let loaded_image = &load_result.image;
+                            crate::serial_println!("[SHELL] Loaded at base={:#x} entry={:#x}",
+                                loaded_image.base, loaded_image.entry_point);
+
+                            // The load_executable already creates process and thread
+                            if !load_result.process.is_null() && !load_result.thread.is_null() {
+                                crate::serial_println!("[SHELL] Process created, starting thread...");
+
+                                // Start the thread
+                                crate::ps::ps_start_user_thread(load_result.thread);
+
+                                self.puts("Started: ");
+                                self.puts(program);
+                                self.puts("\r\n");
+                            } else {
+                                self.puts("Error: Failed to create process\r\n");
+                            }
+                        }
+                        Err(e) => {
+                            self.puts("Error: Failed to load executable (");
+                            match e {
+                                crate::ldr::PeError::InvalidDosHeader => self.puts("invalid DOS header"),
+                                crate::ldr::PeError::InvalidPeSignature => self.puts("invalid PE signature"),
+                                crate::ldr::PeError::InvalidOptionalHeader => self.puts("invalid optional header"),
+                                crate::ldr::PeError::UnsupportedMachine => self.puts("unsupported machine"),
+                                crate::ldr::PeError::ImageTooLarge => self.puts("image too large"),
+                                crate::ldr::PeError::NotRelocatable => self.puts("not relocatable"),
+                                crate::ldr::PeError::OutOfMemory => self.puts("out of memory"),
+                                _ => self.puts("unknown error"),
+                            }
+                            self.puts(")\r\n");
+                        }
+                    }
+                }
+                Err(e) => {
+                    self.puts("Error: Invalid executable (");
+                    match e {
+                        crate::ldr::PeError::InvalidDosHeader => self.puts("not a valid executable"),
+                        crate::ldr::PeError::InvalidPeSignature => self.puts("invalid PE signature"),
+                        _ => self.puts("parse error"),
+                    }
+                    self.puts(")\r\n");
+                }
+            }
+        }
+
+        true
     }
 
     fn put_num(&mut self, n: u32) {

@@ -339,6 +339,11 @@ pub use vfs::{
     drive_count as vfs_drive_count,
     create_directory as vfs_create_directory,
     create_file as vfs_create_file,
+    open_file as vfs_open_file,
+    read_file as vfs_read_file,
+    close_file as vfs_close_file,
+    get_file_size as vfs_get_file_size,
+    file_exists as vfs_file_exists,
     MAX_DRIVES,
 };
 
