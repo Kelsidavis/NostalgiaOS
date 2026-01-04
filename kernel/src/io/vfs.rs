@@ -196,6 +196,28 @@ pub fn drive_letter(index: usize) -> char {
     }
 }
 
+/// Mount a RAM disk to a drive letter
+pub fn mount_ramdisk(letter: char, size_mb: u64) -> bool {
+    let idx = match drive_index(letter) {
+        Some(i) => i,
+        None => return false,
+    };
+
+    let _guard = VFS_LOCK.lock();
+
+    unsafe {
+        let drive = &mut DRIVES[idx];
+        drive.drive_type = DriveType::RamDisk;
+        drive.fat32_slot = 0;
+        drive.label = *b"RAMDISK     ";
+        drive.total_mb = size_mb;
+        drive.free_mb = size_mb;
+    }
+
+    crate::serial_println!("[VFS] Mounted RAM disk at {}:", letter);
+    true
+}
+
 /// Mount a FAT32 volume to a drive letter
 pub fn mount_fat32(letter: char, fat32_slot: usize) -> bool {
     let idx = match drive_index(letter) {
@@ -627,6 +649,7 @@ pub fn init() {
 
     // Assign drive letters starting from C:
     let mut next_letter = 'C';
+    let mut drives_mounted = 0;
 
     for i in 0..count {
         let vol = &vol_infos[i];
@@ -641,12 +664,21 @@ pub fn init() {
                 vol.label_str(),
                 next_letter
             );
+            drives_mounted += 1;
         }
 
         next_letter = ((next_letter as u8) + 1) as char;
     }
 
-    crate::serial_println!("[VFS] Virtual File System initialized");
+    // If no drives were mounted, create a RAM disk so explorer has something to show
+    if drives_mounted == 0 {
+        crate::serial_println!("[VFS] No FAT32 volumes found, creating RAM disk...");
+        if mount_ramdisk('C', 64) {
+            drives_mounted += 1;
+        }
+    }
+
+    crate::serial_println!("[VFS] Virtual File System initialized ({} drives)", drives_mounted);
 }
 
 /// Get number of mounted drives

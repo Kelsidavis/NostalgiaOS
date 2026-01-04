@@ -730,8 +730,9 @@ impl Default for DragState {
 /// Drag threshold in pixels (must move at least this far to start drag)
 pub const DRAG_THRESHOLD: i32 = 5;
 
-/// Default column widths
-pub const DEFAULT_COLUMN_WIDTHS: [i32; 4] = [200, 80, 120, 120];
+/// Default column widths (Name, Size, Type, Date Modified)
+/// Total should fit in ~300px content area (500px window - 150px tree - borders)
+pub const DEFAULT_COLUMN_WIDTHS: [i32; 4] = [120, 60, 80, 100];
 
 /// Minimum column width
 pub const MIN_COLUMN_WIDTH: i32 = 40;
