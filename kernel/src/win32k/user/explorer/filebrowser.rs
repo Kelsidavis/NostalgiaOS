@@ -4918,14 +4918,16 @@ pub fn handle_tree_click(hwnd: HWND, x: i32, y: i32) -> bool {
 
     // Get selected path and navigate
     if let Some((path_buf, path_len)) = super::foldertree::get_selected_path_after_click(hwnd) {
-        if path_len > 0 {
-            if let Ok(path) = core::str::from_utf8(&path_buf[..path_len]) {
-                with_browser(hwnd, |browser| {
-                    browser.navigate(path);
-                });
-                return true;
-            }
-        }
+        // Empty path means "My Computer" - show drives
+        let path = if path_len > 0 {
+            core::str::from_utf8(&path_buf[..path_len]).unwrap_or("")
+        } else {
+            "" // Empty path shows drives
+        };
+        with_browser(hwnd, |browser| {
+            browser.navigate(path);
+        });
+        return true;
     }
 
     true // Still consumed the click even if no navigation

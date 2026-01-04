@@ -659,7 +659,20 @@ fn handle_left_button_down(x: i32, y: i32) {
                                 }
                             }
 
-                            // Check for header click (in details view)
+                            // Check if clicking in tree pane FIRST (tree has no header)
+                            if let Some(tree_rect) = super::filebrowser::get_tree_rect(hwnd) {
+                                if x >= tree_rect.left && x < tree_rect.right &&
+                                   y >= tree_rect.top && y < tree_rect.bottom {
+                                    // Click in tree pane
+                                    if super::filebrowser::handle_tree_click(hwnd, x, y) {
+                                        super::super::paint::repaint_all();
+                                        paint_taskbar();
+                                        return;
+                                    }
+                                }
+                            }
+
+                            // Check for header click (in details view) - only for content area
                             let header_bottom = address_bar_bottom + super::filebrowser::HEADER_HEIGHT;
 
                             if y >= address_bar_bottom && y < header_bottom {
@@ -677,35 +690,22 @@ fn handle_left_button_down(x: i32, y: i32) {
                                     super::super::paint::repaint_all();
                                     return;
                                 }
-                            } else {
-                                // Check if clicking in tree pane first
-                                if let Some(tree_rect) = super::filebrowser::get_tree_rect(hwnd) {
-                                    if x >= tree_rect.left && x < tree_rect.right &&
-                                       y >= tree_rect.top && y < tree_rect.bottom {
-                                        // Click in tree pane
-                                        if super::filebrowser::handle_tree_click(hwnd, x, y) {
-                                            super::super::paint::repaint_all();
-                                            paint_taskbar();
-                                            return;
-                                        }
-                                    }
-                                }
+                            }
 
-                                // Content area single click with modifier support
-                                let ctrl = is_ctrl_down();
-                                let shift = is_shift_down();
+                            // Content area single click with modifier support
+                            let ctrl = is_ctrl_down();
+                            let shift = is_shift_down();
 
-                                // Check if clicking on an already selected item (potential drag start)
-                                if !ctrl && !shift && super::filebrowser::is_on_selected_item(hwnd, x, y) {
-                                    // Initiate potential drag operation
-                                    super::filebrowser::initiate_drag(hwnd, x, y);
-                                    // Still handle the click to update focus
-                                }
+                            // Check if clicking on an already selected item (potential drag start)
+                            if !ctrl && !shift && super::filebrowser::is_on_selected_item(hwnd, x, y) {
+                                // Initiate potential drag operation
+                                super::filebrowser::initiate_drag(hwnd, x, y);
+                                // Still handle the click to update focus
+                            }
 
-                                if super::filebrowser::handle_content_click_ex(hwnd, x, y, false, ctrl, shift) {
-                                    super::super::paint::repaint_all();
-                                    return;
-                                }
+                            if super::filebrowser::handle_content_click_ex(hwnd, x, y, false, ctrl, shift) {
+                                super::super::paint::repaint_all();
+                                return;
                             }
                         }
                     }

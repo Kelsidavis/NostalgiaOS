@@ -677,11 +677,12 @@ pub fn get_selected_path_after_click(hwnd: HWND) -> Option<([u8; MAX_PATH], usiz
     with_tree(hwnd, |tree| {
         if tree.selected_index >= 0 && (tree.selected_index as usize) < tree.node_count {
             let node = &tree.nodes[tree.selected_index as usize];
+            // Return path even if empty (empty path = show drives/My Computer)
+            let mut buf = [0u8; MAX_PATH];
             if node.path_len > 0 {
-                let mut buf = [0u8; MAX_PATH];
                 buf[..node.path_len].copy_from_slice(&node.path[..node.path_len]);
-                return Some((buf, node.path_len));
             }
+            return Some((buf, node.path_len));
         }
         None
     }).flatten()
