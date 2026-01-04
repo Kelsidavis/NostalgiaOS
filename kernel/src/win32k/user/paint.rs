@@ -197,6 +197,9 @@ pub fn draw_window_frame(hwnd: HWND) {
     // Fill client area with window background color
     draw_client_background(hdc, &wnd, &metrics);
 
+    // Draw window content based on class
+    draw_window_content(hdc, &wnd, &metrics);
+
     // Clean up
     dc::delete_dc(hdc);
 }
@@ -226,6 +229,137 @@ fn draw_client_background(hdc: HDC, wnd: &window::Window, metrics: &FrameMetrics
 
     // Fill with window background color (white for standard windows)
     surf.fill_rect(&client_rect, ColorRef::WHITE);
+}
+
+/// Draw window content based on window class
+fn draw_window_content(hdc: HDC, wnd: &window::Window, metrics: &FrameMetrics) {
+    let class_name = wnd.class_name_str();
+
+    // Only draw content for explorer-style windows
+    if class_name != "CabinetWClass" {
+        return;
+    }
+
+    let surface_handle = dc::get_dc_surface(hdc);
+    let surf = match surface::get_surface(surface_handle) {
+        Some(s) => s,
+        None => return,
+    };
+
+    let offset = dc::get_dc(hdc)
+        .map(|d| d.viewport_org)
+        .unwrap_or(Point::new(0, 0));
+
+    let border = metrics.border_width;
+    let caption = if wnd.has_caption() { metrics.caption_height } else { 0 };
+
+    // Client area coordinates
+    let client_x = offset.x + border;
+    let client_y = offset.y + border + caption;
+    let client_w = wnd.rect.width() - border * 2;
+    let client_h = wnd.rect.height() - border * 2 - caption;
+
+    // Draw toolbar area (gray bar at top of client area)
+    let toolbar_height = 26;
+    let toolbar_rect = Rect::new(
+        client_x,
+        client_y,
+        client_x + client_w,
+        client_y + toolbar_height,
+    );
+    surf.fill_rect(&toolbar_rect, ColorRef::BUTTON_FACE);
+    // Toolbar bottom edge
+    surf.hline(client_x, client_x + client_w, client_y + toolbar_height - 1, ColorRef::BUTTON_SHADOW);
+
+    // Draw address bar area
+    let addr_y = client_y + toolbar_height;
+    let addr_height = 22;
+    let addr_rect = Rect::new(
+        client_x,
+        addr_y,
+        client_x + client_w,
+        addr_y + addr_height,
+    );
+    surf.fill_rect(&addr_rect, ColorRef::BUTTON_FACE);
+
+    // Address label
+    dc::set_text_color(hdc, ColorRef::BLACK);
+    dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+    super::super::gdi::text_out(hdc, client_x + 4, addr_y + 4, "Address:");
+
+    // Address bar (white sunken box)
+    let addr_box = Rect::new(
+        client_x + 55,
+        addr_y + 2,
+        client_x + client_w - 4,
+        addr_y + addr_height - 2,
+    );
+    surf.fill_rect(&addr_box, ColorRef::WHITE);
+    // Sunken edge
+    surf.hline(addr_box.left, addr_box.right, addr_box.top, ColorRef::BUTTON_SHADOW);
+    surf.vline(addr_box.left, addr_box.top, addr_box.bottom, ColorRef::BUTTON_SHADOW);
+    surf.hline(addr_box.left, addr_box.right, addr_box.bottom - 1, ColorRef::BUTTON_HIGHLIGHT);
+    surf.vline(addr_box.right - 1, addr_box.top, addr_box.bottom, ColorRef::BUTTON_HIGHLIGHT);
+
+    // Draw window title in address bar
+    let title = wnd.title_str();
+    super::super::gdi::text_out(hdc, addr_box.left + 4, addr_y + 4, title);
+
+    // Address bar bottom edge
+    surf.hline(client_x, client_x + client_w, addr_y + addr_height - 1, ColorRef::BUTTON_SHADOW);
+
+    // Content area starts below address bar
+    let content_y = addr_y + addr_height;
+    let content_h = client_h - toolbar_height - addr_height;
+
+    if content_h > 20 {
+        // Draw some placeholder folder icons
+        let icon_size = 32;
+        let icon_spacing = 80;
+        let start_x = client_x + 20;
+        let start_y = content_y + 20;
+
+        // Draw a few folder placeholders
+        let folders = ["Documents", "Pictures", "Music", "Downloads"];
+        for (i, folder_name) in folders.iter().enumerate() {
+            let ix = start_x + (i as i32 % 4) * icon_spacing;
+            let iy = start_y + (i as i32 / 4) * (icon_size + 40);
+
+            if ix + icon_size < client_x + client_w && iy + icon_size + 16 < client_y + client_h {
+                // Draw folder icon (simple yellow folder shape)
+                draw_folder_icon(&surf, ix, iy);
+
+                // Draw folder name below icon
+                let text_x = ix - 5;
+                let text_y = iy + icon_size + 2;
+                super::super::gdi::text_out(hdc, text_x, text_y, folder_name);
+            }
+        }
+    }
+}
+
+/// Draw a simple folder icon
+fn draw_folder_icon(surf: &surface::Surface, x: i32, y: i32) {
+    // Folder colors
+    let folder_dark = ColorRef::rgb(180, 160, 80);
+    let folder_light = ColorRef::rgb(255, 220, 100);
+    let folder_tab = ColorRef::rgb(200, 180, 90);
+
+    // Draw folder tab (top part)
+    for dy in 0..4 {
+        surf.hline(x + 2, x + 14, y + dy, folder_tab);
+    }
+
+    // Draw folder body
+    for dy in 4..28 {
+        surf.hline(x, x + 30, y + dy, folder_light);
+    }
+
+    // Draw folder edges (3D effect)
+    surf.hline(x, x + 30, y + 4, folder_dark);
+    surf.vline(x, y + 4, y + 28, folder_dark);
+    surf.hline(x, x + 30, y + 27, folder_dark);
+    surf.vline(x + 29, y + 4, y + 28, folder_dark);
 }
 
 /// Draw window border
