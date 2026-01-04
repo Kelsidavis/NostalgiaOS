@@ -168,6 +168,11 @@ pub fn create_desktop(rect: Rect) {
         0, // menu
     );
 
+    // Mark as desktop window so it's not painted with white client area
+    window::with_window_mut(hwnd, |w| {
+        w.is_desktop = true;
+    });
+
     let mut host = DESKTOP_HOST.lock();
     host.hwnd = hwnd;
 
