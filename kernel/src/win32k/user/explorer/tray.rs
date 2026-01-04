@@ -882,6 +882,10 @@ fn handle_window_drag(x: i32, y: i32) {
         let width = wnd.rect.right - wnd.rect.left;
         let height = wnd.rect.bottom - wnd.rect.top;
         window::move_window(hwnd, new_x, new_y, width, height, true);
+
+        // Repaint to show window in new position
+        super::super::paint::repaint_all();
+        paint_taskbar();
     }
 }
 
@@ -935,6 +939,10 @@ fn handle_window_resize(x: i32, y: i32) {
 
     window::move_window(hwnd, new_rect.left, new_rect.top,
         new_rect.right - new_rect.left, new_rect.bottom - new_rect.top, true);
+
+    // Repaint to show window with new size
+    super::super::paint::repaint_all();
+    paint_taskbar();
 }
 
 fn end_window_drag() {
