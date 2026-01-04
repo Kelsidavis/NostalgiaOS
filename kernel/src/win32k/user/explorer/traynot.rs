@@ -22,10 +22,10 @@ use super::tray::TASKBAR_HEIGHT;
 // ============================================================================
 
 /// Clock width
-const CLOCK_WIDTH: i32 = 55;
+const CLOCK_WIDTH: i32 = 75;
 
 /// System tray icon area width
-const SYSTRAY_WIDTH: i32 = 20;
+const SYSTRAY_WIDTH: i32 = 100;
 
 /// Total notification area width
 const NOTIFY_WIDTH: i32 = CLOCK_WIDTH + SYSTRAY_WIDTH;
@@ -71,13 +71,17 @@ pub fn init(screen_width: i32) {
     let mut notify = TRAY_NOTIFY.lock();
     notify.screen_width = screen_width;
 
-    // Position clock at right edge
-    let clock_x = screen_width - CLOCK_WIDTH - 4;
-    notify.clock_rect = Rect::new(clock_x, 4, clock_x + CLOCK_WIDTH, TASKBAR_HEIGHT - 4);
+    // Position clock at right edge (matching original explorer.rs)
+    notify.clock_rect = Rect::new(
+        screen_width - CLOCK_WIDTH - 2, 2,
+        screen_width - 2, TASKBAR_HEIGHT - 2
+    );
 
     // Position systray to left of clock
-    let systray_x = clock_x - SYSTRAY_WIDTH - 2;
-    notify.systray_rect = Rect::new(systray_x, 4, systray_x + SYSTRAY_WIDTH, TASKBAR_HEIGHT - 4);
+    notify.systray_rect = Rect::new(
+        screen_width - CLOCK_WIDTH - SYSTRAY_WIDTH - 4, 2,
+        screen_width - CLOCK_WIDTH - 4, TASKBAR_HEIGHT - 2
+    );
 }
 
 /// Get the total width of the notification area
@@ -289,21 +293,48 @@ fn paint_systray(hdc: HDC, taskbar_y: i32) {
 /// Paint the clock
 fn paint_clock(hdc: HDC, taskbar_y: i32) {
     let notify = TRAY_NOTIFY.lock();
-    let mut rect = notify.clock_rect;
-    rect.top += taskbar_y;
-    rect.bottom += taskbar_y;
+    let mut clock_rect = notify.clock_rect;
+    clock_rect.top += taskbar_y;
+    clock_rect.bottom += taskbar_y;
     drop(notify);
 
-    // Draw sunken area for clock
+    // Draw sunken area for clock (also clears previous text)
     let bg_brush = brush::create_solid_brush(ColorRef::BUTTON_FACE);
-    super::super::super::gdi::fill_rect(hdc, &rect, bg_brush);
-    super::super::super::gdi::draw_edge_sunken(hdc, &rect);
+    super::super::super::gdi::fill_rect(hdc, &clock_rect, bg_brush);
+    super::super::super::gdi::draw_edge_sunken(hdc, &clock_rect);
 
-    // Draw time
-    let time_buf = get_time_string();
-    let time_str = core::str::from_utf8(&time_buf).unwrap_or("??:?? ??");
+    // Get current time from RTC
+    let datetime = crate::hal::rtc::get_datetime();
+    let hour = datetime.hour;
+    let minute = datetime.minute;
 
-    dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+    // Format time (12-hour format with AM/PM)
+    let is_pm = hour >= 12;
+    let h12 = if hour == 0 { 12 } else if hour > 12 { hour - 12 } else { hour };
+
+    // Build time string characters
+    let c0 = if h12 >= 10 { b'1' } else { b' ' };
+    let c1 = b'0' + (h12 % 10);
+    let c2 = b':';
+    let c3 = b'0' + (minute / 10);
+    let c4 = b'0' + (minute % 10);
+    let c5 = if is_pm { b'P' } else { b'A' };
+    let c6 = b'M';
+
+    // Draw each character
     dc::set_text_color(hdc, ColorRef::BLACK);
-    super::super::super::gdi::text_out(hdc, rect.left + 4, rect.top + 4, time_str);
+    dc::set_bk_mode(hdc, dc::BkMode::Transparent);
+
+    let text_x = clock_rect.left + 4;
+    let text_y = clock_rect.top + 5;
+    let char_width = 7; // Approximate character width
+
+    // Draw time characters individually
+    let chars = [c0, c1, c2, c3, c4, b' ', c5, c6];
+    for (i, &ch) in chars.iter().enumerate() {
+        let s = [ch];
+        if let Ok(text) = core::str::from_utf8(&s) {
+            super::super::super::gdi::text_out(hdc, text_x + (i as i32 * char_width), text_y, text);
+        }
+    }
 }
