@@ -585,6 +585,9 @@ pub fn destroy_window(hwnd: HWND) -> bool {
     // Remove from taskbar
     super::explorer::remove_taskbar_button(hwnd);
 
+    // Destroy file browser if attached
+    super::explorer::filebrowser::destroy_browser(hwnd);
+
     let index = hwnd.index() as usize;
     if index >= MAX_WINDOWS {
         return false;

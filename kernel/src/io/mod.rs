@@ -344,6 +344,9 @@ pub use vfs::{
     close_file as vfs_close_file,
     get_file_size as vfs_get_file_size,
     file_exists as vfs_file_exists,
+    delete_file as vfs_delete_file,
+    rename_file as vfs_rename_file,
+    copy_file as vfs_copy_file,
     MAX_DRIVES,
 };
 

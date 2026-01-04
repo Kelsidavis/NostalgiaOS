@@ -339,13 +339,26 @@ fn create_explorer_window(title: &str, folder_path: &str) {
         title,
         WindowStyle::OVERLAPPEDWINDOW | WindowStyle::VISIBLE,
         WindowStyleEx::empty(),
-        200, 100, 400, 300,
+        200, 100, 500, 400,
         super::super::super::HWND::NULL,
         0, // menu
     );
 
     if hwnd.is_valid() {
         crate::serial_println!("[DESKTOP] Created window: {} path={} hwnd={:#x}", title, folder_path, hwnd.raw());
+
+        // Create file browser for this window
+        let initial_path = match folder_path {
+            "MyComputer" => "",
+            "MyDocuments" => "C:\\Documents and Settings\\User\\My Documents",
+            "RecycleBin" => "C:\\RECYCLER",
+            "NetworkPlaces" => "",
+            _ => folder_path,
+        };
+
+        if super::filebrowser::create_browser(hwnd, initial_path).is_some() {
+            crate::serial_println!("[DESKTOP] Created file browser for hwnd={:#x}", hwnd.raw());
+        }
 
         // Store folder path in window user data and push to history
         window::set_window_user_data(hwnd, folder_path);
@@ -369,6 +382,20 @@ fn create_explorer_window(title: &str, folder_path: &str) {
     } else {
         crate::serial_println!("[DESKTOP] Failed to create window: {}", title);
     }
+}
+
+/// Create an explorer window for a specific path (public API)
+pub fn open_folder(path: &str) {
+    // Generate title from path
+    let title = if path.is_empty() {
+        "My Computer"
+    } else if let Some(pos) = path.rfind('\\') {
+        &path[pos + 1..]
+    } else {
+        path
+    };
+
+    create_explorer_window(title, path);
 }
 
 // ============================================================================

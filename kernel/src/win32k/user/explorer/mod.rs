@@ -35,6 +35,10 @@ pub mod taskband;
 pub mod traynot;
 pub mod deskhost;
 pub mod startmenu;
+pub mod process;
+pub mod filebrowser;
+pub mod foldertree;
+pub mod properties;
 
 use core::sync::atomic::{AtomicBool, Ordering};
 use crate::ke::spinlock::SpinLock;

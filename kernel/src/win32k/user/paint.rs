@@ -252,6 +252,12 @@ fn draw_window_content(hdc: HDC, wnd: &window::Window, metrics: &FrameMetrics) {
         return;
     }
 
+    // Try to use file browser if attached to this window
+    if super::explorer::filebrowser::get_browser_for_window(wnd.hwnd).is_some() {
+        super::explorer::filebrowser::paint_browser(wnd.hwnd, hdc);
+        return;
+    }
+
     let surface_handle = dc::get_dc_surface(hdc);
     let surf = match surface::get_surface(surface_handle) {
         Some(s) => s,
@@ -1326,6 +1332,9 @@ pub fn repaint_all() {
     for i in 0..window_count {
         draw_window_frame(windows[i].0);
     }
+
+    // Draw properties dialogs on top of windows
+    super::explorer::filebrowser::paint_properties();
 
     // Draw context menu on top of everything
     super::context_menu::draw_context_menu();

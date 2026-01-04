@@ -244,6 +244,57 @@ fn process_keyboard_input(scancode: u8) {
         }
         return;
     }
+
+    // Check if active window has a file browser
+    if pressed && active_hwnd.is_valid() {
+        if super::filebrowser::get_browser_for_window(active_hwnd).is_some() {
+            // Check modifiers
+            let ctrl = is_ctrl_down();
+            let shift = is_shift_down();
+
+            // Convert scancode to virtual key code
+            let vk = scancode_to_vk(code);
+
+            // Use the extended handler with modifier support
+            if super::filebrowser::handle_key_ex(active_hwnd, vk, ctrl, shift) {
+                super::super::paint::repaint_all();
+                paint_taskbar();
+            }
+
+            // Also send character input for rename mode
+            let ch = scancode_to_char(code, shift);
+            if ch != '\0' && !ctrl {
+                if super::filebrowser::handle_char(active_hwnd, ch) {
+                    super::super::paint::repaint_all();
+                }
+            }
+        }
+    }
+}
+
+/// Convert scancode to virtual key code for file browser
+fn scancode_to_vk(scancode: u8) -> u8 {
+    match scancode {
+        0x48 => 0x26, // Up arrow
+        0x50 => 0x28, // Down arrow
+        0x4B => 0x25, // Left arrow
+        0x4D => 0x27, // Right arrow
+        0x1C => 0x0D, // Enter
+        0x0E => 0x08, // Backspace
+        0x3C => 0x71, // F2
+        0x3F => 0x74, // F5
+        0x01 => 0x1B, // Escape
+        0x47 => 0x24, // Home
+        0x4F => 0x23, // End
+        0x49 => 0x21, // Page Up
+        0x51 => 0x22, // Page Down
+        0x53 => 0x2E, // Delete
+        0x1E => 0x41, // A (for Ctrl+A)
+        0x2E => 0x43, // C (for Ctrl+C)
+        0x2F => 0x56, // V (for Ctrl+V)
+        0x2D => 0x58, // X (for Ctrl+X)
+        _ => scancode,
+    }
 }
 
 /// Check if shift is currently held down
@@ -251,6 +302,12 @@ fn is_shift_down() -> bool {
     // Use virtual key codes and check bit 15 (0x8000) for key down state
     (input::get_key_state(super::super::input::vk::LSHIFT) & 0x8000u16 as i16 != 0) ||
     (input::get_key_state(super::super::input::vk::RSHIFT) & 0x8000u16 as i16 != 0)
+}
+
+/// Check if control is currently held down
+fn is_ctrl_down() -> bool {
+    (input::get_key_state(super::super::input::vk::LCONTROL) & 0x8000u16 as i16 != 0) ||
+    (input::get_key_state(super::super::input::vk::RCONTROL) & 0x8000u16 as i16 != 0)
 }
 
 /// Convert scancode to ASCII character
@@ -326,6 +383,43 @@ fn process_mouse_event(event: mouse::MouseEvent) {
         }
     }
 
+    // Handle properties dialog mouse move (for button hover effects)
+    if super::filebrowser::is_properties_visible() {
+        if event.dx != 0 || event.dy != 0 {
+            super::filebrowser::handle_properties_mouse_move(x, y);
+        }
+    }
+
+    // Check if we're dragging files
+    if super::filebrowser::is_file_dragging() {
+        if event.dx != 0 || event.dy != 0 {
+            super::filebrowser::update_file_drag(x, y);
+            // TODO: Add visual feedback for drag (outline, ghost image, etc.)
+        }
+        return;
+    }
+
+    // Check if we're resizing a column
+    if super::filebrowser::is_column_resizing() {
+        if event.dx != 0 || event.dy != 0 {
+            if super::filebrowser::update_column_resize(x) {
+                super::super::paint::repaint_all();
+            }
+        }
+        return;
+    }
+
+    // Check for potential drag initiation (mouse moved while button held on selected item)
+    if event.dx != 0 || event.dy != 0 {
+        let hwnd = window::window_from_point(Point::new(x, y));
+        if hwnd.is_valid() && super::filebrowser::get_browser_for_window(hwnd).is_some() {
+            if super::filebrowser::check_drag_start(hwnd, x, y) {
+                // Drag threshold exceeded - start actual drag
+                super::filebrowser::start_file_drag(hwnd);
+            }
+        }
+    }
+
     if icon_dragging {
         // Dragging a desktop icon
         if event.dx != 0 || event.dy != 0 {
@@ -346,11 +440,43 @@ fn process_mouse_event(event: mouse::MouseEvent) {
         if event.dx != 0 || event.dy != 0 {
             input::process_mouse_move(x, y);
             update_cursor_for_position(x, y);
+
+            // Update file browser hover state for tooltips
+            let hwnd = window::window_from_point(Point::new(x, y));
+            if hwnd.is_valid() && super::filebrowser::get_browser_for_window(hwnd).is_some() {
+                super::filebrowser::update_hover(hwnd, x, y);
+                // Trigger repaint if tooltip became visible
+                if super::filebrowser::is_tooltip_visible(hwnd) {
+                    super::super::paint::repaint_all();
+                }
+            }
         }
     }
 
     // Process button clicks
     process_mouse_buttons(event, x, y);
+
+    // Process mouse wheel
+    if event.dz != 0 {
+        process_mouse_wheel(event.dz, x, y);
+    }
+}
+
+fn process_mouse_wheel(delta: i8, x: i32, y: i32) {
+    // Find window under cursor
+    let hwnd = window::window_from_point(Point::new(x, y));
+    if !hwnd.is_valid() {
+        return;
+    }
+
+    // Check if it's a file browser window
+    if super::filebrowser::get_browser_for_window(hwnd).is_some() {
+        // Convert delta to scroll units (positive = scroll up)
+        let scroll_delta = -(delta as i32) * 3; // 3 items per wheel notch
+        if super::filebrowser::handle_mouse_wheel(hwnd, scroll_delta) {
+            super::super::paint::repaint_all();
+        }
+    }
 }
 
 fn process_mouse_buttons(event: mouse::MouseEvent, x: i32, y: i32) {
@@ -412,6 +538,15 @@ fn handle_left_button_down(x: i32, y: i32) {
         return;
     }
 
+    // Check for properties dialog clicks
+    if super::filebrowser::is_properties_visible() {
+        if super::filebrowser::handle_properties_click(x, y) {
+            super::super::paint::repaint_all();
+            paint_taskbar();
+            return;
+        }
+    }
+
     // Check for navigation button clicks on explorer windows
     let hwnd = window::window_from_point(Point::new(x, y));
     if hwnd.is_valid() {
@@ -462,9 +597,20 @@ fn handle_left_button_down(x: i32, y: i32) {
         if let Some(icon_idx) = deskhost::get_icon_at_position(x, y) {
             deskhost::handle_icon_double_click(icon_idx);
         } else {
-            // Check if double-clicked on a window content icon
+            // Check if double-clicked in a file browser window
             let hwnd = window::window_from_point(Point::new(x, y));
             if hwnd.is_valid() {
+                // Try file browser first
+                if super::filebrowser::get_browser_for_window(hwnd).is_some() {
+                    let ctrl = is_ctrl_down();
+                    let shift = is_shift_down();
+                    if super::filebrowser::handle_content_click_ex(hwnd, x, y, true, ctrl, shift) {
+                        super::super::paint::repaint_all();
+                        paint_taskbar();
+                        return;
+                    }
+                }
+                // Fallback to old content icon handling
                 if let Some(folder_name) = super::super::paint::get_content_icon_at_position(hwnd, x, y) {
                     // Navigate the existing window to the clicked folder
                     navigate_window_to_folder(hwnd, folder_name);
@@ -483,6 +629,76 @@ fn handle_left_button_down(x: i32, y: i32) {
             let hwnd = window::window_from_point(Point::new(x, y));
             if !hwnd.is_valid() || hwnd == window::get_desktop_window() {
                 deskhost::select_icon(None);
+            } else {
+                // Check if clicking in a file browser window
+                if super::filebrowser::get_browser_for_window(hwnd).is_some() {
+                    // Check toolbar area first
+                    if let Some(wnd) = window::get_window(hwnd) {
+                        let metrics = wnd.get_frame_metrics();
+                        let client_y = wnd.rect.top + metrics.border_width + metrics.caption_height;
+                        let toolbar_bottom = client_y + super::filebrowser::TOOLBAR_HEIGHT;
+
+                        if y >= client_y && y < toolbar_bottom {
+                            // Toolbar click
+                            let local_x = x - wnd.rect.left - metrics.border_width;
+                            if super::filebrowser::handle_toolbar_click(hwnd, local_x, y) {
+                                super::super::paint::repaint_all();
+                                paint_taskbar();
+                                return;
+                            }
+                        } else {
+                            // Check for header click (in details view)
+                            let address_bar_bottom = toolbar_bottom + super::filebrowser::ADDRESS_BAR_HEIGHT;
+                            let header_bottom = address_bar_bottom + super::filebrowser::HEADER_HEIGHT;
+
+                            if y >= address_bar_bottom && y < header_bottom {
+                                // Header click - check for column resize first
+                                let local_x = x - wnd.rect.left - metrics.border_width;
+
+                                // Check if clicking on a column separator for resize
+                                if let Some(col_idx) = super::filebrowser::is_on_column_separator(hwnd, local_x) {
+                                    super::filebrowser::start_column_resize(hwnd, col_idx, x);
+                                    return;
+                                }
+
+                                // Not on separator - try sort
+                                if super::filebrowser::handle_header_click(hwnd, local_x, y) {
+                                    super::super::paint::repaint_all();
+                                    return;
+                                }
+                            } else {
+                                // Check if clicking in tree pane first
+                                if let Some(tree_rect) = super::filebrowser::get_tree_rect(hwnd) {
+                                    if x >= tree_rect.left && x < tree_rect.right &&
+                                       y >= tree_rect.top && y < tree_rect.bottom {
+                                        // Click in tree pane
+                                        if super::filebrowser::handle_tree_click(hwnd, x, y) {
+                                            super::super::paint::repaint_all();
+                                            paint_taskbar();
+                                            return;
+                                        }
+                                    }
+                                }
+
+                                // Content area single click with modifier support
+                                let ctrl = is_ctrl_down();
+                                let shift = is_shift_down();
+
+                                // Check if clicking on an already selected item (potential drag start)
+                                if !ctrl && !shift && super::filebrowser::is_on_selected_item(hwnd, x, y) {
+                                    // Initiate potential drag operation
+                                    super::filebrowser::initiate_drag(hwnd, x, y);
+                                    // Still handle the click to update focus
+                                }
+
+                                if super::filebrowser::handle_content_click_ex(hwnd, x, y, false, ctrl, shift) {
+                                    super::super::paint::repaint_all();
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             try_start_window_drag(x, y);
         }
@@ -491,6 +707,23 @@ fn handle_left_button_down(x: i32, y: i32) {
 
 fn handle_left_button_up(x: i32, y: i32) {
     input::process_mouse_button(0, false, x, y);
+
+    // Check if we were doing file drag
+    if super::filebrowser::is_file_dragging() {
+        super::filebrowser::end_file_drag(x, y);
+        super::super::paint::repaint_all();
+        paint_taskbar();
+        return;
+    }
+
+    // Check if we were doing column resize
+    let was_column_resizing = super::filebrowser::is_column_resizing();
+    if was_column_resizing {
+        super::filebrowser::end_column_resize();
+        super::super::paint::repaint_all();
+        paint_taskbar();
+        return;
+    }
 
     // Check if we were dragging/resizing and need to repaint
     let was_dragging = DRAGGING_WINDOW.lock().is_valid();
@@ -527,6 +760,15 @@ fn handle_right_click(x: i32, y: i32) {
         let desktop_hwnd = deskhost::get_desktop_hwnd();
 
         if hwnd.is_valid() && hwnd != desktop_hwnd && hwnd != window::get_desktop_window() {
+            // Check if it's an explorer window with a file browser
+            if super::filebrowser::get_browser_for_window(hwnd).is_some() {
+                // Let file browser handle the right-click (for item-specific context menus)
+                if super::filebrowser::handle_right_click(hwnd, x, y) {
+                    super::super::paint::repaint_all();
+                    return;
+                }
+            }
+
             // Check if it's an explorer window (CabinetWClass)
             if let Some(wnd) = window::get_window(hwnd) {
                 if wnd.class_name_str() == "CabinetWClass" {
@@ -551,33 +793,156 @@ fn handle_right_click(x: i32, y: i32) {
 
 fn handle_context_menu_action(action: u16) {
     let folder_path = context_menu::get_menu_folder_path();
+    let menu_hwnd = context_menu::get_menu_owner();
 
     match action {
         context_menu::menu_id::REFRESH => {
-            // Refresh the window content
             crate::serial_println!("[TRAY] Refresh requested for: {}", folder_path);
+            if menu_hwnd.is_valid() {
+                super::filebrowser::refresh_browser(menu_hwnd);
+            }
             super::super::paint::repaint_all();
             paint_taskbar();
         }
         context_menu::menu_id::NEW_FOLDER => {
-            // Create a new folder
             crate::serial_println!("[TRAY] New Folder requested in: {}", folder_path);
-            create_new_folder(folder_path);
+            if menu_hwnd.is_valid() {
+                create_new_folder(folder_path, menu_hwnd);
+            } else {
+                create_new_folder(folder_path, super::super::super::HWND::NULL);
+            }
         }
         context_menu::menu_id::NEW_TEXT_FILE => {
-            // Create a new text file
             crate::serial_println!("[TRAY] New Text Document requested in: {}", folder_path);
-            create_new_text_file(folder_path);
+            if menu_hwnd.is_valid() {
+                create_new_text_file(folder_path, menu_hwnd);
+            } else {
+                create_new_text_file(folder_path, super::super::super::HWND::NULL);
+            }
         }
         context_menu::menu_id::PROPERTIES => {
-            // Show properties (not implemented yet)
             crate::serial_println!("[TRAY] Properties requested for: {}", folder_path);
+            if menu_hwnd.is_valid() {
+                super::filebrowser::show_properties(menu_hwnd);
+                super::super::paint::repaint_all();
+                paint_taskbar();
+            }
+        }
+        context_menu::menu_id::SELECT_ALL => {
+            crate::serial_println!("[TRAY] Select All requested");
+            if menu_hwnd.is_valid() {
+                super::filebrowser::select_all(menu_hwnd);
+                super::super::paint::repaint_all();
+            }
+        }
+        context_menu::menu_id::INVERT_SELECTION => {
+            crate::serial_println!("[TRAY] Invert Selection requested");
+            if menu_hwnd.is_valid() {
+                super::filebrowser::invert_selection(menu_hwnd);
+                super::super::paint::repaint_all();
+            }
+        }
+        context_menu::menu_id::SELECT_BY_TYPE => {
+            crate::serial_println!("[TRAY] Select By Type requested");
+            if menu_hwnd.is_valid() {
+                super::filebrowser::select_by_type(menu_hwnd);
+                super::super::paint::repaint_all();
+            }
+        }
+        context_menu::menu_id::TOGGLE_DETAILS_PANEL => {
+            crate::serial_println!("[TRAY] Toggle Details Panel requested");
+            if menu_hwnd.is_valid() {
+                super::filebrowser::toggle_details_panel(menu_hwnd);
+                super::super::paint::repaint_all();
+            }
+        }
+
+        // File/folder context menu actions
+        context_menu::menu_id::OPEN => {
+            crate::serial_println!("[TRAY] Open requested");
+            if menu_hwnd.is_valid() {
+                super::filebrowser::open_focused(menu_hwnd);
+                super::super::paint::repaint_all();
+                paint_taskbar();
+            }
+        }
+        context_menu::menu_id::CUT => {
+            crate::serial_println!("[TRAY] Cut requested");
+            if menu_hwnd.is_valid() {
+                super::filebrowser::cut_selection(menu_hwnd);
+            }
+        }
+        context_menu::menu_id::COPY => {
+            crate::serial_println!("[TRAY] Copy requested");
+            if menu_hwnd.is_valid() {
+                super::filebrowser::copy_selection(menu_hwnd);
+            }
+        }
+        context_menu::menu_id::DELETE => {
+            crate::serial_println!("[TRAY] Delete requested");
+            if menu_hwnd.is_valid() {
+                super::filebrowser::delete_selection(menu_hwnd);
+                super::super::paint::repaint_all();
+            }
+        }
+        context_menu::menu_id::RENAME => {
+            crate::serial_println!("[TRAY] Rename requested");
+            if menu_hwnd.is_valid() {
+                super::filebrowser::start_rename(menu_hwnd);
+                super::super::paint::repaint_all();
+            }
+        }
+
+        // View menu items
+        context_menu::menu_id::VIEW_LARGE_ICONS => {
+            if menu_hwnd.is_valid() {
+                super::filebrowser::set_view_mode(menu_hwnd, super::filebrowser::ViewMode::LargeIcons);
+                super::super::paint::repaint_all();
+            }
+        }
+        context_menu::menu_id::VIEW_LIST => {
+            if menu_hwnd.is_valid() {
+                super::filebrowser::set_view_mode(menu_hwnd, super::filebrowser::ViewMode::List);
+                super::super::paint::repaint_all();
+            }
+        }
+        context_menu::menu_id::VIEW_DETAILS => {
+            if menu_hwnd.is_valid() {
+                super::filebrowser::set_view_mode(menu_hwnd, super::filebrowser::ViewMode::Details);
+                super::super::paint::repaint_all();
+            }
+        }
+
+        // Arrange/sort menu items
+        context_menu::menu_id::ARRANGE_NAME => {
+            if menu_hwnd.is_valid() {
+                super::filebrowser::set_sort_column(menu_hwnd, super::filebrowser::SortColumn::Name);
+                super::super::paint::repaint_all();
+            }
+        }
+        context_menu::menu_id::ARRANGE_SIZE => {
+            if menu_hwnd.is_valid() {
+                super::filebrowser::set_sort_column(menu_hwnd, super::filebrowser::SortColumn::Size);
+                super::super::paint::repaint_all();
+            }
+        }
+        context_menu::menu_id::ARRANGE_TYPE => {
+            if menu_hwnd.is_valid() {
+                super::filebrowser::set_sort_column(menu_hwnd, super::filebrowser::SortColumn::Type);
+                super::super::paint::repaint_all();
+            }
+        }
+        context_menu::menu_id::ARRANGE_DATE => {
+            if menu_hwnd.is_valid() {
+                super::filebrowser::set_sort_column(menu_hwnd, super::filebrowser::SortColumn::Modified);
+                super::super::paint::repaint_all();
+            }
         }
         _ => {}
     }
 }
 
-fn create_new_folder(folder_path: &str) {
+fn create_new_folder(folder_path: &str, hwnd: super::super::super::HWND) {
     use crate::io::vfs_create_directory;
 
     // Generate a unique folder name
@@ -589,8 +954,8 @@ fn create_new_folder(folder_path: &str) {
 
     // Build folder name - "New Folder" or "New Folder (2)" etc.
     let mut name_buf = [0u8; 32];
-    let name = if count == 1 {
-        "New Folder"
+    let (name, name_len) = if count == 1 {
+        ("New Folder", 10usize)
     } else {
         // Format "NEWFOLD~N" for 8.3 compatibility
         let mut pos = 0;
@@ -601,7 +966,7 @@ fn create_new_folder(folder_path: &str) {
             }
         }
         // Add number suffix
-        let num_str = if count < 10 {
+        if count < 10 {
             name_buf[pos] = b'0' + count as u8;
             pos += 1;
         } else {
@@ -609,14 +974,44 @@ fn create_new_folder(folder_path: &str) {
             pos += 1;
             name_buf[pos] = b'0' + (count % 10) as u8;
             pos += 1;
-        };
-        core::str::from_utf8(&name_buf[..pos]).unwrap_or("NEWFOLD")
+        }
+        (core::str::from_utf8(&name_buf[..pos]).unwrap_or("NEWFOLD"), pos)
     };
 
     crate::serial_println!("[TRAY] Creating folder '{}' in: {}", name, folder_path);
 
     if vfs_create_directory(folder_path, name) {
         crate::serial_println!("[TRAY] Successfully created folder '{}'", name);
+
+        // Build full path for undo recording
+        let mut full_path = [0u8; 260];
+        let mut path_len = 0;
+        for b in folder_path.bytes() {
+            if path_len < 259 {
+                full_path[path_len] = b;
+                path_len += 1;
+            }
+        }
+        if path_len > 0 && path_len < 259 && full_path[path_len - 1] != b'/' && full_path[path_len - 1] != b'\\' {
+            full_path[path_len] = b'/';
+            path_len += 1;
+        }
+        for b in name.bytes() {
+            if path_len < 259 {
+                full_path[path_len] = b;
+                path_len += 1;
+            }
+        }
+        let full_path_str = core::str::from_utf8(&full_path[..path_len]).unwrap_or("");
+        super::filebrowser::record_operation(
+            super::filebrowser::UndoOperation::new_create(full_path_str, true)
+        );
+
+        // Refresh the browser and select the new folder for rename
+        if hwnd.is_valid() {
+            super::filebrowser::refresh_browser(hwnd);
+            super::filebrowser::select_and_rename(hwnd, name);
+        }
     } else {
         crate::serial_println!("[TRAY] Failed to create folder '{}'", name);
     }
@@ -626,7 +1021,7 @@ fn create_new_folder(folder_path: &str) {
     paint_taskbar();
 }
 
-fn create_new_text_file(folder_path: &str) {
+fn create_new_text_file(folder_path: &str, hwnd: super::super::super::HWND) {
     use crate::io::vfs_create_file;
 
     // Generate a unique file name
@@ -673,6 +1068,36 @@ fn create_new_text_file(folder_path: &str) {
 
     if vfs_create_file(folder_path, name) {
         crate::serial_println!("[TRAY] Successfully created file '{}'", name);
+
+        // Build full path for undo recording
+        let mut full_path = [0u8; 260];
+        let mut path_len = 0;
+        for b in folder_path.bytes() {
+            if path_len < 259 {
+                full_path[path_len] = b;
+                path_len += 1;
+            }
+        }
+        if path_len > 0 && path_len < 259 && full_path[path_len - 1] != b'/' && full_path[path_len - 1] != b'\\' {
+            full_path[path_len] = b'/';
+            path_len += 1;
+        }
+        for b in name.bytes() {
+            if path_len < 259 {
+                full_path[path_len] = b;
+                path_len += 1;
+            }
+        }
+        let full_path_str = core::str::from_utf8(&full_path[..path_len]).unwrap_or("");
+        super::filebrowser::record_operation(
+            super::filebrowser::UndoOperation::new_create(full_path_str, false)
+        );
+
+        // Refresh the browser and select the new file for rename
+        if hwnd.is_valid() {
+            super::filebrowser::refresh_browser(hwnd);
+            super::filebrowser::select_and_rename(hwnd, name);
+        }
     } else {
         crate::serial_println!("[TRAY] Failed to create file '{}'", name);
     }

@@ -624,12 +624,15 @@ fn shell_thread_entry() {
         // Disable text framebuffer output - graphical desktop takes over
         framebuffer::disable();
 
-        // Paint desktop and taskbar (explorer handles everything)
-        win32k::user::explorer::paint_desktop();
-        win32k::user::explorer::paint_taskbar();
+        // Start explorer as a managed process
+        if win32k::user::explorer::process::start() {
+            // Paint desktop and taskbar
+            win32k::user::explorer::paint_desktop();
+            win32k::user::explorer::paint_taskbar();
 
-        // Run the Explorer graphical shell message pump
-        win32k::user::explorer::run_message_pump();
+            // Run the Explorer process (handles restarts automatically)
+            win32k::user::explorer::process::run();
+        }
 
         // Re-enable text output on exit
         framebuffer::enable();

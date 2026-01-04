@@ -1496,6 +1496,9 @@ impl Shell {
         // TASKKILL - terminate process
         } else if eq_ignore_case(cmd, "taskkill") {
             commands::cmd_taskkill(&args[1..argc]);
+        // EXPLORER - manage Windows Explorer shell
+        } else if eq_ignore_case(cmd, "explorer") || eq_ignore_case(cmd, "explorer.exe") {
+            commands::cmd_explorer(&args[1..argc]);
         // GPRESULT - group policy result
         } else if eq_ignore_case(cmd, "gpresult") {
             commands::cmd_gpresult(&args[1..argc]);

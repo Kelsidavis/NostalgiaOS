@@ -17,8 +17,37 @@ pub mod menu_id {
     pub const REFRESH: u16 = 3;
     pub const PASTE: u16 = 4;
     pub const PROPERTIES: u16 = 5;
+
+    // File/folder context menu items
+    pub const OPEN: u16 = 10;
+    pub const OPEN_WITH: u16 = 11;
+    pub const CUT: u16 = 12;
+    pub const COPY: u16 = 13;
+    pub const DELETE: u16 = 14;
+    pub const RENAME: u16 = 15;
+    pub const CREATE_SHORTCUT: u16 = 16;
+
+    // View submenu
+    pub const VIEW_LARGE_ICONS: u16 = 20;
+    pub const VIEW_SMALL_ICONS: u16 = 21;
+    pub const VIEW_LIST: u16 = 22;
+    pub const VIEW_DETAILS: u16 = 23;
+
+    // Arrange by
+    pub const ARRANGE_NAME: u16 = 30;
+    pub const ARRANGE_SIZE: u16 = 31;
+    pub const ARRANGE_TYPE: u16 = 32;
+    pub const ARRANGE_DATE: u16 = 33;
+
+    pub const SELECT_ALL: u16 = 40;
+    pub const INVERT_SELECTION: u16 = 41;
+    pub const SELECT_BY_TYPE: u16 = 42;
+    pub const TOGGLE_DETAILS_PANEL: u16 = 43;
+
     pub const SEPARATOR: u16 = 0xFFFE;
     pub const SUBMENU_NEW: u16 = 0xFFFF;
+    pub const SUBMENU_VIEW: u16 = 0xFFFD;
+    pub const SUBMENU_ARRANGE: u16 = 0xFFFC;
 }
 
 /// Menu item
@@ -127,15 +156,68 @@ pub fn show_explorer_context_menu(hwnd: HWND, x: i32, y: i32, folder_path: &str)
         CONTEXT_MENU.folder_path_len = path_len;
 
         CONTEXT_MENU.item_count = 0;
+
+        // View submenu
+        let mut view_item = MenuItem::new(menu_id::SUBMENU_VIEW, "View");
+        view_item.is_submenu = true;
+        add_menu_item(view_item);
+
+        // Arrange submenu
+        let mut arrange_item = MenuItem::new(menu_id::SUBMENU_ARRANGE, "Arrange Icons By");
+        arrange_item.is_submenu = true;
+        add_menu_item(arrange_item);
+
+        add_menu_item(MenuItem::separator());
         add_menu_item(MenuItem::new(menu_id::REFRESH, "Refresh"));
         add_menu_item(MenuItem::separator());
+
+        // New submenu
         let mut new_item = MenuItem::new(menu_id::SUBMENU_NEW, "New");
         new_item.is_submenu = true;
         add_menu_item(new_item);
+
         add_menu_item(MenuItem::separator());
         let mut paste_item = MenuItem::new(menu_id::PASTE, "Paste");
         paste_item.disabled = true;
         add_menu_item(paste_item);
+        add_menu_item(MenuItem::separator());
+        add_menu_item(MenuItem::new(menu_id::SELECT_ALL, "Select All"));
+        add_menu_item(MenuItem::new(menu_id::TOGGLE_DETAILS_PANEL, "Details Panel"));
+        add_menu_item(MenuItem::separator());
+        add_menu_item(MenuItem::new(menu_id::PROPERTIES, "Properties"));
+    }
+    draw_context_menu();
+}
+
+/// Show context menu for selected file(s) or folder(s)
+pub fn show_file_context_menu(hwnd: HWND, x: i32, y: i32, is_directory: bool, has_clipboard: bool) {
+    unsafe {
+        CONTEXT_MENU.visible = true;
+        CONTEXT_MENU.x = x;
+        CONTEXT_MENU.y = y;
+        CONTEXT_MENU.owner_hwnd = hwnd;
+        CONTEXT_MENU.highlight_index = -1;
+        CONTEXT_MENU.submenu_visible = false;
+        CONTEXT_MENU.submenu_parent_index = -1;
+        CONTEXT_MENU.item_count = 0;
+
+        if is_directory {
+            add_menu_item(MenuItem::new(menu_id::OPEN, "Open"));
+        } else {
+            add_menu_item(MenuItem::new(menu_id::OPEN, "Open"));
+            let mut open_with = MenuItem::new(menu_id::OPEN_WITH, "Open With...");
+            open_with.is_submenu = true;
+            add_menu_item(open_with);
+        }
+
+        add_menu_item(MenuItem::separator());
+        add_menu_item(MenuItem::new(menu_id::CUT, "Cut"));
+        add_menu_item(MenuItem::new(menu_id::COPY, "Copy"));
+        add_menu_item(MenuItem::separator());
+        add_menu_item(MenuItem::new(menu_id::DELETE, "Delete"));
+        add_menu_item(MenuItem::new(menu_id::RENAME, "Rename"));
+        add_menu_item(MenuItem::separator());
+        add_menu_item(MenuItem::new(menu_id::SELECT_BY_TYPE, "Select Same Type"));
         add_menu_item(MenuItem::separator());
         add_menu_item(MenuItem::new(menu_id::PROPERTIES, "Properties"));
     }
@@ -390,4 +472,10 @@ pub fn on_click(screen_x: i32, screen_y: i32) -> u16 {
 }
 
 pub fn get_menu_folder_path() -> &'static str { unsafe { CONTEXT_MENU.folder_path_str() } }
+
+/// Get the window handle that owns the current context menu
+pub fn get_menu_owner() -> HWND {
+    unsafe { CONTEXT_MENU.owner_hwnd }
+}
+
 pub fn init() { crate::serial_println!("[USER/Menu] Context menu system initialized"); }

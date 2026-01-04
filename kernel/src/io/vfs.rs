@@ -826,3 +826,107 @@ pub fn create_file(path: &str, name: &str) -> bool {
         }
     }
 }
+
+/// Delete a file at the specified path
+/// Path format: "C:/folder/file.txt" or "C:\folder\file.txt"
+pub fn delete_file(path: &str) -> bool {
+    use crate::fs;
+
+    // Convert forward slashes to backslashes for fs module
+    let mut path_buf = [0u8; 256];
+    let mut len = 0;
+    for b in path.bytes() {
+        if len < 255 {
+            path_buf[len] = if b == b'/' { b'\\' } else { b };
+            len += 1;
+        }
+    }
+    let converted = core::str::from_utf8(&path_buf[..len]).unwrap_or(path);
+
+    match fs::delete(converted) {
+        Ok(()) => {
+            crate::serial_println!("[VFS] Deleted: {}", path);
+            true
+        }
+        Err(e) => {
+            crate::serial_println!("[VFS] delete_file failed: {:?}", e);
+            false
+        }
+    }
+}
+
+/// Rename a file or directory
+/// old_path and new_path format: "C:/folder/old.txt" or "C:\folder\new.txt"
+pub fn rename_file(old_path: &str, new_path: &str) -> bool {
+    use crate::fs;
+
+    // Convert forward slashes to backslashes for fs module
+    let mut old_buf = [0u8; 256];
+    let mut old_len = 0;
+    for b in old_path.bytes() {
+        if old_len < 255 {
+            old_buf[old_len] = if b == b'/' { b'\\' } else { b };
+            old_len += 1;
+        }
+    }
+    let old_converted = core::str::from_utf8(&old_buf[..old_len]).unwrap_or(old_path);
+
+    let mut new_buf = [0u8; 256];
+    let mut new_len = 0;
+    for b in new_path.bytes() {
+        if new_len < 255 {
+            new_buf[new_len] = if b == b'/' { b'\\' } else { b };
+            new_len += 1;
+        }
+    }
+    let new_converted = core::str::from_utf8(&new_buf[..new_len]).unwrap_or(new_path);
+
+    match fs::rename(old_converted, new_converted) {
+        Ok(()) => {
+            crate::serial_println!("[VFS] Renamed: {} -> {}", old_path, new_path);
+            true
+        }
+        Err(e) => {
+            crate::serial_println!("[VFS] rename_file failed: {:?}", e);
+            false
+        }
+    }
+}
+
+/// Copy a file from source to destination
+/// src_path and dst_path format: "C:/folder/src.txt", "C:/folder/dst.txt"
+pub fn copy_file(src_path: &str, dst_path: &str) -> bool {
+    use crate::fs;
+
+    // Convert forward slashes to backslashes for fs module
+    let mut src_buf = [0u8; 256];
+    let mut src_len = 0;
+    for b in src_path.bytes() {
+        if src_len < 255 {
+            src_buf[src_len] = if b == b'/' { b'\\' } else { b };
+            src_len += 1;
+        }
+    }
+    let src_converted = core::str::from_utf8(&src_buf[..src_len]).unwrap_or(src_path);
+
+    let mut dst_buf = [0u8; 256];
+    let mut dst_len = 0;
+    for b in dst_path.bytes() {
+        if dst_len < 255 {
+            dst_buf[dst_len] = if b == b'/' { b'\\' } else { b };
+            dst_len += 1;
+        }
+    }
+    let dst_converted = core::str::from_utf8(&dst_buf[..dst_len]).unwrap_or(dst_path);
+
+    match fs::copy(src_converted, dst_converted) {
+        Ok(bytes) => {
+            crate::serial_println!("[VFS] Copied {} bytes: {} -> {}", bytes, src_path, dst_path);
+            true
+        }
+        Err(e) => {
+            crate::serial_println!("[VFS] copy_file failed: {:?}", e);
+            false
+        }
+    }
+}

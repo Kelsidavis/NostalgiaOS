@@ -19294,6 +19294,30 @@ pub fn cmd_tasklist(args: &[&str]) {
                 entry = (*entry).flink;
                 count += 1;
             }
+
+            // Also show explorer if running (managed process)
+            let explorer_info = crate::win32k::user::explorer::process::get_process_info();
+            if crate::win32k::user::explorer::process::is_running() {
+                let working_set_kb: u64 = 4096; // Estimated 4MB working set
+                let virtual_size_kb: u64 = 16384; // Estimated 16MB virtual
+                total_working_set += working_set_kb * 1024;
+                total_virtual += virtual_size_kb * 1024;
+
+                if show_memory {
+                    outln!("{:<25} {:>8} {:>9} K {:>9} K {:>8} K {:>10} K",
+                        explorer_info.image_name, explorer_info.pid, working_set_kb, virtual_size_kb, 256, 64);
+                } else {
+                    outln!("{:<25} {:>8} {:<16} {:>8} K",
+                        explorer_info.image_name, explorer_info.pid, "Console", working_set_kb);
+                }
+
+                if show_verbose {
+                    outln!("  Threads: 1  Handles: 32  Parent: 0  Priority: Normal");
+                    outln!("  Status: {:?}  Restarts: {}", explorer_info.state, explorer_info.restart_count);
+                }
+                count += 1;
+            }
+
             outln!("");
             outln!("Total: {} processes  Working Set: {} KB  Virtual: {} KB",
                 count, total_working_set / 1024, total_virtual / 1024);
@@ -23639,6 +23663,21 @@ pub fn cmd_taskkill(args: &[&str]) {
     }
 
     if let Some(p) = pid {
+        // Check if it's explorer (PID 1)
+        if crate::win32k::user::explorer::process::is_explorer_pid(p) {
+            if crate::win32k::user::explorer::process::handle_taskkill(p, force) {
+                outln!("SUCCESS: Sent termination signal to explorer.exe (PID: {})", p);
+                if force {
+                    outln!("  (Force flag set)");
+                }
+                outln!("");
+                outln!("Note: Explorer will restart automatically. Use 'explorer /restart' to restart manually.");
+            } else {
+                outln!("ERROR: Failed to terminate explorer.exe");
+            }
+            return;
+        }
+
         // Try to terminate by PID
         unsafe {
             let proc_ptr = crate::ps::ps_lookup_process_by_id(p);
@@ -23656,6 +23695,22 @@ pub fn cmd_taskkill(args: &[&str]) {
             }
         }
     } else if let Some(name) = image_name {
+        // Check if it's explorer.exe
+        if eq_ignore_case(name, "explorer.exe") || eq_ignore_case(name, "explorer") {
+            let explorer_pid = crate::win32k::user::explorer::process::EXPLORER_PID;
+            if crate::win32k::user::explorer::process::handle_taskkill(explorer_pid, force) {
+                outln!("SUCCESS: Sent termination signal to explorer.exe (PID: {})", explorer_pid);
+                if force {
+                    outln!("  (Force flag set)");
+                }
+                outln!("");
+                outln!("Note: Explorer will restart automatically. Use 'explorer /restart' to restart manually.");
+            } else {
+                outln!("ERROR: Failed to terminate explorer.exe");
+            }
+            return;
+        }
+
         // Try to find by name using CID table
         outln!("Searching for processes matching '{}'...", name);
         let mut found = false;
@@ -23683,6 +23738,91 @@ pub fn cmd_taskkill(args: &[&str]) {
         }
     } else {
         outln!("ERROR: Missing /PID or /IM parameter.");
+    }
+}
+
+/// EXPLORER command - manage Windows Explorer shell
+pub fn cmd_explorer(args: &[&str]) {
+    use crate::win32k::user::explorer::process;
+
+    if args.is_empty() {
+        // Just running "explorer" - show status
+        let info = process::get_process_info();
+        outln!("Windows Explorer Shell");
+        outln!("");
+        outln!("  Image Name:     {}", info.image_name);
+        outln!("  PID:            {}", info.pid);
+        outln!("  Status:         {:?}", info.state);
+        outln!("  Restart Count:  {}", info.restart_count);
+        outln!("");
+        outln!("Usage: EXPLORER [/RESTART] [/STOP] [/START] [/STATUS]");
+        outln!("");
+        outln!("  /RESTART    Restart Windows Explorer");
+        outln!("  /STOP       Stop Windows Explorer");
+        outln!("  /START      Start Windows Explorer");
+        outln!("  /STATUS     Show Explorer status");
+        return;
+    }
+
+    let arg = args[0].to_ascii_uppercase();
+
+    if arg == "/RESTART" || arg == "-RESTART" {
+        outln!("Restarting Windows Explorer...");
+        if process::restart() {
+            outln!("Explorer restart initiated.");
+            outln!("The desktop and taskbar will be refreshed.");
+        } else {
+            outln!("ERROR: Failed to restart Explorer.");
+        }
+    } else if arg == "/STOP" || arg == "-STOP" {
+        outln!("Stopping Windows Explorer...");
+        if process::stop() {
+            outln!("Explorer stopped.");
+            outln!("Use 'explorer /start' to restart.");
+        } else {
+            outln!("ERROR: Failed to stop Explorer.");
+        }
+    } else if arg == "/START" || arg == "-START" {
+        if process::is_running() {
+            outln!("Explorer is already running.");
+        } else {
+            outln!("Starting Windows Explorer...");
+            if process::start() {
+                outln!("Explorer started.");
+            } else {
+                outln!("ERROR: Failed to start Explorer.");
+            }
+        }
+    } else if arg == "/STATUS" || arg == "-STATUS" {
+        let info = process::get_process_info();
+        outln!("Windows Explorer Status");
+        outln!("=======================");
+        outln!("");
+        outln!("  Image Name:     {}", info.image_name);
+        outln!("  Process Name:   {}", info.name);
+        outln!("  PID:            {}", info.pid);
+        outln!("  Status:         {:?}", info.state);
+        outln!("  Running:        {}", process::is_running());
+        outln!("  Restart Count:  {}", info.restart_count);
+    } else if arg == "/?" || arg == "HELP" || arg == "-HELP" {
+        outln!("Manages the Windows Explorer shell process.");
+        outln!("");
+        outln!("EXPLORER [/RESTART] [/STOP] [/START] [/STATUS]");
+        outln!("");
+        outln!("  /RESTART    Restart Windows Explorer (refreshes desktop and taskbar)");
+        outln!("  /STOP       Stop Windows Explorer");
+        outln!("  /START      Start Windows Explorer (if stopped)");
+        outln!("  /STATUS     Display Explorer process status");
+        outln!("");
+        outln!("Running EXPLORER with no arguments shows current status.");
+        outln!("");
+        outln!("Examples:");
+        outln!("  EXPLORER /RESTART    - Restart explorer to refresh the shell");
+        outln!("  EXPLORER /STATUS     - Check if explorer is running");
+        outln!("  TASKKILL /IM explorer.exe - Alternative way to stop explorer");
+    } else {
+        outln!("ERROR: Unknown option '{}'", args[0]);
+        outln!("Use 'EXPLORER /?' for help.");
     }
 }
 
