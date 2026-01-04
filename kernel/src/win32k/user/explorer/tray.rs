@@ -374,10 +374,20 @@ fn handle_left_button_down(x: i32, y: i32) {
 fn handle_left_button_up(x: i32, y: i32) {
     input::process_mouse_button(0, false, x, y);
 
+    // Check if we were dragging/resizing and need to repaint
+    let was_dragging = DRAGGING_WINDOW.lock().is_valid();
+    let was_resizing = RESIZING_WINDOW.lock().is_valid();
+
     // End any drag operations
     deskhost::end_icon_drag();
     end_window_drag();
     end_window_resize();
+
+    // Repaint if we were moving/resizing a window
+    if was_dragging || was_resizing {
+        super::super::paint::repaint_all();
+        paint_taskbar();
+    }
 }
 
 fn handle_right_click(x: i32, y: i32) {

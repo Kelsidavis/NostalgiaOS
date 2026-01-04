@@ -194,8 +194,38 @@ pub fn draw_window_frame(hwnd: HWND) {
         draw_caption(hdc, &wnd, &metrics);
     }
 
+    // Fill client area with window background color
+    draw_client_background(hdc, &wnd, &metrics);
+
     // Clean up
     dc::delete_dc(hdc);
+}
+
+/// Draw window client area background
+fn draw_client_background(hdc: HDC, wnd: &window::Window, metrics: &FrameMetrics) {
+    let surface_handle = dc::get_dc_surface(hdc);
+    let surf = match surface::get_surface(surface_handle) {
+        Some(s) => s,
+        None => return,
+    };
+
+    let offset = dc::get_dc(hdc)
+        .map(|d| d.viewport_org)
+        .unwrap_or(Point::new(0, 0));
+
+    // Calculate client area (inside frame and caption)
+    let border = metrics.border_width;
+    let caption = if wnd.has_caption() { metrics.caption_height } else { 0 };
+
+    let client_rect = Rect::new(
+        offset.x + border,
+        offset.y + border + caption,
+        offset.x + wnd.rect.width() - border,
+        offset.y + wnd.rect.height() - border,
+    );
+
+    // Fill with window background color (white for standard windows)
+    surf.fill_rect(&client_rect, ColorRef::WHITE);
 }
 
 /// Draw window border
