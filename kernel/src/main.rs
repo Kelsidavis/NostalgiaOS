@@ -97,6 +97,7 @@ pub mod rpc;
 pub mod vdm;
 pub mod csr;
 pub mod win32k;
+pub mod subsys;
 
 mod framebuffer;
 mod serial;
@@ -546,6 +547,11 @@ fn phase1_init(boot_info: &BootInfo) {
     kprintln!("  Initializing Win32k graphical subsystem...");
     win32k::init();
     kprintln!("  Win32k graphical subsystem initialized");
+
+    // Initialize Win32 subsystem DLL stubs
+    kprintln!("  Initializing Win32 subsystem DLL stubs...");
+    subsys::init();
+    kprintln!("  Win32 subsystem DLL stubs initialized");
 
     // Skip graphics demo - desktop will be shown by shell thread
     // test_graphics();
